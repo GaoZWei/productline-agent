@@ -1,0 +1,45 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and operating system
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Logs and runtime files
+*.log
+*.pid
+tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+agent-service/.venv/
+
+# Java
+*.class
+.gradle/
+build/
+target/
+business-service/out/
+
+# Node
+node_modules/
+dist/
+coverage/
+web-console/node_modules/
+web-console/dist/
+
+# Test and evaluation artifacts
+.coverage
+htmlcov/
+test-results/
+playwright-report/
+

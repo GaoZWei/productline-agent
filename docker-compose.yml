@@ -1,0 +1,80 @@
+name: ${COMPOSE_PROJECT_NAME:-remote-sensing-agent}
+
+services:
+  # postgres 服务
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-remote_sensing_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent-local-only}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  # java 服务
+  business-service:
+    build:
+      context: ./business-service
+    environment:
+      PORT: 8080
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-remote_sensing_agent}
+      DATABASE_USER: ${POSTGRES_USER:-agent}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-agent-local-only}
+    ports:
+      - "${BUSINESS_SERVICE_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+  # python 服务
+  agent-service:
+    build:
+      context: ./agent-service
+    environment:
+      PORT: 8000
+      BUSINESS_SERVICE_URL: http://business-service:8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local-only}@postgres:5432/${POSTGRES_DB:-remote_sensing_agent}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-openai}
+      MODEL_NAME: ${MODEL_NAME:-}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+    ports:
+      - "${AGENT_SERVICE_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      business-service:
+        condition: service_started
+    init: true
+    restart: unless-stopped
+  # web-console 服务
+  web-console:
+    build:
+      context: ./web-console
+    environment:
+      PORT: 5173
+      AGENT_API_URL: ${VITE_AGENT_API_URL:-http://localhost:8000}
+      BUSINESS_API_URL: ${VITE_BUSINESS_API_URL:-http://localhost:8080}
+    ports:
+      - "${WEB_CONSOLE_PORT:-5173}:5173"
+    depends_on:
+      agent-service:
+        condition: service_started
+      business-service:
+        condition: service_started
+    init: true
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+
