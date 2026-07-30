@@ -1,6 +1,6 @@
 # Business Service
 
-M0.1 提供的 Java 可启动骨架。它只暴露 `/health`，不包含领域模型、数据库访问或订单接口。Spring Boot 工程和业务能力将在后续 M0 任务中引入。
+Java 21 + Spring Boot 3.5 + Spring Data JPA + Flyway 的遥感数据产线业务服务。M0.2 已实现领域实体、统一状态、DTO、Repository 和 PostgreSQL 表结构，尚未提供订单业务 API 或固定演示数据。
 
 使用 Docker 启动：
 
@@ -8,11 +8,19 @@ M0.1 提供的 Java 可启动骨架。它只暴露 `/health`，不包含领域�
 docker compose up --build business-service
 ```
 
-使用本机 JDK 启动：
+使用本机 JDK/Maven 测试：
 
 ```bash
-cd business-service
-javac --release 21 -d out src/Main.java
-PORT=8080 java --add-modules jdk.httpserver -cp out Main
+mvn --file business-service/pom.xml test
 ```
 
+服务使用以下环境变量连接 PostgreSQL：
+
+```text
+SPRING_DATASOURCE_URL
+SPRING_DATASOURCE_USERNAME
+SPRING_DATASOURCE_PASSWORD
+PORT
+```
+
+健康检查继续兼容 `GET /health`。

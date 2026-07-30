@@ -26,9 +26,9 @@ services:
       context: ./business-service
     environment:
       PORT: 8080
-      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-remote_sensing_agent}
-      DATABASE_USER: ${POSTGRES_USER:-agent}
-      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-agent-local-only}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-remote_sensing_agent}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-agent}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-agent-local-only}
     ports:
       - "${BUSINESS_SERVICE_PORT:-8080}:8080"
     depends_on:
@@ -77,4 +77,3 @@ services:
 
 volumes:
   postgres-data:
-

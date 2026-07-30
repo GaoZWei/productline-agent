@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-business-domain dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -15,10 +15,15 @@ validate: ## 检查 M0.1 必需目录、文件与 Compose 配置
 	./scripts/check-foundation.sh
 	$(COMPOSE) config --quiet
 
-test: validate smoke ## 运行 M0.1 全部自动检查
+test: validate smoke test-business-domain ## 运行当前阶段全部自动检查
 
-smoke: ## 在本机启动三个服务并验证健康检查
+smoke: ## 验证 Java、Python 和 Web 健康检查
 	./scripts/smoke-services.sh
+
+test-business-domain: ## 在 PostgreSQL Testcontainers 上验证领域模型
+	mvn --file business-service/pom.xml \
+		-Dtest=BusinessStatusEnumTest,DomainModelValidationTest,DomainRepositoryIntegrationTest \
+		test
 
 dev: ## 构建并启动 PostgreSQL、Java、Python 和 Web
 	$(COMPOSE) up --build

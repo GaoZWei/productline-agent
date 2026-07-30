@@ -8,20 +8,15 @@ command -v curl >/dev/null 2>&1 || {
 
 task_tmp_dir=$(mktemp -d)
 agent_pid=""
-business_pid=""
-business_container=""
 web_pid=""
 
 cleanup() {
-    for pid in "$agent_pid" "$business_pid" "$web_pid"; do
+    for pid in "$agent_pid" "$web_pid"; do
         if test -n "$pid"; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
         fi
     done
-    if test -n "$business_container"; then
-        docker rm --force "$business_container" >/dev/null 2>&1 || true
-    fi
     rm -rf "$task_tmp_dir"
 }
 trap cleanup EXIT INT TERM
@@ -49,25 +44,18 @@ else
     exit 1
 fi
 
-if command -v javac >/dev/null 2>&1 \
+if command -v mvn >/dev/null 2>&1 \
     && command -v java >/dev/null 2>&1 \
-    && javac -version >/dev/null 2>&1 \
-    && java -version >/dev/null 2>&1; then
-    mkdir -p "$task_tmp_dir/java"
-    javac --release 21 -d "$task_tmp_dir/java" business-service/src/Main.java
-    PORT=18080 java --add-modules jdk.httpserver -cp "$task_tmp_dir/java" Main \
-        >"$task_tmp_dir/business.log" 2>&1 &
-    business_pid=$!
-    wait_for_health http://127.0.0.1:18080/health
+    && java -version >/dev/null 2>&1 \
+    && command -v docker >/dev/null 2>&1 \
+    && docker info >/dev/null 2>&1; then
+    mvn --quiet \
+        --file business-service/pom.xml \
+        -Dtest=BusinessServiceApplicationIntegrationTest \
+        test
     echo "business-service smoke test passed"
-elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    docker build --quiet --tag remote-sensing-agent-business-smoke business-service >/dev/null
-    business_container=$(docker run --detach --rm --publish 18080:8080 \
-        remote-sensing-agent-business-smoke)
-    wait_for_health http://127.0.0.1:18080/health
-    echo "business-service Docker smoke test passed"
 else
-    echo "JDK 21 or a running Docker daemon is required for business-service smoke test" >&2
+    echo "JDK 21, Maven and a running Docker daemon are required for business-service smoke test" >&2
     exit 1
 fi
 

@@ -18,7 +18,11 @@ docker-compose.yml
 agent-service/Dockerfile
 agent-service/app/main.py
 business-service/Dockerfile
-business-service/src/Main.java
+business-service/pom.xml
+business-service/src/main/java/com/productline/business/BusinessServiceApplication.java
+business-service/src/main/resources/db/migration/V1__create_business_domain.sql
+docs/API_CONTRACT.md
+docs/DOMAIN_MODEL.md
 web-console/Dockerfile
 web-console/server.mjs
 "
@@ -42,6 +46,9 @@ for variable in \
     POSTGRES_USER \
     POSTGRES_PASSWORD \
     BUSINESS_SERVICE_PORT \
+    SPRING_DATASOURCE_URL \
+    SPRING_DATASOURCE_USERNAME \
+    SPRING_DATASOURCE_PASSWORD \
     AGENT_SERVICE_PORT \
     WEB_CONSOLE_PORT \
     MODEL_PROVIDER \
@@ -53,4 +60,3 @@ for variable in \
 done
 
 echo "M0.1 foundation checks passed"
-

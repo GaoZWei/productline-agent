@@ -2,13 +2,14 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M0.1 项目基础环境**：仓库提供 Java 业务服务、Python Agent 服务、Web 控制台和 PostgreSQL/pgvector 的可启动骨架，尚未包含领域模型和业务接口。
+当前进度为 **M0.2 业务领域模型设计**：Java 服务已升级为 Spring Boot/JPA/Flyway 工程，包含订单、生产任务、生产步骤、质检问题、复核、返工和交付领域模型；固定演示数据和业务 API 将在后续 M0 任务实现。
 
 ## 环境要求
 
 - Docker Engine 或 Docker Desktop（支持 `docker compose`）
 - GNU Make
-- 可选：Java 21、Python 3.12、Node.js 22（用于脱离 Docker 的本地开发）
+- Java 21、Maven 3.9（运行 Java 领域测试）
+- 可选：Python 3.12、Node.js 22（用于脱离 Docker 的本地开发）
 
 ## 快速开始
 
@@ -44,7 +45,8 @@ make dev              # 构建并启动全部服务
 make dev-business     # 只启动 Java 服务及其依赖
 make dev-agent        # 只启动 Python 服务及其依赖
 make dev-web          # 只启动 Web 服务及其依赖
-make test             # 运行 M0.1 配置检查与本地服务冒烟测试
+make test             # 运行基础检查、服务冒烟和 Java 领域集成测试
+make test-business-domain # 单独运行 Java 领域模型测试
 make reset-demo       # 删除本地 Compose 数据卷并重建 PostgreSQL
 make logs             # 跟踪服务日志
 make ps               # 查看服务状态
@@ -57,7 +59,7 @@ make ps               # 查看服务状态
 ```text
 .
 ├── agent-service/       # Python Agent 服务（当前为健康检查骨架）
-├── business-service/    # Java 业务服务（当前为健康检查骨架）
+├── business-service/    # Spring Boot 业务服务与领域模型
 ├── web-console/         # Vue 前端目标目录（当前为静态启动骨架）
 ├── doc/                 # 原始需求、细化计划与开发记录
 ├── docs/                # 路线图、状态和测试报告
@@ -74,4 +76,3 @@ make ps               # 查看服务状态
 2. 保证固定数据和 `ORDER-003` 黄金链路稳定；
 3. 运行任务对应测试并如实更新 `docs/STATUS.md`、`docs/TEST_REPORT.md`；
 4. 将核心实现和重要决策追加到 `doc/record.md`。
-

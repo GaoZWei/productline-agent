@@ -255,3 +255,78 @@
   - 后续兼容注意事项：Homebrew 升级 `openjdk@21` 时 `/opt/homebrew/opt/openjdk@21` 稳定链接会自动指向新补丁版本。
 - 下一建议任务：
   - `[T007] 编写领域对象关系文档`
+
+---
+
+## 2026-07-30 — `[T007-T016] M0.2 业务领域模型设计`
+
+- 里程碑：M0 业务数据与 Java 接口
+- 任务类型：功能 / 数据模型 / 配置 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：完成领域关系文档、五组状态枚举、`Order`、`ProductionTask`、`ProductionStep`、`QualityIssue`、`ReviewRecord`、`ReworkTask`、`DeliveryRecord` 的实体/DTO/表/Repository，以及对象关联和 PostgreSQL 集成验收。
+  - 明确不实现：不创建 M0.3 固定演示数据，不提供 M0.4 查询 API，不实现状态流转服务、权限、写回或 Python Tool。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：保持 `ORDER-003 → TASK-003(COMPLETED) → ISSUE-001(COORDINATE_SYSTEM, OPEN) → REVIEW-003(PENDING) → DELIVERY-003(BLOCKED)` 基线；集成测试临时创建并回滚该链路，生产迁移只建表。
+  - 方案选择及原因：采用 Spring Boot 3.5.16、Java 21、Spring Data JPA、Flyway 和 PostgreSQL；所有 ID 使用稳定业务字符串，枚举以字符串持久化，数据库再用 `CHECK` 约束防止跨服务状态漂移。
+  - 契约、状态或兼容性影响：新增七张业务表和五组公共状态字符串。`V1` 一旦应用不得改写，后续数据库变化只能新增迁移。
+- 核心实现：
+  - 本机开发环境 — 执行 `brew install maven` 安装 Maven 3.9.16；Homebrew 同时安装 OpenJDK 26.0.2 依赖，但现有 `JAVA_HOME` 和 Maven 运行时继续使用项目规定的 OpenJDK 21.0.12。
+  - `business-service/pom.xml` — 建立 Maven/Spring Boot 工程，接入 Web、Actuator、JPA、Validation、Flyway、PostgreSQL 与 Testcontainers。
+  - `BusinessServiceApplication` — 替换 M0.1 标准库占位服务，作为 Spring Boot 组件扫描和应用入口。
+  - `domain/enums/*` — 固定订单、生产、质检、复核和交付状态词汇。
+  - `domain/model/*` — `Order` 为聚合根；聚合方法设置双向归属并防止子对象跨聚合重挂；只暴露不可修改集合。
+  - `domain/dto/*` — 七个 Java Record DTO，使用 Jakarta Validation 约束业务 ID、必填字段、状态和步骤序号。
+  - `domain/repository/*` — 七个 `JpaRepository`，支持按稳定业务 ID 独立查询。
+  - `V1__create_business_domain.sql` — 创建七张表、外键、索引、唯一约束、序号约束和状态 `CHECK`。
+  - `application.yml` — 数据源通过环境变量注入；Flyway 管理结构；Hibernate 使用 `ddl-auto=validate` 且关闭 Open Session in View。
+  - `DomainRepositoryIntegrationTest` — 在真实 PostgreSQL 中级联保存后清空 JPA 上下文，再通过各 Repository 验证黄金链路。
+- 代码解释与定位：
+  - 整体调用/数据流：聚合方法组装 `Order` 业务链路 → `OrderRepository.saveAndFlush` 级联写入 → Flyway 约束数据库结构 → 清空持久化上下文 → 各 Repository 独立查询并验证状态。
+  - 核心类、函数、接口或配置项：`Order#addTask`/`addDeliveryRecord` 管理聚合根关系；`ProductionTask#addStep`/`addQualityIssue`/`addReworkTask` 管理任务子对象；`ReworkTask#assignTo`/`setSourceIssue` 双向检查同任务约束。
+  - 输入、输出、异常和边界：输入是非空业务 ID、必填文本和枚举；输出是可持久化聚合及 DTO。构造器拒绝空值和非法序号，关系方法拒绝重挂，返工拒绝跨生产任务引用。
+  - 关键代码位置（文件路径 + 定义起始行号）：最终回复在全部修改完成后重新读取并提供准确绝对路径链接。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：M0.2 无业务 HTTP 参数或上游调用；DTO 与实体先执行本地输入约束，数据库继续执行非空、外键、唯一和状态检查。
+  - 幂等、并发或人工确认：本阶段无业务写接口。稳定主键可作为后续幂等基础，但版本字段与写入幂等键仍属于 M0.5/M0.6。
+- 未完成项与已知问题：
+  - 未完成项：M0.3 的 `ORDER-001`～`ORDER-005` 固定数据、重置机制和固定数据测试尚未实现。
+  - 已知问题/阻塞：测试运行会出现 Mockito 动态加载 Java Agent 的未来兼容警告；当前 JDK 21 测试不受影响。仓库尚未提供 Maven Wrapper，本机构建需要 Maven 3.9+。
+- 替代方案：
+  - 采用的替代方案及原因：概念模型中的 `QualityTask` 和 `DeliveryBatch` 未列入 T009～T015，本阶段分别用 `ProductionTask → QualityIssue` 和 `Order → DeliveryRecord` 直接关系覆盖验收链路；容器构建移除 `dependency:go-offline`，因为它会下载大量与运行 JAR 无关的 Maven 插件/云平台依赖。
+  - 已覆盖/未覆盖的验收要求：已覆盖 M0.2 七个指定实体和 `ORDER-003` Repository 查询链；未覆盖质检批次、交付批次的独立生命周期，因为当前计划没有对应字段、表或验收。
+  - 局限、风险和转正/移除条件：若确认一批质检包含多个问题或一个订单存在多个交付批次，应新增容器实体、DTO 和 Flyway 迁移并迁移外键；不能修改已执行的 V1。直接 Maven 镜像构建依赖网络，但成功后由 Docker 层缓存。
+- 后续影响：
+  - 对后续任务/里程碑：M0.3 可直接复用实体与外键写入固定数据；M0.4 查询接口应基于 DTO 映射，不直接序列化懒加载实体。
+  - 对接口/数据/测试/部署：状态值成为跨服务契约；数据库首次启动自动应用 V1。现有本地 PostgreSQL 卷已升级到 V1、但未写入固定业务数据。删除或改名枚举值需要新迁移和跨服务兼容测试。
+- 测试与验证：
+  - `[通过] mvn --version` — Maven 3.9.16，运行时 Java 21.0.12。
+  - `[通过] brew list --versions maven openjdk openjdk@21` — 分别为 3.9.16、26.0.2、21.0.12；项目仍固定 JDK 21。
+  - `[通过] mvn --file business-service/pom.xml test` — 8/8，失败 0、错误 0、跳过 0。
+  - `[通过] make test` — 基础检查、Compose、三个服务冒烟和领域测试全部通过。
+  - `[通过] mvn --file business-service/pom.xml --define skipTests package` — 可执行 JAR 构建成功。
+  - `[通过] docker compose up --detach --build` — 四服务成功构建并启动。
+  - `[通过] 三个容器 /health` — Agent、Business、Web 均返回 UP。
+  - `[通过] 容器 PostgreSQL` — Flyway V1 `success=true`，七张领域表全部存在。
+  - `[失败后修复] 首次 Maven 测试` — 测试先行产生 68 个缺失类型编译错误；完成领域实现后通过。
+  - `[失败后修复] 首次 Spring 应用集成测试` — 3 个测试中 1 个因缺少 Web 类报错；补充 Web Starter 后通过。
+  - `[中止后优化] 首次 Java 镜像构建` — `dependency:go-offline` 下载无关构建插件和云依赖，主动终止并改为直接打包，随后构建通过。
+  - 未运行项及原因：未运行 Java 业务 API 契约测试和固定数据重置测试；相应能力属于 M0.3/M0.4。
+- 变更文件：
+  - `.env.example`
+  - `Makefile`
+  - `README.md`
+  - `docker-compose.yml`
+  - `business-service/`
+  - `scripts/check-foundation.sh`
+  - `scripts/smoke-services.sh`
+  - `docs/API_CONTRACT.md`
+  - `docs/DOMAIN_MODEL.md`
+  - `docs/ROADMAP.md`
+  - `docs/STATUS.md`
+  - `docs/TEST_REPORT.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无当前阻塞；Mockito 警告和 Maven Wrapper 缺失是非阻塞维护项。
+  - 后续兼容注意事项：M0.3 种子数据必须与 V1 外键顺序一致；M0.4 避免直接暴露 JPA 实体；未来状态变化必须同步数据库、Java、Python 和前端。
+- 下一建议任务：
+  - `[T019] 创建 ORDER-003 黄金数据并实现可重置验证`
