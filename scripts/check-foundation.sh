@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
-
+# Monorepo 必需目录
 required_directories="
 agent-service
 business-service
 web-console
 docs
 "
-
+# Monorepo 必需配置和启动文件
 required_files="
 .editorconfig
 .env.example
@@ -36,7 +36,7 @@ for file in $required_files; do
         exit 1
     }
 done
-
+# .env.example 必须包含的环境变量
 for variable in \
     POSTGRES_DB \
     POSTGRES_USER \
