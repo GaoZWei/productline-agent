@@ -2,9 +2,9 @@
 
 ## 1. 当前范围
 
-本文固定 M0.2 领域模型向后续 Java API、Python Tool 和 Web Console 暴露的状态
-字符串。M0.2 尚未定义订单查询或写入端点；HTTP 路径、请求响应结构、错误模型与
-Trace ID 将在 M0.4～M0.6 中定义。
+本文固定领域模型向后续 Java API、Python Tool 和 Web Console 暴露的状态字符串。
+M0.3 已写入固定数据，但尚未定义订单查询或写入端点；HTTP 路径、请求响应结构、
+错误模型与 Trace ID 将在 M0.4～M0.6 中定义。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -77,7 +77,8 @@ delivery_status = BLOCKED
 ```
 
 这些事实共同支持诊断结论 `blocking_stage = QUALITY_REVIEW`。M0.4 设计响应 DTO 时应
-直接复用本文件中的枚举值，不为前端或 Python 创建另一套状态字符串。
+直接复用本文件中的枚举值，不为前端或 Python 创建另一套状态字符串。五组固定
+数据的完整 ID 映射见 [`DEMO_DATA.md`](DEMO_DATA.md)。
 
 ## 4. 演进规则
 

@@ -42,30 +42,32 @@ class DomainRepositoryIntegrationTest extends PostgresIntegrationTestSupport {
     @Autowired private EntityManager entityManager;
 
     @Test
-    void persistsAndQueriesTheOrder003GoldenRelationshipChain() {
-        Order order = new Order("ORDER-003", "DOM", OrderStatus.QUALITY_CHECKING);
+    void persistsAndQueriesAnIndependentRelationshipChain() {
+        Order order =
+                new Order("ORDER-MODEL-TEST", "DOM", OrderStatus.QUALITY_CHECKING);
         ProductionTask task =
-                new ProductionTask("TASK-003", ProductionTaskStatus.COMPLETED);
+                new ProductionTask("TASK-MODEL-TEST", ProductionTaskStatus.COMPLETED);
         ProductionStep step =
                 new ProductionStep(
-                        "STEP-003-01",
+                        "STEP-MODEL-TEST-01",
                         "DOM production",
                         1,
                         ProductionTaskStatus.COMPLETED);
         QualityIssue issue =
                 new QualityIssue(
-                        "ISSUE-001",
+                        "ISSUE-MODEL-TEST",
                         "COORDINATE_SYSTEM",
                         QualityIssueStatus.OPEN,
                         "Product coordinate system does not match the specification.");
-        ReviewRecord review = new ReviewRecord("REVIEW-003", ReviewStatus.PENDING, null);
+        ReviewRecord review =
+                new ReviewRecord("REVIEW-MODEL-TEST", ReviewStatus.PENDING, null);
         ReworkTask rework =
                 new ReworkTask(
-                        "REWORK-003",
+                        "REWORK-MODEL-TEST",
                         ProductionTaskStatus.PENDING,
                         "Correct the coordinate system.");
         DeliveryRecord delivery =
-                new DeliveryRecord("DELIVERY-003", DeliveryStatus.BLOCKED);
+                new DeliveryRecord("DELIVERY-MODEL-TEST", DeliveryStatus.BLOCKED);
 
         order.addTask(task);
         order.addDeliveryRecord(delivery);
@@ -78,26 +80,30 @@ class DomainRepositoryIntegrationTest extends PostgresIntegrationTestSupport {
         orderRepository.saveAndFlush(order);
         entityManager.clear();
 
-        Order persistedOrder = orderRepository.findById("ORDER-003").orElseThrow();
-        ProductionTask persistedTask = taskRepository.findById("TASK-003").orElseThrow();
-        QualityIssue persistedIssue = issueRepository.findById("ISSUE-001").orElseThrow();
-        ReviewRecord persistedReview = reviewRepository.findById("REVIEW-003").orElseThrow();
+        Order persistedOrder =
+                orderRepository.findById("ORDER-MODEL-TEST").orElseThrow();
+        ProductionTask persistedTask =
+                taskRepository.findById("TASK-MODEL-TEST").orElseThrow();
+        QualityIssue persistedIssue =
+                issueRepository.findById("ISSUE-MODEL-TEST").orElseThrow();
+        ReviewRecord persistedReview =
+                reviewRepository.findById("REVIEW-MODEL-TEST").orElseThrow();
         DeliveryRecord persistedDelivery =
-                deliveryRepository.findById("DELIVERY-003").orElseThrow();
+                deliveryRepository.findById("DELIVERY-MODEL-TEST").orElseThrow();
 
         assertThat(persistedOrder.getTasks()).extracting(ProductionTask::getTaskId)
-                .containsExactly("TASK-003");
-        assertThat(persistedTask.getOrder().getOrderId()).isEqualTo("ORDER-003");
+                .containsExactly("TASK-MODEL-TEST");
+        assertThat(persistedTask.getOrder().getOrderId()).isEqualTo("ORDER-MODEL-TEST");
         assertThat(persistedTask.getSteps()).extracting(ProductionStep::getStepId)
-                .containsExactly("STEP-003-01");
+                .containsExactly("STEP-MODEL-TEST-01");
         assertThat(persistedTask.getQualityIssues()).extracting(QualityIssue::getIssueId)
-                .containsExactly("ISSUE-001");
+                .containsExactly("ISSUE-MODEL-TEST");
         assertThat(persistedIssue.getReviewRecords()).extracting(ReviewRecord::getReviewId)
-                .containsExactly("REVIEW-003");
+                .containsExactly("REVIEW-MODEL-TEST");
         assertThat(persistedReview.getStatus()).isEqualTo(ReviewStatus.PENDING);
         assertThat(persistedDelivery.getStatus()).isEqualTo(DeliveryStatus.BLOCKED);
-        assertThat(stepRepository.count()).isOne();
-        assertThat(reworkRepository.count()).isOne();
-        assertThat(deliveryRepository.count()).isOne();
+        assertThat(stepRepository.findById("STEP-MODEL-TEST-01")).isPresent();
+        assertThat(reworkRepository.findById("REWORK-MODEL-TEST")).isPresent();
+        assertThat(deliveryRepository.findById("DELIVERY-MODEL-TEST")).isPresent();
     }
 }

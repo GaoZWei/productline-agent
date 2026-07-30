@@ -2,7 +2,7 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M0.2 业务领域模型设计**：Java 服务已升级为 Spring Boot/JPA/Flyway 工程，包含订单、生产任务、生产步骤、质检问题、复核、返工和交付领域模型；固定演示数据和业务 API 将在后续 M0 任务实现。
+当前进度为 **M0.3 固定业务数据**：Java 服务已包含订单、生产、质检、复核和交付领域模型，并通过 Flyway 固定初始化 `ORDER-001`～`ORDER-005` 五组场景。Java 业务 API 将在后续 M0.4 实现，当前不能通过 HTTP 查询这些数据。
 
 ## 环境要求
 
@@ -47,12 +47,13 @@ make dev-agent        # 只启动 Python 服务及其依赖
 make dev-web          # 只启动 Web 服务及其依赖
 make test             # 运行基础检查、服务冒烟和 Java 领域集成测试
 make test-business-domain # 单独运行 Java 领域模型测试
-make reset-demo       # 删除本地 Compose 数据卷并重建 PostgreSQL
+make test-business-data   # 单独验证固定数据和业务状态组合
+make reset-demo       # 删除本地数据卷并重建 PostgreSQL、Java 和固定数据
 make logs             # 跟踪服务日志
 make ps               # 查看服务状态
 ```
 
-`make reset-demo` 会删除本项目 Docker Compose 管理的本地数据库卷，仅用于重置演示数据。
+`make reset-demo` 会删除本项目 Docker Compose 管理的本地数据库卷，仅用于重置演示数据；成功后输出订单数和确定性数据快照。固定 ID、状态与后续 Tool 对接注意事项见 [`docs/DEMO_DATA.md`](docs/DEMO_DATA.md)。
 
 ## 项目结构
 
@@ -75,4 +76,5 @@ make ps               # 查看服务状态
 1. 只完成当前里程碑内的一个可测试任务；
 2. 保证固定数据和 `ORDER-003` 黄金链路稳定；
 3. 运行任务对应测试并如实更新 `docs/STATUS.md`、`docs/TEST_REPORT.md`；
-4. 将核心实现和重要决策追加到 `doc/record.md`。
+4. 将核心实现和重要决策追加到 `doc/record.md`；
+5. 评估本次开发的 Agent 面试价值，只有有价值时才更新 `doc/needCare.md`。

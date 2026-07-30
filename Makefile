@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-business-domain dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-business-domain test-business-data dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -15,7 +15,7 @@ validate: ## 检查 M0.1 必需目录、文件与 Compose 配置
 	./scripts/check-foundation.sh
 	$(COMPOSE) config --quiet
 
-test: validate smoke test-business-domain ## 运行当前阶段全部自动检查
+test: validate smoke test-business-domain test-business-data ## 运行当前阶段全部自动检查
 
 smoke: ## 验证 Java、Python 和 Web 健康检查
 	./scripts/smoke-services.sh
@@ -23,6 +23,11 @@ smoke: ## 验证 Java、Python 和 Web 健康检查
 test-business-domain: ## 在 PostgreSQL Testcontainers 上验证领域模型
 	mvn --file business-service/pom.xml \
 		-Dtest=BusinessStatusEnumTest,DomainModelValidationTest,DomainRepositoryIntegrationTest \
+		test
+
+test-business-data: ## 验证 M0.3 固定数据映射和业务状态组合
+	mvn --file business-service/pom.xml \
+		-Dtest=DemoDataIntegrityIntegrationTest,BusinessStateConsistencyValidatorTest \
 		test
 
 dev: ## 构建并启动 PostgreSQL、Java、Python 和 Web
@@ -46,6 +51,5 @@ logs: ## 跟踪全部服务日志
 ps: ## 查看服务状态
 	$(COMPOSE) ps
 
-reset-demo: ## 删除本地演示数据卷并重建 PostgreSQL
-	$(COMPOSE) down --volumes --remove-orphans
-	$(COMPOSE) up --detach postgres
+reset-demo: ## 删除本地演示数据卷并重建 M0.3 固定业务数据
+	./scripts/reset-demo

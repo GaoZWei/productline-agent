@@ -330,3 +330,147 @@
   - 后续兼容注意事项：M0.3 种子数据必须与 V1 外键顺序一致；M0.4 避免直接暴露 JPA 实体；未来状态变化必须同步数据库、Java、Python 和前端。
 - 下一建议任务：
   - `[T019] 创建 ORDER-003 黄金数据并实现可重置验证`
+
+---
+
+## 2026-07-30 — `[T017-T024] M0.3 固定业务数据`
+
+- 里程碑：M0 业务数据与 Java 接口
+- 任务类型：功能 / 数据 / 测试 / 配置 / 文档 / 修复
+- 目标与范围：
+  - 本次实现：通过 Flyway 固定初始化 `ORDER-001`～`ORDER-005`；提供本地演示数据重置命令、数据完整性测试、黄金链路测试和跨对象业务状态一致性校验。
+  - 明确不实现：不实现 M0.4 Java 查询接口、HTTP DTO 映射、统一错误响应、Python Tool 或任何写操作。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：严格保持 `ORDER-003 → TASK-003(COMPLETED) → ISSUE-001(COORDINATE_SYSTEM, OPEN) → REVIEW-003(PENDING) → DELIVERY-003(BLOCKED)`；不预置返工任务，使后续“创建返工任务”建议与事实一致。
+  - 方案选择及原因：采用版本化 Flyway V2 作为唯一种子数据源，首次启动和删除数据卷后的重建都走相同迁移；固定数据不用随机值、当前时间或执行顺序。
+  - 契约、状态或兼容性影响：新增 `ORDER-001`～`005`、`TASK-001`～`005`、固定步骤、`ISSUE-001`～`003`、`REVIEW-003`～`005` 和 `DELIVERY-001`～`005`。这些 ID 和状态将成为 M0.4 Java API 与 M1 Python Tool 的契约夹具。
+- 核心实现：
+  - `business-service/src/main/resources/db/migration/V2__seed_fixed_demo_data.sql` — 六组 `INSERT`（第 3、11、19、27、51、57 行）：按外键顺序写入订单、任务、步骤、质检问题、复核和交付。
+  - `business-service/src/main/java/com/productline/business/domain/validation/BusinessStateConsistencyValidator.java` — `BusinessStateConsistencyValidator`（第 22 行）、`Violation`（第 24 行）、`validate`（第 30 行）：返回稳定违规代码，不修改实体或数据库。
+  - `scripts/reset-demo` — `run_sql`（第 12 行）和 V2 等待/校验/快照流程（第 18 行起）：删除本项目 Compose 数据卷，重建 PostgreSQL 与 Java 服务，确认 5 个订单和黄金链路后输出确定性快照。
+  - `Makefile` — `test-business-data`（第 28 行）、`reset-demo`（第 54 行）：提供独立验收入口。
+  - `DemoDataIntegrityIntegrationTest` — 固定数据映射（第 43 行）、生产失败环节（第 103 行）、黄金链路（第 116 行）和五场景一致性（第 134 行）。
+  - `BusinessStateConsistencyValidatorTest` — 三个非法组合测试（第 25、36、55 行）。
+  - 必要的最小关键片段：
+
+    ```text
+    ORDER-003 / TASK-003 / ISSUE-001 / REVIEW-003 / DELIVERY-003
+    QUALITY_CHECKING / COMPLETED / OPEN / PENDING / BLOCKED
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：Spring Boot 启动 → Flyway 先执行 V1 建表、再执行 V2 写入固定事实 → Repository 读取聚合 → 数据测试检查 ID、外键、状态和数量 → 状态校验器检查跨对象非法组合。重置命令通过删除本项目数据卷重新触发同一条链路。
+  - 核心类、函数、接口或配置项：V2 是固定数据唯一来源；`validate(Order)` 输入一个已加载的订单聚合，输出去重且顺序稳定的 `List<Violation>`；`scripts/reset-demo` 等待 Flyway V2、验证黄金链路并计算全表排序后的 MD5。
+  - 输入、输出、异常和边界：固定输入是五个订单 ID；输出是可重复数据库状态和违规代码。重置等待上限 60 秒，迁移、数量或黄金链路不满足时返回非零并在超时时输出 Java 日志。校验器拒绝 `null` 订单，但不负责懒加载事务边界或 HTTP 错误映射。
+  - 关键代码位置（文件路径 + 定义起始行号）：`V2__seed_fixed_demo_data.sql:3`、`BusinessStateConsistencyValidator.java:22`、`scripts/reset-demo:12`、`DemoDataIntegrityIntegrationTest.java:43`、`BusinessStateConsistencyValidatorTest.java:25`。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：本阶段无业务 HTTP 参数或上游调用。重置脚本只解析本项目 Compose 服务与容器内数据库环境变量，不输出密码；失败时立即停止。
+  - 幂等、并发或人工确认：没有业务写接口。重置操作通过重建专属数据卷实现重复执行结果一致，不在已有数据上做易漂移的追加；命令具有破坏性，只用于本地演示数据。
+- 未完成项与已知问题：
+  - 未完成项：M0.4 Java 查询接口尚未实现，因此 Python Tool 当前不能通过 HTTP 获得固定数据；状态校验器尚未接入写事务，接入点属于 M0.5。
+  - 已知问题/阻塞：无当前阻塞。Mockito 在 JDK 21 输出动态 Java Agent 的未来兼容警告；`make reset-demo` 会停止当前项目的其他 Compose 服务并只重启 PostgreSQL 与 Java；Maven Wrapper 仍未提供。
+- 替代方案：
+  - 采用的替代方案及原因：计划未规定 `ORDER-001`、`002`、`004`、`005` 的产品类型，当前统一使用 `DOM`，避免引入未经确认的产品分支；重置采用删除项目数据卷，而非在原库逐表清理，以保证表结构、迁移历史和数据完全可重复。
+  - 已覆盖/未覆盖的验收要求：覆盖 T017～T024 的五场景、黄金链路、重复重置、映射完整性和三类非法状态判定；未覆盖多产品类型差异、保留本地手工数据的原位重置、生产环境种子隔离和 HTTP 契约。
+  - 局限、风险和转正/移除条件：当前 V2 会随默认应用迁移写入演示数据，适合演示阶段但不应无评审进入真实生产库。生产部署前必须确定独立 Flyway location/profile 或在全新生产基线中排除演示迁移；已应用 V2 的库只能通过新增迁移清理，不能改写 V2。若确认其他产品类型，使用新增迁移和同步契约测试替换相应值。
+- 后续影响：
+  - 对后续任务/里程碑：M0.4 应从这些固定事实构造响应 DTO，并优先实现 `ORDER-003` 完整可查询；M1 Tool 测试直接复用 `docs/DEMO_DATA.md` 的 ID 和状态断言。M0.5 写接口在提交前调用状态校验器。
+  - 对接口/数据/测试/部署：V2 已成为不可改写迁移；固定字符串是跨 Java/Python/前端契约。测试支持改为 JVM 生命周期共享一个 PostgreSQL Testcontainer，避免多个 Spring 测试上下文复用已停止数据源。重置命令会删除本项目数据库卷，不能用于需要保留数据的环境。
+- 测试与验证：
+  - `[预期失败] mvn --file business-service/pom.xml -Dtest=DemoDataIntegrityIntegrationTest test` — 3 个测试中 1 失败、2 错误，证明 V2 前数据库为空；实现迁移后 3/3 通过，加入一致性断言后为 4/4。
+  - `[预期失败] mvn --file business-service/pom.xml -Dtest=BusinessStateConsistencyValidatorTest test` — 7 个缺失类型编译错误；实现校验器后 3/3 通过。
+  - `[失败后修复] mvn --file business-service/pom.xml test` — 首次 15 个测试中 1 失败、4 错误；修复固定 ID 污染和 Testcontainer 生命周期后通过。
+  - `[通过] mvn --file business-service/pom.xml clean test` — 15/15，失败 0、错误 0、跳过 0。
+  - `[通过] make test-business-data` — 7/7。
+  - `[通过] make test-business-domain` — 7/7，M0.2 回归通过。
+  - `[通过] make reset-demo` 连续两次 — 两次均为 `orders=5`，快照均为 `d57e54c32e4ef26eb01c76a8ed97a0ce`。
+  - `[通过] make validate` — 基础文件与 Compose 配置检查通过。
+  - `[通过] make smoke` — Agent、Business、Web 三项健康检查通过。
+  - `[通过] make test` — 基础检查、三服务冒烟、M0.2 回归 7/7 和 M0.3 数据测试 7/7 全部通过。
+  - `[通过] sh -n scripts/reset-demo`、`git diff --check` — Shell 语法和变更空白检查无错误。
+  - 未运行项及原因：未运行 Java 业务 HTTP 契约测试；M0.4 端点尚未实现。
+- 变更文件：
+  - `business-service/src/main/resources/db/migration/V2__seed_fixed_demo_data.sql`
+  - `business-service/src/main/java/com/productline/business/domain/validation/BusinessStateConsistencyValidator.java`
+  - `business-service/src/test/java/com/productline/business/demo/DemoDataIntegrityIntegrationTest.java`
+  - `business-service/src/test/java/com/productline/business/domain/BusinessStateConsistencyValidatorTest.java`
+  - `business-service/src/test/java/com/productline/business/domain/DomainRepositoryIntegrationTest.java`
+  - `business-service/src/test/java/com/productline/business/support/PostgresIntegrationTestSupport.java`
+  - `scripts/reset-demo`
+  - `Makefile`
+  - `README.md`
+  - `docs/API_CONTRACT.md`
+  - `docs/DEMO_DATA.md`
+  - `docs/ROADMAP.md`
+  - `docs/STATUS.md`
+  - `docs/TEST_REPORT.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；生产种子隔离、Mockito Agent 警告、Maven Wrapper 缺失是后续非阻塞维护项。
+  - 后续兼容注意事项：不得改写 V2 或固定 ID；接口字段和 Python Schema 必须直接复用状态词汇。改变固定场景时同步新增迁移、Java/Python/前端契约测试、评测预期和本文件。
+- 下一建议任务：
+  - `[T025] 实现 GET /api/orders/{id} 订单详情查询及 404 契约`
+
+---
+
+## 2026-07-30 — `[DOC-003] 建立 Agent 面试价值评估与记录机制`
+
+- 里程碑：项目治理
+- 任务类型：文档 / 配置
+- 目标与范围：
+  - 本次实现：建立 `doc/needCare.md` 的价值门禁，回填 M0.1～M0.3 中对 Agent 面试确有价值的内容，并把“先评估、有价值才记录”加入仓库级开发规则。
+  - 明确不实现：不修改业务代码、接口、数据库、测试逻辑或里程碑进度；不把环境安装、治理任务和普通样板代码包装成面试亮点。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：历史关注点保留 Java 事实层与 Python Agent 的边界、M0.2 结构化状态契约、M0.3 五组固定场景和 `ORDER-003` 黄金链路；未改变任何固定数据。
+  - 方案选择及原因：`needCare.md` 采用价值筛选而非按任务流水记录。每次开发仍必须评估，但只有内容影响 Agent 架构、Tool、可靠性、安全或评测时才落盘。
+  - 契约、状态或兼容性影响：没有运行时契约变化；新增开发完成门禁和最终汇报项。
+- 核心实现：
+  - `doc/needCare.md` — “记录门禁”（第 6 行）定义准入标准；M0.1（第 29 行）、M0.2（第 83 行）、M0.3（第 137 行）回填已验证的面试知识、问题回答、简历边界和未实现能力。
+  - `AGENTS.md` — “Agent 面试价值评估”（第 241 行）规定每次开发先评估、有价值才记录，并禁止空条目和过度声称。
+  - `README.md` — 开发约束（第 80 行）提示开发者执行面试价值评估。
+  - 必要的最小关键片段：
+
+    ```text
+    每次开发先评估 Agent 面试价值
+    → 有价值：更新 doc/needCare.md
+    → 无价值：不制造空条目，只在最终回复说明判断
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：开发任务完成并验证 → 根据五项价值标准评估 → 有价值时沉淀原理、取舍、问答和能力边界 → 无价值时不修改关注点文件 → 最终回复说明判断。
+  - 核心类、函数、接口或配置项：本次没有运行时代码；核心配置是 `AGENTS.md` 的准入门禁，核心知识载体是 `doc/needCare.md`。
+  - 输入、输出、异常和边界：输入是已真实完成的开发事实；输出是筛选后的面试知识。尚未实现的规划只能写入“不能过度声称”，不得作为成果表述。
+  - 关键代码位置（文件路径 + 定义起始行号）：`doc/needCare.md:6`、`doc/needCare.md:29`、`doc/needCare.md:83`、`doc/needCare.md:137`、`AGENTS.md:241`、`README.md:80`。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：无运行时代码，不涉及参数、权限、超时或上游调用。
+  - 幂等、并发或人工确认：不修改 `doc/record.md` 的历史事实；`needCare.md` 只增加有价值内容，不作为完整开发记录。
+- 未完成项与已知问题：
+  - 未完成项：无。
+  - 已知问题/阻塞：面试价值判断包含一定主观性，已通过明确准入标准和“禁止过度声称”降低偏差；无当前阻塞。
+- 替代方案：
+  - 采用的替代方案及原因：没有采用“每个任务强制生成一条关注点”的流水账方案，因为它会放大普通配置和样板代码、降低 Agent 面试准备的信噪比。
+  - 已覆盖/未覆盖的验收要求：覆盖历史筛选、未来门禁、最终汇报和能力边界；不记录环境安装与纯治理任务的面试条目。
+  - 局限、风险和转正/移除条件：若目标岗位从 Agent 开发转为纯 Java/运维，当前价值标准需要重新评审；在 Agent 岗位目标不变时持续使用。
+- 后续影响：
+  - 对后续任务/里程碑：从 T025 开始，每次开发结束必须先判断其对 Tool 契约、Agent 可靠性、评测或安全是否有面试价值。
+  - 对接口/数据/测试/部署：无运行时影响；增加一项轻量文档完成检查。
+- 测试与验证：
+  - `[通过] needCare/AGENTS 结构脚本` — 三个历史条目及四类必需小节存在；排除内容不存在；价值门禁、空条目禁令和最终汇报要求存在；Markdown 围栏成对。
+  - `[检查脚本修正] Markdown 围栏检查` — 首次扩展检查 `doc/record.md` 时只匹配行首围栏，未识别模板中的缩进围栏而返回非零；允许前导空白后复测通过，文档内容无需修改。
+  - `[通过] make validate` — M0.1 基础文件检查和 Docker Compose 配置校验通过。
+  - `[通过] git diff --check` — 无空白错误。
+  - 未运行项及原因：未运行业务自动化测试，本次没有修改运行时代码、接口、数据库或业务测试。
+- 变更文件：
+  - `doc/needCare.md`
+  - `AGENTS.md`
+  - `README.md`
+  - `docs/STATUS.md`
+  - `docs/TEST_REPORT.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无。
+  - 后续兼容注意事项：不得把规划中的 Java API、Python Tool、Workflow、RAG 或动态 Agent 写成已完成能力；实现后才能升级相应关注点表述。
+- Agent 面试价值评估：
+  - 本次治理任务本身不构成新的 Agent 技术亮点，因此未在 `needCare.md` 新增 DOC-003 条目；文件中只回填既有 M0.1～M0.3 的有效内容。
+- 下一建议任务：
+  - `[T025] 实现 GET /api/orders/{id} 订单详情查询及 404 契约`

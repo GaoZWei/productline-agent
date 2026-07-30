@@ -1,0 +1,91 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+cd "$repository_root"
+
+# Demo reset is intentionally destructive only to this Compose project's data volume.
+docker compose down --volumes --remove-orphans
+docker compose up --detach --build postgres business-service
+
+run_sql() {
+    docker compose exec -T postgres sh -c \
+        'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"' \
+        sh "$1"
+}
+
+migration_query="SELECT COUNT(*) FROM flyway_schema_history WHERE success AND version = '2';"
+attempt=1
+while [ "$attempt" -le 60 ]; do
+    migration_count=$(run_sql "$migration_query" 2>/dev/null || true)
+    if [ "$migration_count" = "1" ]; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+done
+
+if [ "${migration_count:-0}" != "1" ]; then
+    echo "M0.3 demo reset failed: Flyway V2 was not applied within 60 seconds." >&2
+    docker compose logs --no-color business-service >&2
+    exit 1
+fi
+
+order_count=$(run_sql "SELECT COUNT(*) FROM production_orders;")
+golden_count=$(
+    run_sql "
+        SELECT COUNT(*)
+        FROM production_orders orders
+        JOIN production_tasks tasks ON tasks.order_id = orders.order_id
+        JOIN quality_issues issues ON issues.task_id = tasks.task_id
+        JOIN review_records reviews ON reviews.issue_id = issues.issue_id
+        JOIN delivery_records deliveries ON deliveries.order_id = orders.order_id
+        WHERE orders.order_id = 'ORDER-003'
+          AND orders.status = 'QUALITY_CHECKING'
+          AND tasks.task_id = 'TASK-003'
+          AND tasks.status = 'COMPLETED'
+          AND issues.issue_id = 'ISSUE-001'
+          AND issues.issue_type = 'COORDINATE_SYSTEM'
+          AND issues.status = 'OPEN'
+          AND reviews.status = 'PENDING'
+          AND deliveries.status = 'BLOCKED';
+    "
+)
+
+if [ "$order_count" != "5" ] || [ "$golden_count" != "1" ]; then
+    echo "M0.3 demo reset failed: fixed data verification did not pass." >&2
+    exit 1
+fi
+
+snapshot=$(
+    run_sql "
+        SELECT md5(string_agg(row_data, E'\n' ORDER BY row_data))
+        FROM (
+            SELECT concat_ws('|', 'order', order_id, product_type, status) AS row_data
+            FROM production_orders
+            UNION ALL
+            SELECT concat_ws('|', 'task', task_id, order_id, status)
+            FROM production_tasks
+            UNION ALL
+            SELECT concat_ws('|', 'step', step_id, task_id, step_name, sequence_number, status)
+            FROM production_steps
+            UNION ALL
+            SELECT concat_ws('|', 'issue', issue_id, task_id, issue_type, status, description)
+            FROM quality_issues
+            UNION ALL
+            SELECT concat_ws('|', 'review', review_id, issue_id, status, review_comment)
+            FROM review_records
+            UNION ALL
+            SELECT concat_ws('|', 'rework', rework_task_id, task_id, source_issue_id, status, reason)
+            FROM rework_tasks
+            UNION ALL
+            SELECT concat_ws('|', 'delivery', delivery_id, order_id, status)
+            FROM delivery_records
+        ) fixed_demo_data;
+    "
+)
+
+echo "M0.3 demo data reset complete."
+echo "orders=$order_count"
+echo "snapshot=$snapshot"
