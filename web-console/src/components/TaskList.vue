@@ -14,7 +14,7 @@ function statusClass(status: string) {
   <section class="panel task-panel">
     <div class="panel-heading">
       <div>
-        <span class="eyebrow">PRODUCTION</span>
+        <span class="eyebrow">生产执行</span>
         <h2>生产任务</h2>
       </div>
       <span class="count-badge">{{ tasks.length }} 个任务</span>

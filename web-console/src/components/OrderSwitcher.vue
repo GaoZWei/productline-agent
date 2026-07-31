@@ -21,7 +21,7 @@ function isDemoOrderId(orderId: string): orderId is DemoOrderId {
 <template>
   <aside class="order-rail" aria-label="固定演示订单">
     <div class="rail-heading">
-      <span class="eyebrow">DEMO ORDERS</span>
+      <span class="eyebrow">固定演示订单</span>
       <h2>业务场景</h2>
       <p>选择固定订单，查看 Java 事实层返回的完整业务快照。</p>
     </div>

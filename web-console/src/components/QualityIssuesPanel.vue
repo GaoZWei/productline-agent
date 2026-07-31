@@ -19,7 +19,7 @@ const issues = computed(() =>
   <section class="panel quality-panel">
     <div class="panel-heading">
       <div>
-        <span class="eyebrow">QUALITY CONTROL</span>
+        <span class="eyebrow">质量控制</span>
         <h2>质检与复核</h2>
       </div>
       <span class="count-badge" :class="{ alert: issues.length > 0 }">

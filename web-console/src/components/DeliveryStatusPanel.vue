@@ -13,7 +13,7 @@ function isReady(status: string) {
   <section class="panel delivery-panel">
     <div class="panel-heading">
       <div>
-        <span class="eyebrow">DELIVERY</span>
+        <span class="eyebrow">成果交付</span>
         <h2>成果交付</h2>
       </div>
     </div>

@@ -15,7 +15,7 @@ function tagType(status: string) {
 <template>
   <section class="summary-card" data-current-order>
     <div>
-      <span class="eyebrow">ORDER OVERVIEW</span>
+      <span class="eyebrow">订单概览</span>
       <h1>{{ order.orderId }}</h1>
       <p>遥感数据生产订单业务快照</p>
     </div>

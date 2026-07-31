@@ -30,11 +30,11 @@ onMounted(() => store.initialize());
     <header class="topbar">
       <a class="brand" href="/" aria-label="遥感产线协同中心首页">
         <span class="brand-mark">PL</span>
-        <span><strong>产线协同中心</strong><small>REMOTE SENSING OPERATIONS</small></span>
+        <span><strong>产线协同中心</strong><small>遥感数据生产业务</small></span>
       </a>
       <div class="topbar-status">
-        <span class="environment">M0 · BUSINESS VIEW</span>
-        <span class="service-health"><i></i>业务服务</span>
+        <span class="environment">M0 · 业务视图</span>
+        <span class="service-health"><i></i>Java 事实源</span>
       </div>
     </header>
 
@@ -49,7 +49,7 @@ onMounted(() => store.initialize());
       <main class="content-area">
         <div class="page-intro">
           <div>
-            <span class="eyebrow">BUSINESS FACTS</span>
+            <span class="eyebrow">业务事实</span>
             <h2>订单业务全景</h2>
           </div>
           <div v-if="traceId" class="trace-chip" title="用于关联 Java 服务日志">

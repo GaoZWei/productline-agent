@@ -910,3 +910,67 @@
   - 无新增条目，未修改 `doc/needCare.md`。M0.8 是必要的业务事实展示与常规前端可靠性实现，但尚未承载 Agent 上下文、Tool 调用、步骤/引用、SSE 或 Approval；快速切单和错误展示更适合前端工程讨论，不足以单独形成 Agent 岗位面试证据。
 - 下一建议任务：
   - `[T101] 使用 uv 初始化 Python 项目`
+
+## 2026-07-31 23:38 — `[UI-001] M0.8 云端蓝灰视觉改版`
+
+- 里程碑：M0 业务数据与 Java 接口
+- 任务类型：前端视觉 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：只调整既有 M0.8 页面的色板、层次、卡片、状态标签、字号、中文区块眉题和响应式视觉，形成清爽克制的云端蓝灰企业平台风格。
+  - 明确不实现：不新增 M1、Agent 对话、图表、导航、业务接口、数据字段、状态映射、Store 行为或运行时依赖。
+- 需求与关键决策：
+  - 色板契约：页面背景 `#F5F7FA`、顶部导航 `#17243B`、主蓝 `#2F6BFF`、正文 `#1F2937`、次级文字 `#667085`、边框 `#E4E7EC`，成功/警告/失败分别为 `#12B76A`、`#F79009`、`#D92D20`。
+  - 信息层次：仅顶部导航保留深色；侧栏改为浅蓝灰，选中订单使用淡蓝底、蓝边和左侧强调条；订单概览改为白色卡片和蓝色顶部线；普通面板统一白底、细边框、轻阴影与约 10px 圆角。
+  - 语义边界：状态颜色继续表达成功、等待和失败；质检问题改为白底红色左边线，避免用大面积红底制造过度告警。页面只展示 Java 事实，不增加诊断或建议。
+  - 兼容决策：保留桌面双栏、移动端横向订单切换、1000px/720px 断点，以及 `data-order-id`、`data-current-order` 和现有业务文本；只替换装饰性英文眉题。
+- 核心实现：
+  - `web-console/src/styles.css` — 根级 CSS 变量定义统一色板；顶部栏、浅色订单侧栏、白色概览卡、普通面板、语义标签和两个响应式断点共用同一组视觉令牌。使用系统字体，不新增图片、字体、图标库或运行时依赖。
+  - `web-console/src/App.vue` — 顶栏与业务区装饰文案改为中文，明确页面是 M0 业务视图和 Java 事实源。
+  - `web-console/src/components/OrderSwitcher.vue`、`OrderSummary.vue`、`TaskList.vue`、`QualityIssuesPanel.vue`、`DeliveryStatusPanel.vue` — 将英文眉题替换为“固定演示订单”“订单概览”“生产执行”“质量控制”“成果交付”；组件输入、事件和业务字段不变。
+  - `web-console/src/App.spec.ts` — 增加五个中文区块标识断言，防止视觉文案回退，同时保留五单、黄金链路和快速切单断言。
+- 代码解释与定位：
+  - 整体渲染流不变：Store 读取 Java 总览 → `App.vue` 组合订单切换和业务面板 → 组件渲染固定事实 → `styles.css` 仅决定视觉呈现。此次没有进入 API Client、Pinia Store 或 DTO 层。
+  - 色板通过根变量集中管理，再由导航、侧栏、概览、面板和状态类消费；后续更换品牌色时无需逐组件修改硬编码颜色。
+  - 1000px 以下由双栏收敛为单列并把订单列表变为横向滚动；720px 以下进一步调整顶部栏、内容间距和概览字段网格，业务 DOM 与选择行为保持一致。
+  - 测试只对稳定的中文业务区块做文本断言，不绑定阴影、像素或 class 细节，避免合理视觉微调造成脆弱测试。
+- 异常、安全与边界：
+  - 错误卡片、重试按钮、Trace ID 和状态语义仍由原组件/Store 驱动；没有改变错误是否可重试、Trace 解析或 Java 事实来源。
+  - `ORDER-003` 黄金事实和 `ORDER-005` 切换路径仍由既有组件测试覆盖；本次不涉及写操作、权限、幂等或 Approval。
+- 未完成项与已知问题：
+  - 未完成项：真实浏览器桌面与移动端截图/人工视觉验收未完成。
+  - 已知问题/阻塞：无功能阻塞；应用内浏览器能力在读取故障排查说明并重试后仍返回空列表，因此当前没有像素级、字体渲染或真实滚动行为证据。
+- 替代方案：
+  - 采用原因：浏览器实例不可用时，使用 jsdom 组件测试、CSS 规则检查、TypeScript 检查和 Vite 生产构建作为阶段性证据，避免引入计划外浏览器依赖或绕过指定测试能力。
+  - 已覆盖/未覆盖：覆盖 DOM 文案、五单与黄金链路功能回归、响应式规则存在、类型和生产打包；不覆盖真实浏览器像素布局、系统字体差异、横向滚动手感和视觉主观验收。
+  - 局限与移除条件：可用浏览器恢复后，应分别在桌面、1000px 附近和 720px 以下检查 `ORDER-003`、`ORDER-005` 与错误态；完成后可关闭该视觉证据缺口，无需改变运行时代码。
+- 后续影响：
+  - 对后续任务/里程碑：无 M1 功能影响；未来增加 Agent 面板时应复用本次色板与轻量面板层次，但不能把当前业务页面称为 Agent UI。
+  - 对接口/数据/测试/部署：Java API、Axios Client、Pinia Store、DTO、固定数据、Docker 代理和数据库均不变；CSS 构建产物从 49.57 kB 增至 51.77 kB（gzip 从 8.34 kB 增至 8.61 kB），无部署配置变化。
+- 测试与验证：
+  - `[预期失败] npm test -- --run src/App.spec.ts` — 1 个测试、1 个失败；旧模板尚无五个中文区块标识。
+  - `[通过] 同一命令` — 1/1。
+  - `[通过] make test-web` — Vitest 4 文件、7/7；Vue TypeScript 检查与 Vite 生产构建通过。
+  - `[通过] npm --prefix web-console audit --omit=dev` — 0 个已知漏洞。
+  - `[通过] node --check web-console/server.mjs` — Node 生产服务脚本语法有效。
+  - `[通过] 静态视觉规则检查` — 旧英文眉题、旧墨绿色值和 8～10px 字号均无匹配。
+  - `[未运行] Java 测试` — 本次未修改 Java、接口契约或业务逻辑，按计划不重复运行。
+  - `[未运行] 浏览器视觉验收` — 应用内浏览器列表两次均为空。
+- 变更文件：
+  - `web-console/src/styles.css`
+  - `web-console/src/App.vue`
+  - `web-console/src/components/OrderSwitcher.vue`
+  - `web-console/src/components/OrderSummary.vue`
+  - `web-console/src/components/TaskList.vue`
+  - `web-console/src/components/QualityIssuesPanel.vue`
+  - `web-console/src/components/DeliveryStatusPanel.vue`
+  - `web-console/src/App.spec.ts`
+  - `docs/STATUS.md`
+  - `docs/TEST_REPORT.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无功能阻塞；真实浏览器视觉验收是唯一遗留证据缺口。
+  - 后续兼容注意事项：后续业务/Agent UI 应复用 CSS 变量，不要重新引入大面积深色或硬编码语义色；组件测试依赖的业务文本与 `data-*` 属性应继续保留。
+- Agent 面试价值评估：
+  - 无新增条目，未修改 `doc/needCare.md`。本次是纯视觉与展示文案调整，没有新增 Agent、Tool、Workflow、RAG、上下文、Approval、评测或模型/业务边界实现，不满足 Agent 岗位面试价值门禁。
+- 下一建议任务：
+  - 浏览器能力恢复后补一次桌面与移动端视觉验收；用户恢复功能开发时再进入 `[T101] 使用 uv 初始化 Python 项目`。

@@ -40,6 +40,11 @@ describe("minimal business page", () => {
     for (const order of orderFixtures) {
       expect(host.textContent).toContain(order.orderId);
     }
+    expect(host.textContent).toContain("固定演示订单");
+    expect(host.textContent).toContain("订单概览");
+    expect(host.textContent).toContain("生产执行");
+    expect(host.textContent).toContain("质量控制");
+    expect(host.textContent).toContain("成果交付");
     expect(host.textContent).toContain("ISSUE-001");
     expect(host.textContent).toContain("COORDINATE_SYSTEM");
     expect(host.textContent).toContain("PENDING");
