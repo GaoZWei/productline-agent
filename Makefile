@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-business-domain test-business-data test-java-contract dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-business-domain test-business-data test-java-contract test-java-write dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -15,7 +15,7 @@ validate: ## 检查 M0.1 必需目录、文件与 Compose 配置
 	./scripts/check-foundation.sh
 	$(COMPOSE) config --quiet
 
-test: validate smoke test-business-domain test-business-data test-java-contract ## 运行当前阶段全部自动检查
+test: validate smoke test-business-domain test-business-data test-java-contract test-java-write ## 运行当前阶段全部自动检查
 
 smoke: ## 验证 Java、Python 和 Web 健康检查
 	./scripts/smoke-services.sh
@@ -33,6 +33,11 @@ test-business-data: ## 验证 M0.3 固定数据映射和业务状态组合
 test-java-contract: ## 验证 M0.4 Java 只读查询接口契约
 	mvn --file business-service/pom.xml \
 		-Dtest=BusinessQueryApiIntegrationTest \
+		test
+
+test-java-write: ## 验证 M0.5 Java 写接口、权限、幂等、并发与操作日志
+	mvn --file business-service/pom.xml \
+		-Dtest=BusinessWriteApiIntegrationTest \
 		test
 
 dev: ## 构建并启动 PostgreSQL、Java、Python 和 Web

@@ -4,7 +4,8 @@
 
 M0.2 为 Java `business-service` 建立订单生产链路的持久化模型，使业务事实能够由
 Spring Data JPA 通过 PostgreSQL 查询。M0.3 已补充固定演示数据，M0.4 已在模型之上
-增加只读 HTTP 查询边界；写接口、统一错误响应和 Trace ID 仍不属于当前实现。
+增加只读 HTTP 查询边界，M0.5 已增加复核/返工写入及幂等、版本和操作日志保护；统一
+错误响应和 Trace ID 仍不属于当前实现。
 
 业务聚合以 `Order` 为根，关系如下：
 
@@ -46,7 +47,7 @@ Order.addTask
 | Java 实体 | 数据库表 | 主键 | 关键字段 | 上级对象 |
 | --- | --- | --- | --- | --- |
 | `Order` | `production_orders` | `order_id` | `product_type`, `status` | 聚合根 |
-| `ProductionTask` | `production_tasks` | `task_id` | `status` | `order_id` |
+| `ProductionTask` | `production_tasks` | `task_id` | `status`, `version` | `order_id` |
 | `ProductionStep` | `production_steps` | `step_id` | `step_name`, `sequence_number`, `status` | `task_id` |
 | `QualityIssue` | `quality_issues` | `issue_id` | `issue_type`, `status`, `description` | `task_id` |
 | `ReviewRecord` | `review_records` | `review_id` | `status`, `review_comment` | `issue_id` |
@@ -120,3 +121,27 @@ HTTP 层不直接序列化 JPA Entity。这样可以避免懒加载关系、循�
 步骤按 `sequenceNumber` 排序，其他集合按稳定业务 ID 排序。确定性顺序不会改变业务
 事实，但能降低 Tool Schema 消费、快照比较和 Agent 回归评测中的无意义波动。完整
 路径与响应示例见 `docs/API_CONTRACT.md`。
+
+## 8. M0.5 写入一致性边界
+
+写接口沿用聚合关系创建 `ReviewRecord` 或 `ReworkTask`，并在同一个数据库事务中完成：
+
+```text
+身份/参数校验
+→ 预占并核对 Idempotency-Key
+→ 重查任务和质检问题
+→ 校验状态、归属和重复返工
+→ 级联持久化业务记录
+→ WHERE task_id = ? AND version = ? 原子递增版本
+→ 完成幂等记录并写 operation_logs
+→ 返回业务结果和新版本
+```
+
+`idempotency_records` 保存请求指纹和首次成功结果引用，使网络重试可重放同一响应；
+`operation_logs` 保存关键前后状态和幂等键哈希，不保存原始幂等键。`ProductionTask.version`
+同时映射为 JPA `@Version` 并暴露在查询 DTO 中，写接口使用条件更新确保并发冲突能在
+事务内部转换为 `409`，而不是在提交后成为不可控的 `500`。
+
+复核写入当前只新增复核历史，返工写入只新增 `PENDING` 任务；它们不隐式迁移质检问题、
+订单或交付状态。因此现有跨对象一致性校验器仍作为独立规则组件，待后续真正修改这些
+状态的写操作再接入事务门禁。

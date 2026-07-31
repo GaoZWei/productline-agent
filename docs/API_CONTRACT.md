@@ -2,9 +2,9 @@
 
 ## 1. 当前范围
 
-本文固定 Java API 向后续 Python Tool 和 Web Console 暴露的查询路径、响应结构与
-状态字符串。M0.4 已实现 8 个只读端点；写接口属于 M0.5，统一错误模型与 Trace ID
-属于 M0.6。
+本文固定 Java API 向后续 Python Tool 和 Web Console 暴露的查询/写入路径、响应结构与
+状态字符串。M0.4 已实现 8 个只读端点，M0.5 已实现提交复核和创建返工两个写端点；
+统一错误模型与 Trace ID 属于 M0.6。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -53,7 +53,8 @@ JSON 中状态字段必须使用下列大写字符串，不接受数字序号、
       "task": {
         "taskId": "TASK-003",
         "orderId": "ORDER-003",
-        "status": "COMPLETED"
+        "status": "COMPLETED",
+        "version": 0
       },
       "steps": [
         {
@@ -105,7 +106,65 @@ M0.4 的错误契约只保证 HTTP 状态：未知父资源为 `404`，非法状
 响应体、业务错误码和 Trace ID 尚未稳定，调用方不得依赖 Spring 默认错误 JSON；
 这些能力将在 M0.6 统一。
 
-## 3. 状态枚举
+## 3. M0.5 写入端点
+
+| 任务 | 方法与路径 | 请求体 | 成功响应 |
+| --- | --- | --- | --- |
+| T033 | `POST /api/tasks/{taskId}/review` | `issueId`、`status`、`reviewComment`、`expectedVersion` | `review` 与递增后的 `taskVersion` |
+| T034 | `POST /api/tasks/{taskId}/rework` | `sourceIssueId`、`reason`、`expectedVersion` | `reworkTask` 与递增后的 `taskVersion` |
+
+两个写接口都要求以下 Header：
+
+```text
+X-User-Id: reviewer-001
+X-User-Role: REVIEWER
+Idempotency-Key: 调用方为一次业务动作生成的稳定唯一值
+```
+
+提交 `ORDER-003` 复核结果的最小请求和响应示例：
+
+```json
+{
+  "issueId": "ISSUE-001",
+  "status": "REWORK_REQUIRED",
+  "reviewComment": "需要完成坐标系返工。",
+  "expectedVersion": 0
+}
+```
+
+```json
+{
+  "review": {
+    "reviewId": "REVIEW-WRITE-<uuid>",
+    "issueId": "ISSUE-001",
+    "status": "REWORK_REQUIRED",
+    "reviewComment": "需要完成坐标系返工。"
+  },
+  "taskVersion": 1
+}
+```
+
+写入约束：
+
+- 只有 `REVIEWER` 角色可调用；缺失/非法身份上下文分别返回 `400`/`403`。
+- 生产任务必须为 `COMPLETED`，问题必须属于路径中的任务；不存在的资源返回 `404`，
+  状态或归属冲突返回 `409`。
+- `PENDING` 不能作为新复核结论，`CLOSED` 问题不能重复复核；只有 `RESOLVED` 问题
+  能提交 `APPROVED`。复核接口只追加复核记录，不隐式修改问题、订单或交付状态。
+- 创建返工时来源问题不能为 `CLOSED`；同一任务与来源问题已有 `PENDING`、`RUNNING`
+  或 `BLOCKED` 返工时返回 `409`。新返工任务初始状态固定为 `PENDING`。
+- 相同用户以相同幂等键和完全相同的请求重试，返回首次成功结果且不再次写入；同一键
+  更换操作或请求内容返回 `409`。
+- 客户端从任务查询读取 `version` 并作为 `expectedVersion` 提交。数据库只在当前版本
+  仍匹配时原子递增；并发写同一版本时仅一个成功，其余返回 `409`。
+- 每次成功写入在同一事务中保存操作类型、操作者、目标、幂等键哈希和关键业务字段的
+  前后状态；重放幂等请求不重复生成日志。
+
+当前 `X-User-Id`/`X-User-Role` 是 M0.5 的最小身份上下文，不等同于真实认证令牌。
+Agent Approval、Python 写 Tool 和确认用户校验尚未实现。M0.6 前只稳定 HTTP 状态码，
+调用方仍不得依赖 Spring 默认错误体。
+
+## 4. 状态枚举
 
 ### OrderStatus
 
@@ -161,7 +220,7 @@ M0.4 的错误契约只保证 HTTP 状态：未知父资源为 `404`，非法状
 | `FAILED` | 交付失败 |
 | `BLOCKED` | 被质量、复核或其他业务条件阻塞 |
 
-## 4. 固定业务断言
+## 5. 固定业务断言
 
 `ORDER-003` 的关键契约不得由模型推测或改写：
 
@@ -177,7 +236,7 @@ delivery_status = BLOCKED
 复用本文件中的枚举值，不为前端或 Python 创建另一套状态字符串。五组固定数据的
 完整 ID 映射见 [`DEMO_DATA.md`](DEMO_DATA.md)。
 
-## 5. 演进规则
+## 6. 演进规则
 
 状态契约变化必须：
 

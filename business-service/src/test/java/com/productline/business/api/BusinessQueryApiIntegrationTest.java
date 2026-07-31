@@ -65,6 +65,7 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         assertThat(found.getBody().path("taskId").asText()).isEqualTo("TASK-003");
         assertThat(found.getBody().path("orderId").asText()).isEqualTo("ORDER-003");
         assertThat(found.getBody().path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(found.getBody().path("version").asLong()).isZero();
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 

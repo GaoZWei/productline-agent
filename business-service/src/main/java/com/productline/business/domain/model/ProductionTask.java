@@ -12,6 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -32,6 +33,10 @@ public class ProductionTask {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32)
     private ProductionTaskStatus status;
+    // 任务版本
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     @OneToMany(mappedBy = "task", cascade = CascadeType.ALL, orphanRemoval = true)
     private final List<ProductionStep> steps = new ArrayList<>();
@@ -63,6 +68,7 @@ public class ProductionTask {
         requiredStep.assignTo(this);
         steps.add(requiredStep);
     }
+
     // 添加质检问题
     public void addQualityIssue(QualityIssue issue) {
         QualityIssue requiredIssue = Objects.requireNonNull(issue, "issue");
@@ -86,6 +92,10 @@ public class ProductionTask {
 
     public ProductionTaskStatus getStatus() {
         return status;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     public List<ProductionStep> getSteps() {

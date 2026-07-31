@@ -555,3 +555,104 @@
   - 有价值，已更新 `doc/needCare.md`。本次建立了 Agent Tool 的 Java 事实接口，明确空结果/404、确定性排序、细粒度 Tool 与聚合接口的取舍，并通过黄金链路契约测试提供可举证内容。
 - 下一建议任务：
   - `[T033] 实现 POST /api/tasks/{id}/review 的请求、权限与状态冲突校验`
+
+---
+
+## 2026-07-31 21:36 — `[T033-T037] M0.5 Java 写接口`
+
+- 里程碑：M0 业务数据与 Java 接口
+- 任务类型：功能 / 接口 / 数据库 / 测试 / 配置 / 文档 / 修复
+- 目标与范围：
+  - 本次实现：实现提交复核结果和创建返工任务两个 Java POST 接口；增加最小角色/状态校验、请求幂等、任务业务版本、并发冲突和操作前后日志；将写契约加入根级回归。
+  - 明确不实现：不实现 M0.6 统一响应、错误码和 Trace ID，不实现真实认证、Python 写 Tool、Agent Approval、前端确认或自动推进问题/订单/交付状态。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：以 `TASK-003 + ISSUE-001(OPEN)` 验证 `REWORK_REQUIRED` 复核和 `PENDING` 返工写入；测试后删除新增记录并恢复任务版本，保持 `ORDER-003` 固定黄金事实和无预置返工基线。
+  - 方案选择及原因：计划只给出路径和测试重点，当前明确最小契约为 `X-User-Id`、`X-User-Role: REVIEWER`、`Idempotency-Key`，请求体携带业务字段与 `expectedVersion`。复核只追加历史，不推断未定义的状态迁移；返工初始状态固定为 `PENDING`。
+  - 契约、状态或兼容性影响：`ProductionTaskDto` 新增 `version`；两个 POST 成功响应返回新资源和 `taskVersion`。400/403/404/409 当前只稳定 HTTP 状态，M0.6 可能增加统一响应包装，后续 Python Schema 必须以届时最终契约为准。
+- 核心实现：
+  - `business-service/src/main/java/com/productline/business/api/TaskWriteController.java` — `TaskWriteController`（第 18 行）、`submitReview`（第 27 行）、`createRework`（第 38 行）：接收路径、身份/幂等 Header 和校验后的请求 Schema。
+  - `business-service/src/main/java/com/productline/business/application/BusinessWriteService.java` — `BusinessWriteService`（第 42 行）、`submitReview`（第 82 行）、`createRework`（第 155 行）：在单事务内执行身份、幂等、资源、状态、版本、写入和审计流程。
+  - `business-service/src/main/java/com/productline/business/application/BusinessWriteService.java` — `reserveOrLoad`（第 233 行）区分首次预占、同请求重放、同键异请求和进行中冲突；`incrementVersion`（第 346 行）把条件更新结果映射为并发 409。
+  - `business-service/src/main/resources/db/migration/V3__add_write_safety_support.sql` — 从第 1、4、21 行增加任务版本、`idempotency_records` 和 `operation_logs`，并以约束保证幂等完成字段成对为空或成对有值。
+  - `business-service/src/main/java/com/productline/business/domain/model/ProductionTask.java` — `@Version`（第 37 行）把版本纳入领域/查询契约。
+  - `business-service/src/main/java/com/productline/business/domain/model/IdempotencyRecord.java` — `isCompleted`/`complete`（第 62、66 行）记录首次成功资源及写后版本。
+  - `business-service/src/main/java/com/productline/business/domain/model/OperationLog.java` — 构造器（第 45 行）强制操作类型、目标、操作者、幂等键哈希和前后状态非空。
+  - `business-service/src/test/java/com/productline/business/api/BusinessWriteApiIntegrationTest.java` — 12 个真实 HTTP/PostgreSQL 用例（类第 28 行）；幂等（第 135 行）、并发竞争（第 191 行）、返工防重（第 264 行）和审计均有数据库副作用断言。
+  - `Makefile` — `test-java-write`（第 38 行）提供独立验收入口，并在第 18 行纳入 `make test`。
+  - 必要的最小关键片段：
+
+    ```sql
+    UPDATE production_tasks
+       SET version = version + 1
+     WHERE task_id = :taskId
+       AND version = :expectedVersion
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：HTTP POST → Controller 校验请求形状 → `BusinessWriteService` 校验身份和幂等键 → 预占幂等记录 → 重查任务/问题并校验状态 → 通过聚合关系级联写复核/返工 → 原子递增版本 → 完成幂等结果并保存操作日志 → 事务提交后返回资源与新版本。同键同请求在状态校验前直接读取首次资源并重放。
+  - 核心类、函数、接口或配置项：`submitReview` 拒绝未完成任务、跨任务/关闭问题、`PENDING` 结论和对非 `RESOLVED` 问题的 `APPROVED`；`createRework` 拒绝关闭/跨任务问题及已有活动返工；`incrementVersionIfMatches` 用数据库更新行数作为并发判定，而不是依赖提交时异常。
+  - 输入、输出、异常和边界：输入为任务 ID、用户/角色、幂等键和带 `expectedVersion` 的复核/返工 Schema；输出为新记录 DTO 和递增版本。缺失/非法参数 400、非 `REVIEWER` 403、未知资源 404、状态/幂等/版本冲突 409。单事务失败会回滚业务子记录、幂等预占、版本和日志。
+  - 关键代码位置（文件路径 + 定义起始行号）：`TaskWriteController.java:18`、`BusinessWriteService.java:82`、`BusinessWriteService.java:155`、`BusinessWriteService.java:233`、`BusinessWriteService.java:346`、`V3__add_write_safety_support.sql:1`、`BusinessWriteApiIntegrationTest.java:28`。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：Bean Validation 约束必填、非负版本和 1000 字符文本；业务层限制身份/幂等键长度并校验角色、资源归属和状态。当前没有上游 HTTP 调用或超时；Header 身份尚不能证明来源真实性。
+  - 幂等、并发或人工确认：同键同用户同请求只写一次并重放首次结果，同键变更内容/操作/用户为 409；不同键但重复活动返工由业务规则阻止；不同写动作使用同一旧版本时原子条件更新保证只有一个成功。人工确认不在 M0.5，当前直接调用 Java 接口会尝试写入。
+- 未完成项与已知问题：
+  - 未完成项：M0.6 统一错误模型/Trace ID、真实认证、幂等记录 TTL/归档、操作日志查询、Python 写 Tool、Approval 和前端确认尚未实现；复核成功不会自动迁移问题、订单或交付状态。
+  - 已知问题/阻塞：无阻塞。Mockito 在 JDK 21 输出动态 Java Agent 的未来兼容警告；幂等表会持续增长；当前操作日志是关键字段快照而非完整事件溯源。
+- 替代方案：
+  - 采用的替代方案及原因：M0.5 尚无认证系统，暂用 `X-User-Id`/`X-User-Role` 传入最小身份上下文以验证 Java 侧权限门禁；M0.6 前用三个 `@ResponseStatus` 异常提供临时 400/403/409；本机没有 Maven Wrapper，验收使用已固定到 JDK 21 的系统 Maven。
+  - 已覆盖/未覆盖的验收要求：覆盖 T033～T037 的正常写入、权限、状态冲突、重复创建、同请求只写一次、并发冲突和前后日志；不覆盖身份防伪、统一错误 JSON、Trace 链路、跨服务幂等治理、人工确认或 Agent 调用次数策略。
+  - 局限、风险和转正/移除条件：接入网关/JWT 后必须从可信 Principal 获取身份并删除可伪造角色 Header；M0.6 用全局异常处理和统一错误码替换临时异常映射；生产化前根据保留周期增加幂等/日志归档；若补充 Maven Wrapper，再把本地与 CI 验收统一到 `./mvnw`。
+- 后续影响：
+  - 对后续任务/里程碑：M0.6 应为 400/403/404/409 建立稳定业务错误码并加入 Trace ID；M1 只读 Tool 不消费写端点；M6 写 Tool 必须透传 Approval 派生的可信用户、幂等键和查询所得版本，并正确处理 409 为 STALE/冲突，而不是盲目重试。
+  - 对接口/数据/测试/部署：V3 是不可改写迁移；已有数据库部署会新增非空默认版本和两张表。查询 DTO 的 `version` 是新增字段，宽松 JSON 客户端兼容，严格客户端需同步 Schema。写成功会改变固定数据库，演示重置仍通过删除项目数据卷恢复；测试自身已做后清理。
+- 测试与验证：
+  - `[预期失败] mvn --file business-service/pom.xml -Dtest=BusinessWriteApiIntegrationTest test` — 首次 11/11 错误，首个证据为 `operation_logs` 不存在，证明写安全结构和接口尚未实现。
+  - `[失败后修复] 同一目标测试` — V3 首次 `CHAR(64)` 与 Hibernate `VARCHAR(64)` 不一致导致应用启动失败；改为 `VARCHAR(64)`。
+  - `[失败后修复] 同一目标测试` — 聚合级联后又显式保存子实体触发重复托管异常；移除显式 `save`，统一由聚合级联持久化。
+  - `[失败后修复] 同一目标测试` — 11 个测试中 3 个失败：成功响应版本仍为 0，并发结果为 200/500；将提交阶段 `OPTIMISTIC_FORCE_INCREMENT` 改为条件更新后通过。
+  - `[通过] mvn --file business-service/pom.xml -Dtest=BusinessWriteApiIntegrationTest test` — 扩充后 12/12，失败 0、错误 0、跳过 0。
+  - `[失败后修复] mvn --file business-service/pom.xml -Dtest=BusinessWriteApiIntegrationTest,BusinessQueryApiIntegrationTest test` — 首次 25 个测试中 1 个失败，写测试残留版本污染查询测试；增加 `@AfterEach` 恢复后 25/25。
+  - `[通过] mvn --file business-service/pom.xml clean test` — 全量 40/40，失败 0、错误 0、跳过 0。
+  - `[通过] make test` — 基础检查、Compose 校验、三服务冒烟、M0.2 7/7、M0.3 7/7、M0.4 13/13、M0.5 12/12 全部通过。
+  - `[失败后使用既有替代命令] ./mvnw -Dtest=BusinessWriteApiIntegrationTest test` — 退出 127，仓库无 Maven Wrapper；随后使用 `mvn --file business-service/pom.xml ...` 完成全部验证。
+  - 未运行项及原因：未运行 M0.6、Python Tool、Approval 和 Agent E2E 测试，对应实现不在本次范围。
+- 变更文件：
+  - `business-service/src/main/java/com/productline/business/api/TaskWriteController.java`
+  - `business-service/src/main/java/com/productline/business/api/dto/ReviewSubmissionRequest.java`
+  - `business-service/src/main/java/com/productline/business/api/dto/ReviewWriteResponse.java`
+  - `business-service/src/main/java/com/productline/business/api/dto/ReworkCreationRequest.java`
+  - `business-service/src/main/java/com/productline/business/api/dto/ReworkWriteResponse.java`
+  - `business-service/src/main/java/com/productline/business/api/error/BusinessConflictException.java`
+  - `business-service/src/main/java/com/productline/business/api/error/InvalidRequestException.java`
+  - `business-service/src/main/java/com/productline/business/api/error/PermissionDeniedException.java`
+  - `business-service/src/main/java/com/productline/business/application/BusinessQueryService.java`
+  - `business-service/src/main/java/com/productline/business/application/BusinessWriteService.java`
+  - `business-service/src/main/java/com/productline/business/domain/dto/ProductionTaskDto.java`
+  - `business-service/src/main/java/com/productline/business/domain/model/ProductionTask.java`
+  - `business-service/src/main/java/com/productline/business/domain/model/IdempotencyRecord.java`
+  - `business-service/src/main/java/com/productline/business/domain/model/OperationLog.java`
+  - `business-service/src/main/java/com/productline/business/domain/repository/ProductionTaskRepository.java`
+  - `business-service/src/main/java/com/productline/business/domain/repository/ReworkTaskRepository.java`
+  - `business-service/src/main/java/com/productline/business/domain/repository/IdempotencyRecordRepository.java`
+  - `business-service/src/main/java/com/productline/business/domain/repository/OperationLogRepository.java`
+  - `business-service/src/main/resources/db/migration/V3__add_write_safety_support.sql`
+  - `business-service/src/test/java/com/productline/business/api/BusinessQueryApiIntegrationTest.java`
+  - `business-service/src/test/java/com/productline/business/api/BusinessWriteApiIntegrationTest.java`
+  - `business-service/README.md`
+  - `Makefile`
+  - `docs/API_CONTRACT.md`
+  - `docs/DEMO_DATA.md`
+  - `docs/DOMAIN_MODEL.md`
+  - `docs/ROADMAP.md`
+  - `docs/STATUS.md`
+  - `docs/TEST_REPORT.md`
+  - `doc/needCare.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；临时身份 Header、默认错误体、无 Trace、幂等/日志无归档和 Mockito 警告是已知风险。
+  - 后续兼容注意事项：不得改写 V3；Python/前端必须从任务查询读取最新版本并把 409 当业务冲突，写请求不能自动无条件重试；接入 Approval 前不得声称“未确认绝不写入”已完成。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次真实实现并测试了 Agent 写回所需的 Java 权威校验、请求幂等、乐观并发和同事务审计，并记录了 JPA 提交阶段版本冲突为何改为条件更新的工程取舍。
+- 下一建议任务：
+  - `[T038] 定义统一 ApiResponse<T> 响应结构`

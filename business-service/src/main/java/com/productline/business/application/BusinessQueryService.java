@@ -179,7 +179,10 @@ public class BusinessQueryService {
 
         private ProductionTaskDto toDto(ProductionTask task) {
                 return new ProductionTaskDto(
-                                task.getTaskId(), task.getOrder().getOrderId(), task.getStatus());
+                                task.getTaskId(),
+                                task.getOrder().getOrderId(),
+                                task.getStatus(),
+                                task.getVersion());
         }
 
         private ProductionStepDto toDto(ProductionStep step) {
