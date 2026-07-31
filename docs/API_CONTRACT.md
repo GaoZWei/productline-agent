@@ -3,8 +3,8 @@
 ## 1. 当前范围
 
 本文固定 Java API 向后续 Python Tool 和 Web Console 暴露的查询/写入路径、响应结构与
-状态字符串。M0.4 已实现 8 个只读端点，M0.5 已实现提交复核和创建返工两个写端点；
-统一错误模型与 Trace ID 属于 M0.6。
+状态字符串。M0.4 已实现 8 个只读端点，M0.5 已实现提交复核和创建返工两个写端点，
+M0.6 已为全部 `/api` 业务端点增加统一响应、错误码和 Trace ID。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -21,21 +21,28 @@ JSON 中状态字段必须使用下列大写字符串，不接受数字序号、
 | T031 | `GET /api/orders/{orderId}/delivery-status` | `DeliveryStatusResponse` | 保留交付记录数组，不猜测“最新记录” |
 | T032 | `GET /api/orders/{orderId}/overview` | `OrderOverviewResponse` | 聚合订单、任务、步骤、问题、复核和交付 |
 
-详情对象直接返回 DTO；集合端点返回父资源 ID 和稳定数组，避免调用方把“父资源存在但
-暂无关联记录”误判为接口失败。例如：
+业务 DTO 统一放在响应的 `data` 字段中；集合数据仍包含父资源 ID 和稳定数组，避免调用
+方把“父资源存在但暂无关联记录”误判为接口失败。例如：
 
 ```json
 {
-  "taskId": "TASK-003",
-  "issues": [
-    {
-      "issueId": "ISSUE-001",
-      "taskId": "TASK-003",
-      "issueType": "COORDINATE_SYSTEM",
-      "status": "OPEN",
-      "description": "成果坐标系与生产规范要求不一致，问题尚未处理。"
-    }
-  ]
+  "success": true,
+  "code": "SUCCESS",
+  "message": "success",
+  "data": {
+    "taskId": "TASK-003",
+    "issues": [
+      {
+        "issueId": "ISSUE-001",
+        "taskId": "TASK-003",
+        "issueType": "COORDINATE_SYSTEM",
+        "status": "OPEN",
+        "description": "成果坐标系与生产规范要求不一致，问题尚未处理。"
+      }
+    ]
+  },
+  "trace_id": "trace-<uuid>",
+  "retryable": false
 }
 ```
 
@@ -43,56 +50,63 @@ JSON 中状态字段必须使用下列大写字符串，不接受数字序号、
 
 ```json
 {
-  "order": {
-    "orderId": "ORDER-003",
-    "productType": "DOM",
-    "status": "QUALITY_CHECKING"
-  },
-  "tasks": [
-    {
-      "task": {
-        "taskId": "TASK-003",
-        "orderId": "ORDER-003",
-        "status": "COMPLETED",
-        "version": 0
-      },
-      "steps": [
-        {
-          "stepId": "STEP-003-01",
-          "taskId": "TASK-003",
-          "stepName": "DOM 生产处理",
-          "sequenceNumber": 1,
-          "status": "COMPLETED"
-        }
-      ],
-      "qualityIssues": [
-        {
-          "issue": {
-            "issueId": "ISSUE-001",
-            "taskId": "TASK-003",
-            "issueType": "COORDINATE_SYSTEM",
-            "status": "OPEN",
-            "description": "成果坐标系与生产规范要求不一致，问题尚未处理。"
-          },
-          "reviews": [
-            {
-              "reviewId": "REVIEW-003",
-              "issueId": "ISSUE-001",
-              "status": "PENDING",
-              "reviewComment": null
-            }
-          ]
-        }
-      ]
-    }
-  ],
-  "deliveryRecords": [
-    {
-      "deliveryId": "DELIVERY-003",
+  "success": true,
+  "code": "SUCCESS",
+  "message": "success",
+  "data": {
+    "order": {
       "orderId": "ORDER-003",
-      "status": "BLOCKED"
-    }
-  ]
+      "productType": "DOM",
+      "status": "QUALITY_CHECKING"
+    },
+    "tasks": [
+      {
+        "task": {
+          "taskId": "TASK-003",
+          "orderId": "ORDER-003",
+          "status": "COMPLETED",
+          "version": 0
+        },
+        "steps": [
+          {
+            "stepId": "STEP-003-01",
+            "taskId": "TASK-003",
+            "stepName": "DOM 生产处理",
+            "sequenceNumber": 1,
+            "status": "COMPLETED"
+          }
+        ],
+        "qualityIssues": [
+          {
+            "issue": {
+              "issueId": "ISSUE-001",
+              "taskId": "TASK-003",
+              "issueType": "COORDINATE_SYSTEM",
+              "status": "OPEN",
+              "description": "成果坐标系与生产规范要求不一致，问题尚未处理。"
+            },
+            "reviews": [
+              {
+                "reviewId": "REVIEW-003",
+                "issueId": "ISSUE-001",
+                "status": "PENDING",
+                "reviewComment": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "deliveryRecords": [
+      {
+        "deliveryId": "DELIVERY-003",
+        "orderId": "ORDER-003",
+        "status": "BLOCKED"
+      }
+    ]
+  },
+  "trace_id": "trace-<uuid>",
+  "retryable": false
 }
 ```
 
@@ -102,9 +116,8 @@ JSON 中状态字段必须使用下列大写字符串，不接受数字序号、
 聚合端点保留给页面展示、排障和契约核对。M1 的 Agent Tool 仍应优先映射多个细粒度
 端点，让调用路径、证据来源和失败步骤可观测，而不是只暴露一个“大而全” Tool。
 
-M0.4 的错误契约只保证 HTTP 状态：未知父资源为 `404`，非法状态过滤为 `400`。错误
-响应体、业务错误码和 Trace ID 尚未稳定，调用方不得依赖 Spring 默认错误 JSON；
-这些能力将在 M0.6 统一。
+M0.6 后调用方必须先校验统一信封，再校验 `data` 中的具体 DTO；不能继续把根节点直接
+当作订单、任务或问题对象。
 
 ## 3. M0.5 写入端点
 
@@ -134,19 +147,26 @@ Idempotency-Key: 调用方为一次业务动作生成的稳定唯一值
 
 ```json
 {
-  "review": {
-    "reviewId": "REVIEW-WRITE-<uuid>",
-    "issueId": "ISSUE-001",
-    "status": "REWORK_REQUIRED",
-    "reviewComment": "需要完成坐标系返工。"
+  "success": true,
+  "code": "SUCCESS",
+  "message": "success",
+  "data": {
+    "review": {
+      "reviewId": "REVIEW-WRITE-<uuid>",
+      "issueId": "ISSUE-001",
+      "status": "REWORK_REQUIRED",
+      "reviewComment": "需要完成坐标系返工。"
+    },
+    "taskVersion": 1
   },
-  "taskVersion": 1
+  "trace_id": "trace-<uuid>",
+  "retryable": false
 }
 ```
 
 写入约束：
 
-- 只有 `REVIEWER` 角色可调用；缺失/非法身份上下文分别返回 `400`/`403`。
+- 只有 `REVIEWER` 角色可调用；缺失用户身份返回 `401`，身份存在但角色不足返回 `403`。
 - 生产任务必须为 `COMPLETED`，问题必须属于路径中的任务；不存在的资源返回 `404`，
   状态或归属冲突返回 `409`。
 - `PENDING` 不能作为新复核结论，`CLOSED` 问题不能重复复核；只有 `RESOLVED` 问题
@@ -161,10 +181,48 @@ Idempotency-Key: 调用方为一次业务动作生成的稳定唯一值
   前后状态；重放幂等请求不重复生成日志。
 
 当前 `X-User-Id`/`X-User-Role` 是 M0.5 的最小身份上下文，不等同于真实认证令牌。
-Agent Approval、Python 写 Tool 和确认用户校验尚未实现。M0.6 前只稳定 HTTP 状态码，
-调用方仍不得依赖 Spring 默认错误体。
+Agent Approval、Python 写 Tool 和确认用户校验尚未实现。
 
-## 4. 状态枚举
+## 4. M0.6 统一响应、错误与 Trace ID
+
+成功和失败都固定为：
+
+```json
+{
+  "success": false,
+  "code": "BUSINESS_CONFLICT",
+  "message": "task version conflict: expected 0 but was 1",
+  "data": null,
+  "trace_id": "trace-<uuid>",
+  "retryable": false
+}
+```
+
+| HTTP | `code` | 典型来源 | `retryable` |
+| --- | --- | --- | --- |
+| `200` | `SUCCESS` | 查询或写入成功 | `false` |
+| `400` | `PARAM_VALIDATION_ERROR` | Bean Validation、非法枚举、畸形 JSON、缺少业务参数 | `false` |
+| `401` | `PERMISSION_DENIED` | 缺少已认证用户身份 | `false` |
+| `403` | `PERMISSION_DENIED` | 用户存在但角色不足 | `false` |
+| `404` | `RESOURCE_NOT_FOUND` | 订单、任务或问题不存在 | `false` |
+| `409` | `BUSINESS_CONFLICT` | 状态、版本、幂等或重复创建冲突 | `false` |
+| `500` | `INTERNAL_SERVER_ERROR` | 未预期系统异常 | `false` |
+
+401 和 403 复用后续 Python Tool 已规划的 `PERMISSION_DENIED`，由 HTTP 状态区分认证缺失
+和授权不足。通用 500 不回传内部异常详情，也不默认标记可重试：尤其写请求发生 500 时
+结果可能未知，后续 Tool 不得绕过幂等和版本策略自动重试。
+
+Trace ID 规则：
+
+- 调用方可通过 `X-Trace-Id` 透传由字母、数字、点、下划线、冒号或短横线组成的 1～128
+  位标识。
+- Header 缺失或不符合安全格式时，Java 生成 `trace-<uuid>`，避免超长值或换行等内容
+  污染日志。
+- 响应 Header `X-Trace-Id` 和响应体 `trace_id` 始终一致；服务日志 MDC 同步保存该值。
+- 本统一信封适用于 `/api` 业务接口；Actuator `/health` 保持探针原始结构，但仍返回
+  `X-Trace-Id` Header。
+
+## 5. 状态枚举
 
 ### OrderStatus
 
@@ -220,7 +278,7 @@ Agent Approval、Python 写 Tool 和确认用户校验尚未实现。M0.6 前只
 | `FAILED` | 交付失败 |
 | `BLOCKED` | 被质量、复核或其他业务条件阻塞 |
 
-## 5. 固定业务断言
+## 6. 固定业务断言
 
 `ORDER-003` 的关键契约不得由模型推测或改写：
 
@@ -236,7 +294,7 @@ delivery_status = BLOCKED
 复用本文件中的枚举值，不为前端或 Python 创建另一套状态字符串。五组固定数据的
 完整 ID 映射见 [`DEMO_DATA.md`](DEMO_DATA.md)。
 
-## 6. 演进规则
+## 7. 演进规则
 
 状态契约变化必须：
 

@@ -26,9 +26,9 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         ResponseEntity<JsonNode> missing = get("/api/orders/ORDER-404");
 
         assertThat(found.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(found.getBody().path("orderId").asText()).isEqualTo("ORDER-003");
-        assertThat(found.getBody().path("productType").asText()).isEqualTo("DOM");
-        assertThat(found.getBody().path("status").asText()).isEqualTo("QUALITY_CHECKING");
+        assertThat(data(found).path("orderId").asText()).isEqualTo("ORDER-003");
+        assertThat(data(found).path("productType").asText()).isEqualTo("DOM");
+        assertThat(data(found).path("status").asText()).isEqualTo("QUALITY_CHECKING");
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
@@ -46,13 +46,13 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         ResponseEntity<JsonNode> missing = get("/api/orders/ORDER-404/tasks");
 
         assertThat(populated.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(populated.getBody().path("orderId").asText()).isEqualTo("ORDER-003");
-        assertThat(populated.getBody().path("tasks")).hasSize(1);
-        assertThat(populated.getBody().path("tasks").get(0).path("taskId").asText())
+        assertThat(data(populated).path("orderId").asText()).isEqualTo("ORDER-003");
+        assertThat(data(populated).path("tasks")).hasSize(1);
+        assertThat(data(populated).path("tasks").get(0).path("taskId").asText())
                 .isEqualTo("TASK-003");
         assertThat(empty.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(empty.getBody().path("tasks").isArray()).isTrue();
-        assertThat(empty.getBody().path("tasks")).isEmpty();
+        assertThat(data(empty).path("tasks").isArray()).isTrue();
+        assertThat(data(empty).path("tasks")).isEmpty();
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
@@ -62,10 +62,10 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         ResponseEntity<JsonNode> missing = get("/api/tasks/TASK-404");
 
         assertThat(found.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(found.getBody().path("taskId").asText()).isEqualTo("TASK-003");
-        assertThat(found.getBody().path("orderId").asText()).isEqualTo("ORDER-003");
-        assertThat(found.getBody().path("status").asText()).isEqualTo("COMPLETED");
-        assertThat(found.getBody().path("version").asLong()).isZero();
+        assertThat(data(found).path("taskId").asText()).isEqualTo("TASK-003");
+        assertThat(data(found).path("orderId").asText()).isEqualTo("ORDER-003");
+        assertThat(data(found).path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(data(found).path("version").asLong()).isZero();
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
@@ -91,8 +91,8 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         ResponseEntity<JsonNode> response = get("/api/tasks/TASK-API-PROGRESS/progress");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody().path("taskId").asText()).isEqualTo("TASK-API-PROGRESS");
-        JsonNode steps = response.getBody().path("steps");
+        assertThat(data(response).path("taskId").asText()).isEqualTo("TASK-API-PROGRESS");
+        JsonNode steps = data(response).path("steps");
         assertThat(steps).hasSize(2);
         assertThat(steps.get(0).path("sequenceNumber").asInt()).isEqualTo(1);
         assertThat(steps.get(0).path("stepId").asText()).isEqualTo("STEP-API-01");
@@ -112,14 +112,14 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         ResponseEntity<JsonNode> closed = get("/api/tasks/TASK-003/quality-issues?status=CLOSED");
 
         assertThat(all.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(all.getBody().path("issues")).hasSize(1);
-        assertThat(open.getBody().path("issues")).hasSize(1);
-        assertThat(open.getBody().path("issues").get(0).path("issueId").asText())
+        assertThat(data(all).path("issues")).hasSize(1);
+        assertThat(data(open).path("issues")).hasSize(1);
+        assertThat(data(open).path("issues").get(0).path("issueId").asText())
                 .isEqualTo("ISSUE-001");
-        assertThat(open.getBody().path("issues").get(0).path("status").asText())
+        assertThat(data(open).path("issues").get(0).path("status").asText())
                 .isEqualTo("OPEN");
         assertThat(closed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(closed.getBody().path("issues")).isEmpty();
+        assertThat(data(closed).path("issues")).isEmpty();
     }
 
     @Test
@@ -136,13 +136,13 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         ResponseEntity<JsonNode> empty = get("/api/tasks/TASK-001/review");
 
         assertThat(pending.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(pending.getBody().path("reviews")).hasSize(1);
-        assertThat(pending.getBody().path("reviews").get(0).path("reviewId").asText())
+        assertThat(data(pending).path("reviews")).hasSize(1);
+        assertThat(data(pending).path("reviews").get(0).path("reviewId").asText())
                 .isEqualTo("REVIEW-003");
-        assertThat(pending.getBody().path("reviews").get(0).path("status").asText())
+        assertThat(data(pending).path("reviews").get(0).path("status").asText())
                 .isEqualTo("PENDING");
         assertThat(empty.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(empty.getBody().path("reviews")).isEmpty();
+        assertThat(data(empty).path("reviews")).isEmpty();
     }
 
     @Test
@@ -157,10 +157,10 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         ResponseEntity<JsonNode> ready = get("/api/orders/ORDER-005/delivery-status");
 
         assertThat(blocked.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(blocked.getBody().path("records")).hasSize(1);
-        assertThat(blocked.getBody().path("records").get(0).path("status").asText())
+        assertThat(data(blocked).path("records")).hasSize(1);
+        assertThat(data(blocked).path("records").get(0).path("status").asText())
                 .isEqualTo("BLOCKED");
-        assertThat(ready.getBody().path("records").get(0).path("status").asText())
+        assertThat(data(ready).path("records").get(0).path("status").asText())
                 .isEqualTo("READY");
     }
 
@@ -175,7 +175,7 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
         ResponseEntity<JsonNode> response = get("/api/orders/ORDER-003/overview");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        JsonNode overview = response.getBody();
+        JsonNode overview = data(response);
         assertThat(overview.path("order").path("orderId").asText()).isEqualTo("ORDER-003");
         assertThat(overview.path("tasks")).hasSize(1);
         JsonNode task = overview.path("tasks").get(0);
@@ -199,5 +199,9 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
 
     private ResponseEntity<JsonNode> get(String path) {
         return restTemplate.getForEntity("http://127.0.0.1:" + port + path, JsonNode.class);
+    }
+
+    private JsonNode data(ResponseEntity<JsonNode> response) {
+        return response.getBody().path("data");
     }
 }

@@ -56,11 +56,11 @@ class BusinessWriteApiIntegrationTest extends PostgresIntegrationTestSupport {
                         reviewBody("ISSUE-001", "REWORK_REQUIRED", "需要完成坐标系返工。", 0));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody().path("review").path("issueId").asText())
+        assertThat(data(response).path("review").path("issueId").asText())
                 .isEqualTo("ISSUE-001");
-        assertThat(response.getBody().path("review").path("status").asText())
+        assertThat(data(response).path("review").path("status").asText())
                 .isEqualTo("REWORK_REQUIRED");
-        assertThat(response.getBody().path("taskVersion").asLong()).isEqualTo(1);
+        assertThat(data(response).path("taskVersion").asLong()).isEqualTo(1);
         assertThat(count("review_records", "review_id LIKE 'REVIEW-WRITE-%'"))
                 .isEqualTo(1);
         assertThat(count("operation_logs", "operation_type = 'SUBMIT_REVIEW'"))
@@ -143,7 +143,7 @@ class BusinessWriteApiIntegrationTest extends PostgresIntegrationTestSupport {
 
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(second.getBody()).isEqualTo(first.getBody());
+        assertThat(data(second)).isEqualTo(data(first));
         assertThat(count("review_records", "review_id LIKE 'REVIEW-WRITE-%'"))
                 .isEqualTo(1);
         assertThat(count("operation_logs", "operation_type = 'SUBMIT_REVIEW'"))
@@ -247,11 +247,11 @@ class BusinessWriteApiIntegrationTest extends PostgresIntegrationTestSupport {
                         reworkBody("ISSUE-001", "修正坐标系统。", 0));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody().path("reworkTask").path("sourceIssueId").asText())
+        assertThat(data(response).path("reworkTask").path("sourceIssueId").asText())
                 .isEqualTo("ISSUE-001");
-        assertThat(response.getBody().path("reworkTask").path("status").asText())
+        assertThat(data(response).path("reworkTask").path("status").asText())
                 .isEqualTo("PENDING");
-        assertThat(response.getBody().path("taskVersion").asLong()).isEqualTo(1);
+        assertThat(data(response).path("taskVersion").asLong()).isEqualTo(1);
         assertThat(count("rework_tasks", "rework_task_id LIKE 'REWORK-WRITE-%'"))
                 .isEqualTo(1);
         assertThat(count("operation_logs", "operation_type = 'CREATE_REWORK'"))
@@ -276,7 +276,7 @@ class BusinessWriteApiIntegrationTest extends PostgresIntegrationTestSupport {
                         reworkBody("ISSUE-001", "再次创建同一返工。", 1));
 
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(replay.getBody()).isEqualTo(first.getBody());
+        assertThat(data(replay)).isEqualTo(data(first));
         assertThat(duplicate.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(count("rework_tasks", "rework_task_id LIKE 'REWORK-WRITE-%'"))
                 .isEqualTo(1);
@@ -380,6 +380,10 @@ class BusinessWriteApiIntegrationTest extends PostgresIntegrationTestSupport {
 
     private String singleText(String sql) {
         return jdbcTemplate.queryForObject(sql, String.class);
+    }
+
+    private JsonNode data(ResponseEntity<JsonNode> response) {
+        return response.getBody().path("data");
     }
 
     private void assertNoWriteSideEffects() {

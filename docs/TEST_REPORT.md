@@ -180,3 +180,37 @@
   - `X-User-Id`/`X-User-Role` 尚未连接真实认证来源，不能作为生产级鉴权方案
   - 幂等记录尚无 TTL/归档清理策略；当前适合固定演示规模
   - Mockito 在 JDK 21 输出动态 Java Agent 的未来兼容警告，当前结果不受影响
+
+## M0.6 Java 统一异常
+
+- 验证时间：2026-07-31
+- 运行环境：OpenJDK 21.0.12、Maven 3.9.16、Docker Desktop 29.6.2、PostgreSQL 16
+- 测试先行基线：`mvn --file business-service/pom.xml -Dtest=ApiExceptionHandlingIntegrationTest,BusinessQueryApiIntegrationTest,BusinessWriteApiIntegrationTest test` 共 31 个用例，16 个失败、15 个通过；失败证明成功信封、统一错误体、Trace ID 及缺失身份的 401 语义尚未实现
+- 实现后定向回归：同一命令扩充为 33 个用例，33/33 通过
+  - M0.6 统一响应、错误与 Trace ID：8/8
+  - M0.4 查询契约：13/13
+  - M0.5 写入契约：12/12
+- `mvn --file business-service/pom.xml clean test`：通过，48/48，失败 0、错误 0、跳过 0
+- `make test`：通过
+  - 基础文件和 Docker Compose 配置检查：通过
+  - Agent、Business、Web 三服务冒烟：通过
+  - M0.2 领域测试：7/7
+  - M0.3 数据测试：7/7
+  - M0.4 查询契约：13/13
+  - M0.5 写入契约：12/12
+  - M0.6 异常契约：8/8
+- M0.6 契约覆盖：
+  - 成功响应包装，以及来访 Trace ID 的 Header/响应体一致透传
+  - 非法枚举、Bean Validation 和畸形 JSON 映射为 `400/PARAM_VALIDATION_ERROR`
+  - 缺少用户身份映射为 `401/PERMISSION_DENIED`，角色不足映射为 `403/PERMISSION_DENIED`
+  - 未知业务资源映射为 `404/RESOURCE_NOT_FOUND`
+  - 版本冲突映射为 `409/BUSINESS_CONFLICT`
+  - 未预期异常映射为 `500/INTERNAL_SERVER_ERROR`，不泄露内部异常详情且不建议自动重试
+  - 缺失或非法 Trace ID 自动替换为安全的 `trace-<uuid>`
+- 开发中发现并修复：API 契约文档的总览 JSON 示例存在尾逗号，已移除，不影响运行时代码
+- 最终失败：0
+- 未运行：M0.7 延迟/500/畸形响应故障模拟、Python Tool、Approval 和 Agent E2E；对应运行时代码尚未实现
+- 已知非阻塞问题：
+  - 500 用例会在测试日志中输出预期堆栈，用于验证服务端保留诊断证据；客户端响应不包含敏感详情
+  - `X-User-Id`/`X-User-Role` 尚未连接真实认证来源，401/403 只验证 Java 接口语义，不等同生产级认证授权
+  - Mockito 在 JDK 21 输出动态 Java Agent 的未来兼容警告，当前结果不受影响

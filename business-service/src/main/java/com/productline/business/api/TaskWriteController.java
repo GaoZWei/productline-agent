@@ -27,9 +27,9 @@ public class TaskWriteController {
     @PostMapping("/{taskId}/review")
     public ReviewWriteResponse submitReview(
             @PathVariable String taskId,
-            @RequestHeader("X-User-Id") String userId,
-            @RequestHeader("X-User-Role") String userRole,
-            @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
+            @RequestHeader(value = "X-User-Role", required = false) String userRole,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ReviewSubmissionRequest request) {
         return writeService.submitReview(
                 taskId, userId, userRole, idempotencyKey, request);
@@ -39,9 +39,9 @@ public class TaskWriteController {
     @PostMapping("/{taskId}/rework")
     public ReworkWriteResponse createRework(
             @PathVariable String taskId,
-            @RequestHeader("X-User-Id") String userId,
-            @RequestHeader("X-User-Role") String userRole,
-            @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
+            @RequestHeader(value = "X-User-Role", required = false) String userRole,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ReworkCreationRequest request) {
         return writeService.createRework(
                 taskId, userId, userRole, idempotencyKey, request);

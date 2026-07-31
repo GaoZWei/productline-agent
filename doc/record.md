@@ -656,3 +656,95 @@
   - 有价值，已更新 `doc/needCare.md`。本次真实实现并测试了 Agent 写回所需的 Java 权威校验、请求幂等、乐观并发和同事务审计，并记录了 JPA 提交阶段版本冲突为何改为条件更新的工程取舍。
 - 下一建议任务：
   - `[T038] 定义统一 ApiResponse<T> 响应结构`
+
+## 2026-07-31 22:11 — `[T038-T044] M0.6 Java 统一异常`
+
+- 里程碑：M0 业务数据与 Java 接口
+- 任务类型：功能 / 接口 / 测试 / 文档 / 配置
+- 目标与范围：
+  - 本次实现：为全部 `/api` 业务端点增加统一成功/失败信封，完成参数、未认证、无权限、资源不存在、业务冲突和系统异常的 400/401/403/404/409/500 映射，并增加 Trace ID 入口过滤与响应透传。
+  - 明确不实现：不实现 M0.7 故障模拟、真实 JWT/网关认证、Python HTTP Client/Tool、跨服务重试、Agent Run/Step、Approval 或 SSE。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：统一包装不改变 `ORDER-003 → TASK-003(COMPLETED) → ISSUE-001(OPEN) → REVIEW-003(PENDING) → DELIVERY-003(BLOCKED)` 事实，只把原 DTO 移入 `data`。
+  - 方案选择及原因：使用 `ResponseBodyAdvice` 集中包装成功结果，使用 `@RestControllerAdvice` 集中映射异常，避免 10 个既有 Controller 方法重复构造信封；用最高优先级 `OncePerRequestFilter` 在 Controller 前建立 Trace ID。
+  - 契约、状态或兼容性影响：成功响应从根 DTO 变为 `ApiResponse<DTO>`，现有 Java 查询/写契约测试已同步改为读取 `data`。调用方必须先校验 `success/code/retryable`，再解析 `data`；错误分支不得匹配 `message` 文案。
+  - 错误分类：400=`PARAM_VALIDATION_ERROR`，401/403=`PERMISSION_DENIED`，404=`RESOURCE_NOT_FOUND`，409=`BUSINESS_CONFLICT`，500=`INTERNAL_SERVER_ERROR`；HTTP 状态保留 401/403 的认证与授权差异。
+  - 重试决策：通用 500 最终设为 `retryable=false`。写请求出现 500 时执行结果可能未知，不能诱导 Tool 使用新幂等键重复写；M0.7/M1 以后只对明确、安全的只读暂态异常增加白名单重试。
+- 核心实现：
+  - `business-service/src/main/java/com/productline/business/api/response/ApiResponse.java` — `ApiResponse<T>`（第 6 行）固定 `success/code/message/data/trace_id/retryable` 六字段，成功工厂在第 20 行，失败工厂在第 30 行并禁止失败响应使用 `SUCCESS`。
+  - `business-service/src/main/java/com/productline/business/api/response/ApiResponseCode.java` — `ApiResponseCode`（第 3 行）定义可被后续 Tool Schema 枚举校验的稳定代码。
+  - `business-service/src/main/java/com/productline/business/api/response/ApiSuccessResponseAdvice.java` — `ApiSuccessResponseAdvice`（第 15 行）只作用于业务 API Controller 包，第 26 行统一包装返回体，第 33 行跳过已包装的错误响应以避免二次信封。
+  - `business-service/src/main/java/com/productline/business/api/error/GlobalApiExceptionHandler.java` — `GlobalApiExceptionHandler`（第 23 行）完成异常到状态/错误码的集中映射；401/403 分别从第 117、129 行开始，404/409 从第 141、153 行开始；第 165 行隐藏未知异常详情并按 Trace ID 记录服务端堆栈。
+  - `business-service/src/main/java/com/productline/business/api/error/AuthenticationRequiredException.java` — `AuthenticationRequiredException`（第 3 行）将缺失身份与角色不足分离，使二者分别返回 401 和 403。
+  - `business-service/src/main/java/com/productline/business/api/trace/TraceIdFilter.java` — `TraceIdFilter`（第 16 行）在第 30～37 行完成安全透传/生成、请求属性、响应 Header、MDC 写入与清理；第 22 行限制允许字符和 128 位长度。
+  - `business-service/src/main/java/com/productline/business/application/BusinessWriteService.java` — `validateActor`（第 276 行）将缺失用户映射为未认证，将非法长度保留为参数错误，将非 `REVIEWER` 映射为无权限。
+  - `business-service/src/test/java/com/productline/business/api/ApiExceptionHandlingIntegrationTest.java` — 测试类（第 23 行）通过真实 HTTP/PostgreSQL 验证 8 组成功、400、401/403、404、409、500 和 Trace 边界；第 161 行的测试专用 500 验证响应不泄露内部详情。
+  - `Makefile` — `test-java-errors`（第 43 行）提供 M0.6 独立验收，并在第 18 行纳入根级 `make test`。
+  - 必要的最小关键流程：
+
+    ```text
+    HTTP 请求
+    → TraceIdFilter 校验/生成 trace_id，并写 Header + request attribute + MDC
+    → Controller / BusinessService
+    → 成功：ResponseBodyAdvice 包装 ApiResponse.success(data)
+    → 失败：GlobalApiExceptionHandler 映射 HTTP + code + retryable
+    → 响应 Header X-Trace-Id 与响应体 trace_id 一致
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：Filter 最先建立请求链路标识；Controller 继续返回原业务 DTO，成功 Advice 在序列化前将 DTO 放入 `data`；参数转换、Bean Validation、领域异常或未知异常进入全局 Handler，构造同一信封。Filter 在请求结束后清理 MDC，防止线程复用串号。
+  - 核心类、函数、接口或配置项：`ApiResponse.success/failure` 保证信封基本不变量；`handleTypeMismatch`、`handleUnreadableBody` 和 `handleMethodArgumentNotValid` 覆盖主要 400 来源；`handleUnexpectedException` 只回固定文案但保留带 Trace 的服务端堆栈；`resolveTraceId` 拒绝空格、换行、超长等不安全来访值。
+  - 输入、输出、异常和边界：Trace Header 允许以字母或数字开头，后续为字母、数字、点、下划线、冒号或短横线，总长 1～128；缺失/非法时生成 `trace-<uuid>`。统一信封只覆盖 `/api` 业务端点，Actuator `/health` 为兼容探针保持原结构，但响应 Header 仍含 Trace ID。
+  - 关键代码位置：`ApiResponse.java:6`、`ApiSuccessResponseAdvice.java:15`、`GlobalApiExceptionHandler.java:23`、`TraceIdFilter.java:16`、`ApiExceptionHandlingIntegrationTest.java:23`。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：已覆盖非法枚举、空字段、畸形 JSON、缺失身份、角色不足、资源不存在、版本冲突和未知异常。500 不回传原异常信息。当前 Java 服务没有上游 HTTP 调用，超时和畸形上游响应留到 M0.7/M1。
+  - 幂等、并发或人工确认：409 继续表达版本、状态和幂等冲突，`retryable=false` 防止调用方把业务冲突当网络错误盲重试。统一异常不改变 M0.5 事务、幂等和版本逻辑；人工确认仍未实现。
+- 未完成项与已知问题：
+  - 未完成项：M0.7 故障模拟、真实认证、Python 错误 Schema/Tool 分支、Run/Step Trace 关联、结构化日志平台和按异常类型区分的安全重试尚未实现。
+  - 已知问题/阻塞：无阻塞。测试专用 500 会按生产策略在测试日志打印预期堆栈；Mockito 动态 Java Agent 仍有未来 JDK 兼容警告。`ResponseBodyAdvice` 在运行时完成包装，未来若引入 OpenAPI 生成，需要显式补充参数化信封 Schema。
+- 替代方案：
+  - 采用的替代方案及原因：使用 `ResponseBodyAdvice` 兼容既有 Controller 返回类型，而未逐个把方法签名改成 `ApiResponse<DTO>`；当前身份仍使用 M0.5 Header，因为真实认证不在当前里程碑；通用 500 采用保守不可重试，而未对未知异常猜测可恢复性。
+  - 已覆盖/未覆盖的验收要求：覆盖 T038～T044 的信封、400/401/403/404/409/500 和 Trace ID，并覆盖成功与既有查询/写接口回归；不覆盖未定义路由的框架错误定制、JWT 身份真实性、故障注入、跨服务 Trace 或自动重试执行。
+  - 局限、风险和转正/移除条件：接入 Spring Security/网关后从可信 Principal 生成身份并移除可伪造角色 Header；引入 OpenAPI 时为信封增加明确组件 Schema；M0.7/M1 有真实故障类型和只读幂等证据后，才为特定错误设置 `retryable=true` 和有限退避。
+- 后续影响：
+  - 对后续任务/里程碑：M0.7 的故障响应必须继续遵守信封和 Trace 契约；M1 Python Client 必须先解析 `ApiResponse` 再解析 `data`，将 400/404/权限错误转为不可重试 Tool 错误，将 409 转为刷新事实/STALE 分支，而不是把所有非 200 当同一异常。
+  - 对接口/数据/测试/部署：无数据库迁移和固定数据变化。所有现有 `/api` 客户端都需适配新增信封，这是有意的契约变更；Actuator 探针无需适配。Java 测试已更新并证明 M0.4/M0.5 业务语义未回归。
+- 测试与验证：
+  - `[预期失败] mvn --file business-service/pom.xml -Dtest=ApiExceptionHandlingIntegrationTest,BusinessQueryApiIntegrationTest,BusinessWriteApiIntegrationTest test` — 初始 31 个测试中 16 个失败、15 个通过；失败集中在统一包装/错误体/Trace ID 缺失及缺失身份仍为 400。
+  - `[通过] 同一目标测试` — 首轮实现后 31/31 通过；补充畸形 JSON、Bean Validation 和非法 Trace 边界后，最终 33/33 通过。
+  - `[通过] mvn --file business-service/pom.xml -Dtest=ApiExceptionHandlingIntegrationTest test` — 8/8，失败 0、错误 0、跳过 0。
+  - `[通过] mvn --file business-service/pom.xml clean test` — 全量 48/48，失败 0、错误 0、跳过 0。
+  - `[通过] make test` — 基础/Compose 检查、三服务冒烟、M0.2 7/7、M0.3 7/7、M0.4 13/13、M0.5 12/12、M0.6 8/8 全部通过。
+  - 未运行项及原因：未运行 M0.7 故障模拟、Python Tool、Approval 和 Agent E2E，相关实现不在本次范围。
+- 变更文件：
+  - `business-service/src/main/java/com/productline/business/api/response/ApiResponse.java`
+  - `business-service/src/main/java/com/productline/business/api/response/ApiResponseCode.java`
+  - `business-service/src/main/java/com/productline/business/api/response/ApiSuccessResponseAdvice.java`
+  - `business-service/src/main/java/com/productline/business/api/error/AuthenticationRequiredException.java`
+  - `business-service/src/main/java/com/productline/business/api/error/GlobalApiExceptionHandler.java`
+  - `business-service/src/main/java/com/productline/business/api/error/BusinessConflictException.java`
+  - `business-service/src/main/java/com/productline/business/api/error/InvalidRequestException.java`
+  - `business-service/src/main/java/com/productline/business/api/error/PermissionDeniedException.java`
+  - `business-service/src/main/java/com/productline/business/api/error/ResourceNotFoundException.java`
+  - `business-service/src/main/java/com/productline/business/api/trace/TraceIdFilter.java`
+  - `business-service/src/main/java/com/productline/business/api/TaskWriteController.java`
+  - `business-service/src/main/java/com/productline/business/application/BusinessWriteService.java`
+  - `business-service/src/test/java/com/productline/business/api/ApiExceptionHandlingIntegrationTest.java`
+  - `business-service/src/test/java/com/productline/business/api/BusinessQueryApiIntegrationTest.java`
+  - `business-service/src/test/java/com/productline/business/api/BusinessWriteApiIntegrationTest.java`
+  - `business-service/README.md`
+  - `Makefile`
+  - `docs/API_CONTRACT.md`
+  - `docs/DOMAIN_MODEL.md`
+  - `docs/ROADMAP.md`
+  - `docs/STATUS.md`
+  - `docs/TEST_REPORT.md`
+  - `doc/needCare.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；身份 Header、跨服务 Trace 未完成、OpenAPI 参数化信封待补和通用 500 保守不可重试是已知边界。
+  - 后续兼容注意事项：Python/前端必须读取 `data`；写请求的 500 和 409 都不得用新幂等键盲重试；后续新增业务端点需返回可由 Jackson 包装的 DTO，或直接返回 `ApiResponse` 避免二次包装。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次稳定了 Tool 可机器判定的错误控制流、写操作保守重试边界和 Trace ID 安全透传，直接影响后续 Workflow 分支、Tool Schema 与结果可观测性。
+- 下一建议任务：
+  - `[T045] 增加延迟模拟参数`

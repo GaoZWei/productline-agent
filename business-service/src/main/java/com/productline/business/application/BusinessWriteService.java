@@ -6,6 +6,7 @@ import com.productline.business.api.dto.ReviewSubmissionRequest;
 import com.productline.business.api.dto.ReviewWriteResponse;
 import com.productline.business.api.dto.ReworkCreationRequest;
 import com.productline.business.api.dto.ReworkWriteResponse;
+import com.productline.business.api.error.AuthenticationRequiredException;
 import com.productline.business.api.error.BusinessConflictException;
 import com.productline.business.api.error.InvalidRequestException;
 import com.productline.business.api.error.PermissionDeniedException;
@@ -272,9 +273,13 @@ public class BusinessWriteService {
                 return new ReworkWriteResponse(toDto(rework), record.getTaskVersionAfter());
         }
 
+        // 校验用户角色
         private void validateActor(String userId, String userRole) {
-                if (userId == null || userId.isBlank() || userId.length() > 128) {
-                        throw new InvalidRequestException("X-User-Id must contain 1 to 128 characters");
+                if (userId == null || userId.isBlank()) {
+                        throw new AuthenticationRequiredException("authenticated user is required");
+                }
+                if (userId.length() > 128) {
+                        throw new InvalidRequestException("X-User-Id must not exceed 128 characters");
                 }
                 if (!REVIEWER_ROLE.equals(userRole)) {
                         throw new PermissionDeniedException("REVIEWER role is required");
