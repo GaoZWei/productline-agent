@@ -2,7 +2,7 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M0.3 固定业务数据**：Java 服务已包含订单、生产、质检、复核和交付领域模型，并通过 Flyway 固定初始化 `ORDER-001`～`ORDER-005` 五组场景。Java 业务 API 将在后续 M0.4 实现，当前不能通过 HTTP 查询这些数据。
+当前进度为 **M0.4 Java 查询接口**：Java 服务已包含订单、生产、质检、复核和交付领域模型，通过 Flyway 固定初始化 `ORDER-001`～`ORDER-005` 五组场景，并提供 8 个只读 HTTP 查询接口。`ORDER-003` 的完整黄金链路可从 `/api/orders/ORDER-003/overview` 查询。
 
 ## 环境要求
 
@@ -48,12 +48,13 @@ make dev-web          # 只启动 Web 服务及其依赖
 make test             # 运行基础检查、服务冒烟和 Java 领域集成测试
 make test-business-domain # 单独运行 Java 领域模型测试
 make test-business-data   # 单独验证固定数据和业务状态组合
+make test-java-contract   # 单独验证 8 个 Java 只读查询接口
 make reset-demo       # 删除本地数据卷并重建 PostgreSQL、Java 和固定数据
 make logs             # 跟踪服务日志
 make ps               # 查看服务状态
 ```
 
-`make reset-demo` 会删除本项目 Docker Compose 管理的本地数据库卷，仅用于重置演示数据；成功后输出订单数和确定性数据快照。固定 ID、状态与后续 Tool 对接注意事项见 [`docs/DEMO_DATA.md`](docs/DEMO_DATA.md)。
+`make reset-demo` 会删除本项目 Docker Compose 管理的本地数据库卷，仅用于重置演示数据；成功后输出订单数和确定性数据快照。固定 ID、状态与后续 Tool 对接注意事项见 [`docs/DEMO_DATA.md`](docs/DEMO_DATA.md)，查询路径和响应结构见 [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md)。
 
 ## 项目结构
 

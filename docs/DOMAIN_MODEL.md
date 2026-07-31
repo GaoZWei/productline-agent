@@ -3,8 +3,8 @@
 ## 1. 目标与边界
 
 M0.2 为 Java `business-service` 建立订单生产链路的持久化模型，使业务事实能够由
-Spring Data JPA 通过 PostgreSQL 查询。当前阶段只定义实体、DTO、状态枚举、数据库
-约束和 Repository，不提供订单业务 HTTP 接口，也不写入 M0.3 的固定演示数据。
+Spring Data JPA 通过 PostgreSQL 查询。M0.3 已补充固定演示数据，M0.4 已在模型之上
+增加只读 HTTP 查询边界；写接口、统一错误响应和 Trace ID 仍不属于当前实现。
 
 业务聚合以 `Order` 为根，关系如下：
 
@@ -88,7 +88,7 @@ DTO、接口文档及跨服务契约测试。
 
 ## 6. ORDER-003 黄金链路
 
-M0.2 Repository 集成测试在独立 PostgreSQL 容器中临时创建并查询：
+固定数据和 Repository 集成测试共同维护以下链路：
 
 ```text
 ORDER-003 (QUALITY_CHECKING)
@@ -98,5 +98,25 @@ ORDER-003 (QUALITY_CHECKING)
 → DELIVERY-003 (BLOCKED)
 ```
 
-测试事务结束后数据回滚，因此不会冒充 M0.3 固定数据。M0.3 必须通过独立、可重置的
-种子迁移或初始化机制真正创建 `ORDER-001`～`ORDER-005`。
+Flyway V2 负责真正创建可重置的 `ORDER-001`～`ORDER-005`；M0.4 HTTP 契约测试从
+真实启动的 Spring 服务查询同一组事实。
+
+## 7. M0.4 查询边界
+
+查询调用链固定为：
+
+```text
+OrderQueryController / TaskQueryController
+→ BusinessQueryService（只读事务）
+→ 领域 Repository（按业务 ID、状态和业务顺序查询）
+→ Entity 映射为 DTO / 响应 Schema
+→ JSON
+```
+
+HTTP 层不直接序列化 JPA Entity。这样可以避免懒加载关系、循环引用和数据库内部结构
+泄漏到后续 Python Tool 契约。关联集合始终返回数组：父资源存在但没有任务、问题或
+复核记录时返回 `200` 与空数组；父资源本身不存在时返回 `404`。
+
+步骤按 `sequenceNumber` 排序，其他集合按稳定业务 ID 排序。确定性顺序不会改变业务
+事实，但能降低 Tool Schema 消费、快照比较和 Agent 回归评测中的无意义波动。完整
+路径与响应示例见 `docs/API_CONTRACT.md`。

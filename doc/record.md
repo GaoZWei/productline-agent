@@ -474,3 +474,84 @@
   - 本次治理任务本身不构成新的 Agent 技术亮点，因此未在 `needCare.md` 新增 DOC-003 条目；文件中只回填既有 M0.1～M0.3 的有效内容。
 - 下一建议任务：
   - `[T025] 实现 GET /api/orders/{id} 订单详情查询及 404 契约`
+
+---
+
+## 2026-07-30 21:34 — `[T025-T032] M0.4 Java 查询接口`
+
+- 里程碑：M0 业务数据与 Java 接口
+- 任务类型：功能 / 接口 / 测试 / 文档 / 配置
+- 目标与范围：
+  - 本次实现：实现订单详情、关联任务、任务详情、生产进度、质检问题、复核记录、交付状态和订单总览 8 个只读 HTTP 端点，使 `ORDER-003` 固定事实可通过 Java API 完整查询。
+  - 明确不实现：不实现 M0.5 写接口、权限认证、幂等/版本控制、M0.6 统一响应与 Trace ID、故障模拟、Python HTTP Client 或 Tool。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：HTTP 总览必须保持 `ORDER-003 → TASK-003(COMPLETED) → ISSUE-001(COORDINATE_SYSTEM, OPEN) → REVIEW-003(PENDING) → DELIVERY-003(BLOCKED)`，不得由 Controller 或模型补造事实。
+  - 方案选择及原因：使用 Controller → `BusinessQueryService` 只读事务 → Repository → DTO/响应 record 的分层；禁止直接序列化 JPA Entity。集合端点带父资源 ID，并稳定返回数组。
+  - 契约、状态或兼容性影响：父资源不存在返回 `404`，父资源存在但关联记录为空返回 `200 + []`；非法质检状态过滤返回 `400`；步骤按业务序号排序，其余集合按业务 ID 排序。M0.6 可能为当前成功响应增加统一包装，Python Client 应以届时最终契约为准。
+- 核心实现：
+  - `business-service/src/main/java/com/productline/business/api/OrderQueryController.java` — `OrderQueryController`（第 15 行）暴露订单详情、任务、交付状态和总览 4 个 GET 端点（第 24、29、34、39 行）。
+  - `business-service/src/main/java/com/productline/business/api/TaskQueryController.java` — `TaskQueryController`（第 17 行）暴露任务详情、进度、质检过滤和复核 4 个 GET 端点（第 26、31、36、43 行）。
+  - `business-service/src/main/java/com/productline/business/application/BusinessQueryService.java` — `BusinessQueryService`（第 39 行）在只读事务中校验父资源、执行有序查询并映射 DTO；总览聚合从第 119 行开始，任务内步骤/问题/复核组合从第 132 行开始。
+  - `business-service/src/main/java/com/productline/business/api/dto/OrderOverviewResponse.java` — `OrderOverviewResponse`（第 7 行）定义订单、任务总览和交付记录的嵌套 Schema；其余集合响应 record 使用 `List.copyOf` 固化返回集合。
+  - `business-service/src/main/java/com/productline/business/api/error/ResourceNotFoundException.java` — `ResourceNotFoundException`（第 7 行）提供 M0.4 阶段的 404 状态映射。
+  - `business-service/src/main/java/com/productline/business/domain/repository/ProductionStepRepository.java` — 有序步骤查询（第 9 行）；任务、问题、复核和交付 Repository 同步增加父 ID 查询及排序/过滤。
+  - `business-service/src/test/java/com/productline/business/api/BusinessQueryApiIntegrationTest.java` — `BusinessQueryApiIntegrationTest`（第 17 行）通过真实 Spring Web 与 Testcontainers PostgreSQL 验证 13 个正常、空结果、过滤、排序、404/400 和黄金链路场景。
+  - `Makefile` — `test-java-contract`（第 33 行）提供 M0.4 独立验收入口，并纳入根级 `make test`（第 18 行）。
+  - 必要的最小关键片段：
+
+    ```text
+    页面/Python Tool（后续）
+    → GET Java API
+    → Controller
+    → @Transactional(readOnly = true) BusinessQueryService
+    → 有序 Repository 查询
+    → DTO/响应 Schema
+    → 可追溯业务事实 JSON
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：HTTP 路径参数和可选 `QualityIssueStatus` 进入 Controller；服务先确认订单/任务存在，再从对应 Repository 查询；Entity 只在事务内使用并映射为 DTO；Jackson 序列化 record 返回 JSON。总览按订单加载任务，再为每个任务组合步骤、质检问题和按问题分组的复核，最后附加交付记录。
+  - 核心类、函数、接口或配置项：`getQualityIssues`（`BusinessQueryService.java:89`）根据可选枚举选择全量或状态过滤查询；`getOrderOverview`（第 119 行）与 `toOverview`（第 132 行）构造跨表结果；`requireOrder`（第 156 行）及对应任务方法区分 404 与空集合。
+  - 输入、输出、异常和边界：输入为稳定订单/任务 ID 和可选 `OPEN|PROCESSING|RESOLVED|CLOSED`；输出为 DTO 或含父 ID 的数组响应。不存在的父资源为 404，非法枚举由 Spring 参数转换映射 400；没有关联数据不是错误。当前无分页，适用于固定演示规模。
+  - 关键代码位置（文件路径 + 定义起始行号）：`OrderQueryController.java:15`、`TaskQueryController.java:17`、`BusinessQueryService.java:39`、`OrderOverviewResponse.java:7`、`ResourceNotFoundException.java:7`、`BusinessQueryApiIntegrationTest.java:17`。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：已覆盖非法状态 400 和未知资源 404；当前接口没有认证/授权，也没有统一业务错误码、错误体、Trace ID、超时或故障注入，这些不能被后续 Tool 当作已稳定能力。
+  - 幂等、并发或人工确认：全部为只读接口，不涉及写幂等、版本冲突或人工确认。Controller 不接受写请求。
+- 未完成项与已知问题：
+  - 未完成项：M0.5 写接口和 M0.6 统一异常均未实现；Python Tool 尚不能直接复用本次代码，仍需实现 HTTP Client 和 Pydantic 响应 Schema。
+  - 已知问题/阻塞：无当前阻塞。总览按任务执行步骤、问题和复核查询，固定数据下可控，但任务数量增长时可能增加 SQL 次数；当前缺少生产规模和耗时数据。Mockito 动态 Java Agent 有未来 JDK 兼容警告。
+- 替代方案：
+  - 采用的替代方案及原因：在 M0.6 前使用 `@ResponseStatus` 只保证 404 HTTP 状态，不提前复制统一错误模型；总览使用清晰的分组查询而非复杂多表 Join，避免笛卡尔积和重复去重逻辑；复核和交付返回记录数组，因为当前模型没有“唯一当前记录”约束或时间字段，不能安全猜测最新记录。
+  - 已覆盖/未覆盖的验收要求：已覆盖 T025～T032 正常路径、404、空数组、步骤排序、状态过滤、READY/BLOCKED 和跨表聚合；未覆盖统一错误 JSON、权限、分页、生产规模性能和 Python Tool 消费。
+  - 局限、风险和转正/移除条件：M0.6 实现后由 `ApiResponse<T>`、统一异常处理和 Trace ID 替换临时状态映射；出现真实多任务性能证据时，将总览内部改为批量查询/投影并保持外部 Schema；业务明确当前复核/交付唯一性后，再通过新迁移增加约束或时间/版本字段并评审是否收敛数组。
+- 后续影响：
+  - 对后续任务/里程碑：M0.5 可复用 `ResourceNotFoundException` 的状态语义但不能把它视为最终错误契约；M1 Python Client 应分别映射 8 个响应，Agent 第一版优先使用细粒度 Tool，聚合端点保留给页面和排障。
+  - 对接口/数据/测试/部署：未修改数据库迁移和固定数据；新增 HTTP 路径会随 Java 服务部署生效。后续若增加统一成功包装，必须同步 API 文档、Java 契约测试和 Python Schema。接口尚未鉴权，不应直接暴露到不受控网络。
+- 测试与验证：
+  - `[预期失败] mvn --file business-service/pom.xml -Dtest=BusinessQueryApiIntegrationTest test` — 13 个测试中 9 个失败、4 个通过；失败均为待实现端点返回 404。
+  - `[通过] mvn --file business-service/pom.xml -Dtest=BusinessQueryApiIntegrationTest test` — 实现后 13/13，失败 0、错误 0、跳过 0。
+  - `[通过] mvn --file business-service/pom.xml clean test` — 全量 28/28，失败 0、错误 0、跳过 0。
+  - `[通过] make test` — 基础检查、Compose 校验、三服务冒烟、M0.2 领域 7/7、M0.3 数据 7/7、M0.4 契约 13/13 全部通过。
+  - `[通过] git diff --check` — 无空白错误。
+  - 未运行项及原因：未运行 M0.5 写接口、权限、幂等、并发和人工确认测试，相关实现不在本次范围。
+- 变更文件：
+  - `business-service/src/main/java/com/productline/business/api/`
+  - `business-service/src/main/java/com/productline/business/application/BusinessQueryService.java`
+  - `business-service/src/main/java/com/productline/business/domain/repository/`
+  - `business-service/src/test/java/com/productline/business/api/BusinessQueryApiIntegrationTest.java`
+  - `Makefile`
+  - `README.md`
+  - `docs/API_CONTRACT.md`
+  - `docs/DOMAIN_MODEL.md`
+  - `docs/ROADMAP.md`
+  - `docs/STATUS.md`
+  - `docs/TEST_REPORT.md`
+  - `doc/needCare.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；未鉴权、临时错误体、总览查询次数和 Mockito 警告是已知非阻塞问题。
+  - 后续兼容注意事项：Python 端不得依赖 Spring 默认错误 JSON；必须区分 200 空数组与 404；不得将总览端点存在描述为动态 Tool 路由已完成。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次建立了 Agent Tool 的 Java 事实接口，明确空结果/404、确定性排序、细粒度 Tool 与聚合接口的取舍，并通过黄金链路契约测试提供可举证内容。
+- 下一建议任务：
+  - `[T033] 实现 POST /api/tasks/{id}/review 的请求、权限与状态冲突校验`
