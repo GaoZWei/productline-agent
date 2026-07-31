@@ -1,6 +1,6 @@
 # Business Service
 
-Java 21 + Spring Boot 3.5 + Spring Data JPA + Flyway 的遥感数据产线业务服务。当前已提供固定演示数据、只读查询接口、提交复核/创建返工写接口，以及 M0.6 统一响应和 Trace ID。
+Java 21 + Spring Boot 3.5 + Spring Data JPA + Flyway 的遥感数据产线业务服务。当前已提供固定演示数据、查询/写入接口、统一响应和 Trace ID，以及 M0.7 开发故障模拟。
 
 使用 Docker 启动：
 
@@ -63,4 +63,27 @@ make test-java-write
 
 ```bash
 make test-java-errors
+```
+
+## M0.7 开发故障模拟
+
+故障模拟默认关闭，Docker Compose 本地开发显式开启。它只作用于 `GET /api/**`，不会
+注入复核或返工写接口：
+
+| Header | 行为 |
+| --- | --- |
+| `X-Demo-Delay-Ms: 500` | 响应前延迟 500 毫秒，默认最大 2000 毫秒 |
+| `X-Demo-Fault: timeout` | 默认保持连接 5000 毫秒后继续正常查询，用于触发短超时客户端 |
+| `X-Demo-Fault: server-error` | 返回统一 `500/INTERNAL_SERVER_ERROR` |
+| `X-Demo-Fault: invalid-response` | 返回 HTTP 200，但故意缺少必需的 `data` 字段 |
+| `X-Demo-Fault: permission-denied` | 返回统一 `403/PERMISSION_DENIED` |
+
+裸机启动时需显式设置 `DEMO_FAULTS_ENABLED=true`；生产环境不得启用。延迟和超时上限可
+通过 `DEMO_FAULT_MAX_DELAY_MS`、`DEMO_FAULT_TIMEOUT_DELAY_MS` 调整，服务端硬上限均为
+60000 毫秒。
+
+独立验收：
+
+```bash
+make test-java-faults
 ```

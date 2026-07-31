@@ -4,7 +4,7 @@
 
 本文固定 Java API 向后续 Python Tool 和 Web Console 暴露的查询/写入路径、响应结构与
 状态字符串。M0.4 已实现 8 个只读端点，M0.5 已实现提交复核和创建返工两个写端点，
-M0.6 已为全部 `/api` 业务端点增加统一响应、错误码和 Trace ID。
+M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -222,7 +222,40 @@ Trace ID 规则：
 - 本统一信封适用于 `/api` 业务接口；Actuator `/health` 保持探针原始结构，但仍返回
   `X-Trace-Id` Header。
 
-## 5. 状态枚举
+## 5. M0.7 开发故障模拟
+
+故障模拟用于后续 Python HTTP Client 和 Tool 错误映射测试，不是业务能力。应用配置
+`demo.faults.enabled` 默认为 `false`；Docker Compose 本地开发通过
+`DEMO_FAULTS_ENABLED=true` 显式开启。
+
+只有同时满足“功能已开启、HTTP 方法为 GET、路径为 `/api/**`”时才读取模拟 Header。
+POST 等写请求始终忽略这些 Header，避免演练逻辑改变写入结果。
+
+| Header | Java 行为 | 后续 Tool 预期验证 |
+| --- | --- | --- |
+| `X-Demo-Delay-Ms: <0..max>` | 在 Controller 前延迟指定毫秒后正常响应 | 耗时记录、客户端总超时预算 |
+| `X-Demo-Fault: timeout` | 默认等待 5000 毫秒后继续正常响应 | `httpx.Timeout` → `TOOL_TIMEOUT` |
+| `X-Demo-Fault: server-error` | 经统一异常处理返回 `500/INTERNAL_SERVER_ERROR` | 上游异常映射且不泄露详情 |
+| `X-Demo-Fault: invalid-response` | 返回 HTTP 200 和可解析 JSON，但故意不包含 `data` | Pydantic → `RESPONSE_VALIDATION_ERROR` |
+| `X-Demo-Fault: permission-denied` | 返回 `403/PERMISSION_DENIED` | 权限错误不可重试 |
+
+未知 `X-Demo-Fault` 或非数字、负数、超过上限的延迟返回
+`400/PARAM_VALIDATION_ERROR`。`invalid-response` 仍返回与请求一致的 Trace ID，便于证明
+“HTTP 成功不等于 Tool Schema 合法”。延迟和故障 Header 同时存在时先执行普通延迟，再
+执行指定故障。
+
+环境配置：
+
+```text
+DEMO_FAULTS_ENABLED=false
+DEMO_FAULT_MAX_DELAY_MS=2000
+DEMO_FAULT_TIMEOUT_DELAY_MS=5000
+```
+
+两个延迟配置在 Java 启动时强制限制为不超过 60000 毫秒。该实现通过阻塞开发服务器线程
+模拟慢响应，不用于性能或容量测试，生产部署必须保持关闭。
+
+## 6. 状态枚举
 
 ### OrderStatus
 
@@ -278,7 +311,7 @@ Trace ID 规则：
 | `FAILED` | 交付失败 |
 | `BLOCKED` | 被质量、复核或其他业务条件阻塞 |
 
-## 6. 固定业务断言
+## 7. 固定业务断言
 
 `ORDER-003` 的关键契约不得由模型推测或改写：
 
@@ -294,7 +327,7 @@ delivery_status = BLOCKED
 复用本文件中的枚举值，不为前端或 Python 创建另一套状态字符串。五组固定数据的
 完整 ID 映射见 [`DEMO_DATA.md`](DEMO_DATA.md)。
 
-## 7. 演进规则
+## 8. 演进规则
 
 状态契约变化必须：
 

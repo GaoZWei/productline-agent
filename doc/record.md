@@ -748,3 +748,91 @@
   - 有价值，已更新 `doc/needCare.md`。本次稳定了 Tool 可机器判定的错误控制流、写操作保守重试边界和 Trace ID 安全透传，直接影响后续 Workflow 分支、Tool Schema 与结果可观测性。
 - 下一建议任务：
   - `[T045] 增加延迟模拟参数`
+
+## 2026-07-31 22:42 — `[T045-T049] M0.7 故障模拟`
+
+- 里程碑：M0 业务数据与 Java 接口
+- 任务类型：功能 / 接口测试夹具 / 配置 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：为 Java 只读业务 API 增加可配置、可重复的延迟、客户端超时、服务端 500、缺失字段响应和权限 403 模拟，供后续 Python Client/Tool 错误映射验收。
+  - 明确不实现：不实现 M0.8 前端、Python HTTP Client/Tool、httpx 重试、熔断/降级、生产混沌平台、网络分区、连接池故障或写接口故障注入。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：所有模拟都通过 `GET /api/orders/ORDER-003` 等既有只读端点触发；不修改固定数据，也不改变 `ORDER-003` 黄金事实。
+  - Header 契约：`X-Demo-Delay-Ms` 提供 T045 的可控普通延迟；`X-Demo-Fault` 支持计划中的 `timeout`、`server-error`、`invalid-response`，并为 T049 补充 `permission-denied`。
+  - 安全门禁：应用默认 `demo.faults.enabled=false`；Docker Compose 本地开发显式开启。仅 GET `/api/**` 读取模拟 Header，POST 写接口无条件忽略，防止测试设施改变业务写入或绕过幂等/版本门禁。
+  - 方案选择及原因：使用 Spring MVC `HandlerInterceptor`，使 Trace Filter 已先建立 Trace ID，同时模拟 500/403 仍可进入 M0.6 `@RestControllerAdvice`；`invalid-response` 刻意直接写响应并停止 Controller 链，生成 HTTP 200 但缺少 `data` 的协议漂移样本。
+  - 参数与资源保护：请求延迟受可配置上限约束，延迟和超时配置另有 60000ms 启动硬上限；非法数字、负数、越界值和未知故障类型统一返回 400。
+- 核心实现：
+  - `business-service/src/main/java/com/productline/business/api/fault/DemoFaultInterceptor.java` — `DemoFaultInterceptor`（第 19 行）在 `preHandle`（第 40 行）先执行可选延迟，再分派 4 类故障；`shouldSimulate`（第 66 行）强制开关、GET 和 `/api/` 三重条件；`writeInvalidResponse`（第 94 行）故意省略 `data`；`sleep`（第 110 行）恢复中断标记。
+  - `business-service/src/main/java/com/productline/business/api/fault/DemoFaultProperties.java` — `DemoFaultProperties`（第 5 行）绑定开关和两个延迟值，并在第 11 行拒绝超过 60 秒的启动配置。
+  - `business-service/src/main/java/com/productline/business/api/fault/DemoFaultWebConfiguration.java` — 配置类（第 8 行）注册属性和 `/api/**` 拦截器（第 18 行）。
+  - `business-service/src/main/resources/application.yml` — `demo.faults`（第 22 行）默认关闭，普通延迟默认最大 2000ms，超时模拟默认 5000ms。
+  - `docker-compose.yml` / `.env.example` — 本地 Compose 显式启用并暴露三个非敏感配置项；裸机启动仍需主动设置环境变量。
+  - `business-service/src/test/java/com/productline/business/api/DemoFaultSimulationIntegrationTest.java` — 测试类（第 26 行）启用 300ms 测试配置；真实延迟第 41 行，Java Client 超时第 56 行，500/缺字段/403 第 75、88、102 行，参数拒绝第 114 行，写接口隔离第 128 行。
+  - `business-service/src/test/java/com/productline/business/api/DemoFaultDisabledIntegrationTest.java` — 第 18 行用独立 Spring 上下文证明功能关闭时所有模拟 Header 均被忽略。
+  - `Makefile` — `test-java-faults`（第 48 行）提供独立验收，并在第 18 行进入根级 `make test`。
+  - 关键流程：
+
+    ```text
+    GET /api/** + 模拟 Header
+    → TraceIdFilter 建立 trace_id
+    → DemoFaultInterceptor 检查 enabled / GET / path
+    → 可选 X-Demo-Delay-Ms
+    ├─ timeout：等待后继续正常 Controller
+    ├─ server-error：抛异常 → 统一 500
+    ├─ permission-denied：抛权限异常 → 统一 403
+    └─ invalid-response：直接返回缺少 data 的 200 JSON
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：普通延迟只增加请求耗时，之后仍查询真实固定数据；timeout 以更长服务端等待让短超时客户端主动失败，等待结束后服务端仍完成只读请求；500/403 复用统一错误码和 Trace；缺字段响应用于验证客户端 Schema，而不是验证 JSON 解析器。
+  - 输入、输出、异常和边界：`X-Demo-Delay-Ms` 允许 0 到配置上限；未知/越界为 `400/PARAM_VALIDATION_ERROR`。500 为 `INTERNAL_SERVER_ERROR`、403 为 `PERMISSION_DENIED` 且均不可重试。非法响应为合法 JSON、HTTP 200、`success=true`，但无 `data`。
+  - 调用顺序原因：选择 MVC Interceptor 而非 Servlet Filter，是因为拦截器抛出的异常可由现有全局 Handler 转为统一信封；Filter 抛出的异常发生在 DispatcherServlet 外，可能退回容器默认错误体。
+  - 关键代码位置：`DemoFaultInterceptor.java:19`、`DemoFaultProperties.java:5`、`DemoFaultWebConfiguration.java:8`、`application.yml:22`、`DemoFaultSimulationIntegrationTest.java:26`。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：五类要求均已覆盖；模拟请求记录故障类型和路径，不记录身份或业务正文。来自 M0.6 的 Trace Header/响应体一致性在 500、403 和缺字段响应中继续验证。
+  - 幂等、并发或人工确认：模拟器不作用于写方法。测试携带 `server-error` 调用复核 POST，结果仍为原有缺少身份的 401，证明模拟器没有在写业务前短路；不产生数据库副作用。
+- 未完成项与已知问题：
+  - 未完成项：Python `httpx` 超时、Pydantic 响应校验、Tool 错误映射、有限重试/退避、Run/Step 耗时与错误记录、前端故障展示和 Agent 降级尚未实现。
+  - 已知问题/阻塞：无阻塞。阻塞式 `Thread.sleep` 会占用 Servlet 工作线程，只适合小规模开发测试；500 模拟按统一异常策略打印预期堆栈；Mockito 仍有未来 JDK 动态 Agent 警告。
+- 替代方案：
+  - 采用的替代方案及原因：采用应用内 MVC 拦截器模拟慢响应，而未引入 Toxiproxy、网关故障注入或容器网络控制，原因是 M0.7 只需为 M1 提供最小、确定、可独立运行的 HTTP 失败夹具，且当前仓库没有相应基础设施。
+  - 已覆盖/未覆盖的验收要求：覆盖 T045～T049 的响应延迟、真实客户端超时、500、字段缺失和 403，以及默认关闭、参数限幅、Trace 和写接口隔离；不覆盖连接拒绝、连接重置、DNS、TLS、网络分区、随机抖动、并发容量或生产混沌演练。
+  - 局限、风险和转正/移除条件：当需要连接层故障或并发压测时，应在隔离环境引入代理/网络级工具并保留相同测试语义；生产部署必须保持 `DEMO_FAULTS_ENABLED=false`。应用内夹具可继续服务契约测试，但不能作为生产故障平台。
+- 后续影响：
+  - 对后续任务/里程碑：M1 T123～T126 可直接使用这些 Header 验证 500、`httpx.Timeout`、响应字段错误和权限映射；重试测试只应对只读调用开放，并验证次数与总预算。
+  - 对接口/数据/测试/部署：无数据库迁移和业务响应正常路径变化。Docker Compose 新增开发环境变量；部署配置若误设开关会开放故障 Header，因此生产清单必须显式关闭或不设置。客户端正常不发送 Header 时不受影响。
+- 测试与验证：
+  - `[预期失败] mvn --file business-service/pom.xml -Dtest=DemoFaultSimulationIntegrationTest,DemoFaultDisabledIntegrationTest test` — 7 个测试中 6 个失败、1 个通过；只有默认关闭保护通过，其余模拟 Header 均被忽略并正常返回 200。
+  - `[通过] 同一命令` — 首轮实现 7/7；补充写接口隔离后最终 8/8，失败 0、错误 0、跳过 0。
+  - `[通过] mvn --file business-service/pom.xml -Dtest=BusinessQueryApiIntegrationTest,BusinessWriteApiIntegrationTest,ApiExceptionHandlingIntegrationTest,DemoFaultSimulationIntegrationTest,DemoFaultDisabledIntegrationTest test` — M0.4～M0.7 联合 41/41。
+  - `[通过] mvn --file business-service/pom.xml clean test` — 全量 56/56，失败 0、错误 0、跳过 0。
+  - `[通过] make test` — 基础/Compose 检查、三服务冒烟及 M0.2～M0.7 全部分阶段验收通过。
+  - `[通过] make validate` — 基础文件与 Compose 配置有效。
+  - `[通过] git diff --check` — 无空白错误。
+  - `[通过] API JSON/Markdown 结构检查` — 5 个 JSON 示例可解析，Markdown 围栏成对。
+  - 未运行项及原因：未运行 M0.8、Python Tool、Approval 或 Agent E2E，对应实现不在本次范围。
+- 变更文件：
+  - `business-service/src/main/java/com/productline/business/api/fault/DemoFaultInterceptor.java`
+  - `business-service/src/main/java/com/productline/business/api/fault/DemoFaultProperties.java`
+  - `business-service/src/main/java/com/productline/business/api/fault/DemoFaultWebConfiguration.java`
+  - `business-service/src/main/resources/application.yml`
+  - `business-service/src/test/java/com/productline/business/api/DemoFaultSimulationIntegrationTest.java`
+  - `business-service/src/test/java/com/productline/business/api/DemoFaultDisabledIntegrationTest.java`
+  - `.env.example`
+  - `docker-compose.yml`
+  - `Makefile`
+  - `business-service/README.md`
+  - `docs/API_CONTRACT.md`
+  - `docs/ROADMAP.md`
+  - `docs/STATUS.md`
+  - `docs/TEST_REPORT.md`
+  - `doc/needCare.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；生产误开故障开关和阻塞线程只适合小规模测试是主要风险。
+  - 后续兼容注意事项：M1 不得把 `invalid-response` 当空数据，必须进行严格 Schema 校验；超时是否重试必须同时考虑只读幂等性、次数和总预算；不得把 Java 测试成功表述为 Python Tool 已实现。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次提供了真实 HTTP 的确定性失败夹具，并把默认关闭、只读隔离、限幅、Trace 和 HTTP 200/Schema 失败的差异落实为可执行测试，直接支撑后续 Tool 可靠性评测。
+- 下一建议任务：
+  - `[T050] 初始化 Vue 3 项目`

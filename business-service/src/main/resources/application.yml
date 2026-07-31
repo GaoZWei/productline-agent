@@ -19,6 +19,12 @@ spring:
         jdbc:
           time_zone: UTC
 
+demo:
+  faults:
+    enabled: ${DEMO_FAULTS_ENABLED:false}
+    max-delay-ms: ${DEMO_FAULT_MAX_DELAY_MS:2000}
+    timeout-delay-ms: ${DEMO_FAULT_TIMEOUT_DELAY_MS:5000}
+
 management:
   endpoints:
     web:

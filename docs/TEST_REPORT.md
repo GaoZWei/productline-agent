@@ -214,3 +214,34 @@
   - 500 用例会在测试日志中输出预期堆栈，用于验证服务端保留诊断证据；客户端响应不包含敏感详情
   - `X-User-Id`/`X-User-Role` 尚未连接真实认证来源，401/403 只验证 Java 接口语义，不等同生产级认证授权
   - Mockito 在 JDK 21 输出动态 Java Agent 的未来兼容警告，当前结果不受影响
+
+## M0.7 故障模拟
+
+- 验证时间：2026-07-31
+- 运行环境：OpenJDK 21.0.12、Maven 3.9.16、Docker Desktop 29.6.2、PostgreSQL 16
+- 测试先行基线：`mvn --file business-service/pom.xml -Dtest=DemoFaultSimulationIntegrationTest,DemoFaultDisabledIntegrationTest test` 共 7 个用例，6 个失败、1 个通过；仅默认关闭保护通过，其余请求均返回正常 200，证明故障能力尚未实现
+- M0.7 独立验收：同一命令扩充为 8 个用例，8/8 通过
+- M0.4～M0.7 联合回归：41/41 通过
+- `mvn --file business-service/pom.xml clean test`：通过，56/56，失败 0、错误 0、跳过 0
+- `make test`：通过
+  - 基础检查、Docker Compose 配置和三服务冒烟：通过
+  - M0.2 领域测试：7/7
+  - M0.3 数据测试：7/7
+  - M0.4 查询契约：13/13
+  - M0.5 写入契约：12/12
+  - M0.6 异常契约：8/8
+  - M0.7 故障模拟：8/8
+- M0.7 覆盖：
+  - 指定延迟达到下限，超过配置上限返回统一 400
+  - Java `HttpClient` 80 毫秒请求超时可由 300 毫秒服务端延迟稳定触发
+  - 模拟 500 和 403 沿用统一信封及调用方 Trace ID
+  - 模拟非法响应保持 HTTP 200/合法 JSON，但故意缺失 `data`
+  - 未知故障类型返回统一 400
+  - 功能关闭时即使收到模拟 Header 也正常响应
+  - 功能开启时 POST 写请求仍忽略模拟 Header，并继续执行原有身份门禁
+- 最终失败：0
+- 未运行：M0.8 前端、Python HTTP Client/Tool、Tool 超时重试和 Agent E2E；对应运行时代码尚未实现
+- 已知非阻塞问题：
+  - 500 模拟会按 M0.6 设计输出预期服务端堆栈；客户端仍只得到安全错误体
+  - 延迟通过阻塞 Servlet 线程实现，仅适合小规模受控故障测试，不代表生产超时实现
+  - Mockito 在 JDK 21 输出动态 Java Agent 的未来兼容警告，当前结果不受影响
