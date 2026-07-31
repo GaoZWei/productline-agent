@@ -836,3 +836,77 @@
   - 有价值，已更新 `doc/needCare.md`。本次提供了真实 HTTP 的确定性失败夹具，并把默认关闭、只读隔离、限幅、Trace 和 HTTP 200/Schema 失败的差异落实为可执行测试，直接支撑后续 Tool 可靠性评测。
 - 下一建议任务：
   - `[T050] 初始化 Vue 3 项目`
+
+## 2026-07-31 23:11 — `[T050-T057] M0.8 最小前端业务页面`
+
+- 里程碑：M0 业务数据与 Java 接口
+- 任务类型：功能 / 前端 / 测试 / 配置 / 文档
+- 目标与范围：
+  - 本次实现：初始化 Vue 3、TypeScript、Vite、Pinia、Axios、Element Plus 工程；展示固定五单、订单详情、生产任务/步骤、质检/复核和交付状态；提供快速切单、统一错误展示、Trace ID、生产静态服务和 Java 同源代理。
+  - 明确不实现：不实现 Agent 对话、页面上下文提交、SSE、Python Tool、Workflow、RAG、Approval、写操作或大模型调用。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：页面默认选择黄金场景 `ORDER-003`，并从 Java `/api/orders/{id}/overview` 展示 `TASK-003(COMPLETED) → ISSUE-001(COORDINATE_SYSTEM/OPEN) → REVIEW-003(PENDING) → DELIVERY-003(BLOCKED)`；另外四单用于快速切换业务场景。
+  - 方案选择及原因：浏览器统一请求同源 `/business-api`，Vite 开发代理与 Node 生产代理都移除前缀后转发 Java。这样不要求 Java 开放 CORS，生产镜像也不把容器内域名编译进浏览器资源。
+  - 契约、状态或兼容性影响：前端严格读取 M0.6 六字段信封，缺少 `data` 即报 `RESPONSE_VALIDATION_ERROR`，不把 M0.7 非法响应当空业务数据；错误保留稳定 `code/traceId/retryable/status`。无 Java API、数据库和固定数据变更。
+  - 并发决策：快速切单为每次详情请求分配递增序号，只有最新请求可更新 `overview/error/loading`，防止慢旧请求覆盖用户最后选择。
+- 核心实现：
+  - `web-console/src/api/businessClient.ts` — `BusinessApiError`（第 7 行）、Axios 实例/响应拦截器（第 29、35 行）、`requestBusinessData`（第 51 行）和信封校验（第 59 行）：统一正常、业务错误、协议错误、超时与网络错误。
+  - `web-console/src/api/businessApi.ts` — `fetchOrder/fetchOrderOverview`（第 4、8 行）：封装页面实际使用的两个 Java 查询端点并编码路径参数。
+  - `web-console/src/stores/orderStore.ts` — `DEMO_ORDER_IDS`（第 8 行）、`useOrderStore`（第 26 行）、`initialize`（第 41 行）、`selectOrder`（第 57 行）：管理固定五单、黄金场景、加载/错误/Trace 和最新请求门禁。
+  - `web-console/src/App.vue` — 根页面（模板第 28 行）组织订单切换、错误重试、订单概览、任务、质检/复核和交付组件。
+  - `web-console/src/components/OrderSwitcher.vue`、`TaskList.vue`、`QualityIssuesPanel.vue`、`DeliveryStatusPanel.vue` — 模板分别从第 21、13、18、12 行开始，对应 T052、T054、T055、T056/T057。
+  - `web-console/server.mjs` — `createWebServer`（第 10 行）提供健康检查、静态资源和 SPA 回退；`proxyBusinessRequest`（第 67 行）转发运行时 Java 请求。
+  - `web-console/Dockerfile` — 第 1 行开始的多阶段镜像先执行 `npm ci` 和生产构建，再只复制 `dist` 与 Node 服务。
+  - 必要的最小关键片段：
+
+    ```text
+    用户选择订单 → selectedOrderId 立即更新 → requestSequence + 1
+    → GET /business-api/api/orders/{id}/overview
+    → 仅当 requestSequence 仍等于最新序号时写入页面状态
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：`App.onMounted` 调用 Store → 并行查询五个固定订单 → 默认查询 `ORDER-003` 总览 → Vite/Node 代理转发 Java → Axios 拦截器校验统一信封 → Store 保存业务 DTO 和 Trace ID → 展示组件按任务层级渲染步骤、问题/复核和交付记录。
+  - 核心类、函数、接口或配置项：`requestBusinessData<T>` 只在信封完整且 `success=true` 时返回 `data`；`selectOrder` 通过请求序号实现 latest-wins；`ORDER_SCENES` 仅提供演示说明，真实状态始终来自 Java。
+  - 输入、输出、异常和边界：输入限定为五个演示订单 ID；输出为 Java `OrderOverview`。404/500 等统一错误保留错误码与 Trace；超时/网络失败标为可重试并提供手动重载；HTTP 200 但缺 `data` 被拒绝。页面不推断根因，不生成建议。
+  - 关键代码位置：`businessClient.ts:7`、`businessClient.ts:29`、`businessClient.ts:51`、`orderStore.ts:26`、`orderStore.ts:41`、`orderStore.ts:57`、`App.vue:28`、`server.mjs:10`、`server.mjs:67`。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：路径 ID 经过 URL 编码；统一错误响应和非法响应结构均有测试；生产代理上游不可用时返回 `502/UPSTREAM_UNAVAILABLE`。当前只调用公开演示查询端点，没有身份输入或权限提升。
+  - 幂等、并发或人工确认：页面无写操作，因此不涉及写幂等或人工确认；详情请求竞态已用 latest-wins 测试。后续写页面不得复用“手动重试读取”的策略绕过 Approval。
+- 未完成项与已知问题：
+  - 未完成项：M1 Python Tool、Agent 页面上下文、对话/SSE、RAG 引用、Run/Step 与 Approval 均未实现；当前环境无可用浏览器实例，未完成截图和人工视觉回归。
+  - 已知问题/阻塞：无功能阻塞。移动端布局和真实浏览器视觉仅由响应式 CSS 设计支撑，尚无 Playwright 视觉证据；Java 测试仍输出 Mockito 动态 Agent 的未来兼容警告。
+- 替代方案：
+  - 采用的替代方案及原因：浏览器实例不可用时，以 jsdom 页面组件测试、生产构建、生产服务测试和真实容器 HTTP 链路替代本次视觉验收；`make reset-demo` 因会删除本地持久卷未执行，改用 Testcontainers 固定数据回归及运行容器五单查询。
+  - 已覆盖/未覆盖的验收要求：已覆盖五单可读取、黄金链路字段、切换交互、错误契约、生产资源和代理；未覆盖像素布局、真实浏览器 CSS/可访问性行为和持久卷重建后的 UI 复验。
+  - 局限、风险和转正/移除条件：可用浏览器恢复后应增加一次桌面/移动端人工或 Playwright 验收；需要确认可删除本地演示数据时再执行 `make reset-demo`。两项均不阻塞 T050～T057 的代码与自动契约验收。
+- 后续影响：
+  - 对后续任务/里程碑：M1 Python Tool 可沿用 Java 信封分类，但应在 Python 用 Pydantic 独立实现服务端响应 Schema，不应依赖前端 TypeScript 类型；M3 可在此页面增加上下文采集，但必须由 Python/Java 重校验订单 ID。
+  - 对接口/数据/测试/部署：新增 Node/npm 构建步骤和生产镜像；Compose Web 运行时依赖 `business-service:8080`，不再依赖 Agent 服务启动。Java 接口或信封字段变化时需同步前端类型与 7 个契约/组件测试。
+- 测试与验证：
+  - `[预期失败] npm test` — 初始 3 个套件因目标 API Client、Store、页面不存在而失败；生产服务测试新增后因 `createWebServer` 不存在而 1/1 失败。
+  - `[失败后修复] npm run typecheck` — TypeScript 7 与 `vue-tsc` 内部导出不兼容；固定 TypeScript 6.0.3 后通过。严格数组索引检查另发现测试夹具可能为 `undefined`，增加显式非空约束后通过。
+  - `[通过] make test-web` — Vitest 4 文件、7/7；Vue TypeScript 检查和 Vite 生产构建通过。
+  - `[通过] npm audit && npm audit --omit=dev` — 0 个已知漏洞；移除带 6 个开发期高危传递依赖的测试工具后复测。
+  - `[通过] docker compose config --quiet && docker compose build web-console` — 生产镜像构建成功，镜像内 `npm ci` 审计 0 漏洞。
+  - `[通过] 真实容器 HTTP 验收` — Web 健康检查、五单查询和 `ORDER-003` 黄金链路关键字段全部通过。
+  - `[通过] make test` — 基础/Compose、三服务冒烟、Java M0 回归 56/56、Web 7/7 与生产构建全部通过。
+  - `[未运行] make reset-demo` — 命令会删除本地持久卷，未获单独删除授权；使用非破坏性固定数据测试替代。
+  - `[未运行] 浏览器视觉验收` — 浏览器本地测试能力报告当前无可用浏览器实例。
+- 变更文件：
+  - `web-console/package.json`、`web-console/package-lock.json`、`web-console/tsconfig.json`、`web-console/vite.config.ts`、`web-console/index.html`
+  - `web-console/src/env.d.ts`、`web-console/src/main.ts`、`web-console/src/styles.css`、`web-console/src/types/business.ts`
+  - `web-console/src/api/businessClient.ts`、`web-console/src/api/businessApi.ts`
+  - `web-console/src/stores/orderStore.ts`
+  - `web-console/src/App.vue`、`web-console/src/components/OrderSwitcher.vue`、`web-console/src/components/OrderSummary.vue`、`web-console/src/components/TaskList.vue`、`web-console/src/components/QualityIssuesPanel.vue`、`web-console/src/components/DeliveryStatusPanel.vue`
+  - `web-console/src/api/businessClient.spec.ts`、`web-console/src/stores/orderStore.spec.ts`、`web-console/src/App.spec.ts`、`web-console/src/server.spec.mjs`、`web-console/src/test/setup.ts`、`web-console/src/test/fixtures.ts`
+  - `web-console/server.mjs`、`web-console/Dockerfile`、`web-console/README.md`、`docker-compose.yml`、`Makefile`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`、`doc/record.md`
+  - 删除旧占位页 `web-console/src/index.html`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；视觉回归缺口和未运行破坏性重置是透明遗留。
+  - 后续兼容注意事项：不得把当前页面描述为 Agent UI；前端的 `retryable` 只控制是否适合提示用户重试，不等于未来 Python Tool 自动重试策略。运行时生产代理依赖 `BUSINESS_API_URL`，部署清单必须指向可达 Java 服务。
+- Agent 面试价值评估：
+  - 无新增条目，未修改 `doc/needCare.md`。M0.8 是必要的业务事实展示与常规前端可靠性实现，但尚未承载 Agent 上下文、Tool 调用、步骤/引用、SSE 或 Approval；快速切单和错误展示更适合前端工程讨论，不足以单独形成 Agent 岗位面试证据。
+- 下一建议任务：
+  - `[T101] 使用 uv 初始化 Python 项目`

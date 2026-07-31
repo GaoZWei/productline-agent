@@ -66,13 +66,10 @@ services:
       context: ./web-console
     environment:
       PORT: 5173
-      AGENT_API_URL: ${VITE_AGENT_API_URL:-http://localhost:8000}
-      BUSINESS_API_URL: ${VITE_BUSINESS_API_URL:-http://localhost:8080}
+      BUSINESS_API_URL: http://business-service:8080
     ports:
       - "${WEB_CONSOLE_PORT:-5173}:5173"
     depends_on:
-      agent-service:
-        condition: service_started
       business-service:
         condition: service_started
     init: true

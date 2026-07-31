@@ -245,3 +245,33 @@
   - 500 模拟会按 M0.6 设计输出预期服务端堆栈；客户端仍只得到安全错误体
   - 延迟通过阻塞 Servlet 线程实现，仅适合小规模受控故障测试，不代表生产超时实现
   - Mockito 在 JDK 21 输出动态 Java Agent 的未来兼容警告，当前结果不受影响
+
+## M0.8 最小前端业务页面
+
+- 验证时间：2026-07-31
+- 运行环境：Node.js 22.22.2、npm 10.9.7、Vue 3.5.40、Vite 8.2.0、TypeScript 6.0.3、Docker Desktop 29.6.2
+- 测试先行基线：首次 `npm test` 的 3 个测试套件均失败，原因是 API Client、Store、页面组件尚未实现；生产服务测试新增后因 `createWebServer` 不存在而 1/1 失败
+- `make test-web`：通过
+  - Vitest：4 个测试文件、7/7 用例通过
+  - API Client：成功信封解包、统一错误转换、缺少 `data` 的响应校验
+  - Pinia Store：固定五单加载、默认 `ORDER-003`、快速切换只接受最后请求
+  - 页面：五个订单、黄金链路质检/复核/交付信息及 `ORDER-005` 切换
+  - 生产服务：`/health`、SPA 回退和 `/business-api` Java 代理
+  - `vue-tsc --noEmit` 与 Vite 构建：通过
+- 生产构建产物：CSS 49.57 kB（gzip 8.34 kB），JavaScript 185.03 kB（gzip 69.95 kB），无大包告警
+- `npm audit` 与 `npm audit --omit=dev`：均通过，0 个已知漏洞
+- `docker compose config --quiet && docker compose build web-console`：通过；多阶段镜像执行 `npm ci`、类型检查和生产构建成功
+- 真实容器验收：Web `/health` 通过；同源代理可查询 `ORDER-001`～`ORDER-005`；`ORDER-003` 总览包含 `TASK-003`、`ISSUE-001`、`COORDINATE_SYSTEM`、`PENDING` 和 `BLOCKED`
+- `make test`：通过
+  - 基础检查、Docker Compose 配置和三服务冒烟：通过
+  - M0.2 领域测试：7/7
+  - M0.3 数据测试：7/7
+  - M0.4 查询契约：13/13
+  - M0.5 写入契约：12/12
+  - M0.6 异常契约：8/8
+  - M0.7 故障模拟：8/8
+  - M0.8 前端：7/7，生产构建通过
+- 开发中发现并修复：TypeScript 7 已移除 `vue-tsc` 使用的内部导出，类型检查失败；将 TypeScript 固定为 6.0.3 后恢复。最初的测试工具依赖链报告 6 个开发期高危漏洞，改用 Vue 原生挂载测试并移除该依赖后审计为 0
+- 最终失败：0
+- 未运行：`make reset-demo` 会删除本地持久卷，未在未获单独授权时执行；当前环境没有可用浏览器实例，未运行截图与人工视觉回归；M1 Python Tool 和 Agent E2E 尚未实现
+- 已知非阻塞问题：页面当前没有端到端浏览器测试，视觉和移动端布局只有 CSS 响应式规则与 jsdom 组件测试支撑；页面不含 Agent 对话、SSE、RAG、Approval 或写操作，这是 M0.8 的有意范围边界
