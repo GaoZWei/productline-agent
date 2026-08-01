@@ -974,3 +974,156 @@
   - 无新增条目，未修改 `doc/needCare.md`。本次是纯视觉与展示文案调整，没有新增 Agent、Tool、Workflow、RAG、上下文、Approval、评测或模型/业务边界实现，不满足 Agent 岗位面试价值门禁。
 - 下一建议任务：
   - 浏览器能力恢复后补一次桌面与移动端视觉验收；用户恢复功能开发时再进入 `[T101] 使用 uv 初始化 Python 项目`。
+
+## 2026-07-31 23:54 — `[T101-T108] M1.1 Python 工程初始化`
+
+- 里程碑：M1 Python Tool 层
+- 任务类型：工程基础 / FastAPI / 数据库 / 可观测性 / 测试 / 配置 / 文档
+- 目标与范围：
+  - 本次实现：使用 uv 管理 Python 3.12 和锁文件；将无依赖 HTTP 占位替换为 FastAPI；配置 pytest、Ruff、mypy；建立异步 SQLAlchemy、Alembic、JSON 日志和请求 Trace ID 基础。
+  - 明确不实现：不实现 T109 之后的 Java HTTP Client、错误映射、Tool 协议、重试、Workflow、模型调用、Run/Step 实体、RAG 或 Approval。
+- 需求与关键决策：
+  - 版本和依赖：`.python-version` 固定 3.12，`requires-python` 限定 `>=3.12,<3.13`；`pyproject.toml` 声明运行时/开发依赖，`uv.lock` 保存 42 个解析结果，Docker 使用 `--frozen --no-dev` 安装。
+  - 应用工厂：`create_app(settings)` 支持测试注入；FastAPI lifespan 创建惰性异步 Engine 并在停止时 `dispose`，健康检查保持既有 `service/status` 契约。
+  - 数据边界：`Base` 只面向后续 Agent Run/Step/Approval/RAG 元数据，不映射 Java 业务表；Alembic 使用独立 `agent_alembic_version`，避免与 Java Flyway 历史表混淆。
+  - Trace 与日志：请求头 `X-Trace-Id` 仅接受 1～128 位安全字符，否则生成 `trace-UUID`；JSON 日志固定保存 Trace、方法、路径、状态和耗时，不记录数据库 URL、Token 或请求正文。
+  - 探针语义：`/health` 是 liveness，不主动连接数据库。这样数据库短暂不可用时不会把“依赖未就绪”误判为“进程已死”；readiness 留给后续独立任务。
+- 核心实现：
+  - `agent-service/pyproject.toml` / `.python-version` / `uv.lock` — Python 3.12、运行/开发依赖、pytest 标记、Ruff 规则、mypy strict 和可重复锁定环境。
+  - `agent-service/app/main.py` — `create_app` 组织 lifespan、数据库资源、Trace 中间件和 `/health`；`main` 读取设置并启动 Uvicorn。
+  - `agent-service/app/settings.py` — `Settings` 校验环境、端口、日志级别和数据库 URL，并将 Compose 的 `postgresql://` 转为 `postgresql+asyncpg://`。
+  - `agent-service/app/database.py` — `Base`、惰性 `AsyncEngine`、`async_sessionmaker`、Session 上下文和关闭释放。
+  - `agent-service/app/observability.py` — `ContextVar` 保存请求 Trace，`JsonFormatter` 输出白名单字段，`TraceIdMiddleware` 绑定响应 Header 和请求日志。
+  - `agent-service/alembic.ini` / `migrations/env.py` / `script.py.mako` — 异步 Alembic 环境、Agent 独立版本表和迁移模板；M1.1 无数据表 revision。
+  - `agent-service/tests` — 6 个测试覆盖健康检查/Trace、数据库 URL/Session、JSON 日志和 Alembic 结构。
+  - `agent-service/Dockerfile` — 从官方 uv 镜像复制 0.12.0 二进制，在 Python 3.12 slim 中按锁文件安装非开发依赖，并直接使用 `.venv` 启动。
+  - `Makefile` / `scripts/smoke-services.sh` — 新增 `test-agent-foundation`、`quality`、容器内 `agent-migrate`，根级 `make test` 纳入 Python 6 个测试，冒烟改为 uv/Python 3.12。
+- 代码解释与定位：
+  - 启动流：`python -m app.main` → `get_settings` → Uvicorn → FastAPI lifespan → 创建不立即联网的 `Database` → 请求进入 Trace 中间件 → `/health` → 响应写回同一 Trace → 结构化请求日志 → 应用停止释放 Engine。
+  - 数据流：`DATABASE_URL` 由 Pydantic Settings 读取并验证 → 转换 asyncpg dialect → SQLAlchemy 生成 Engine/Session Factory；只有未来代码显式进入 Session 并执行语句才会连接。当前没有任何业务表查询。
+  - 迁移流：根级 `make agent-migrate` 在 Compose 网络内运行 Alembic → `migrations/env.py` 读取同一设置 → 使用 `Base.metadata` 与独立版本表执行 revision。当前无业务 revision，首次执行只创建空的 `agent_alembic_version`，不触碰 Java 业务表。
+  - Trace 流：优先复用安全来访值，非法/缺失则生成 → `ContextVar` 让同一异步请求日志读取 → 响应 Header 回传 → finally 重置，防止请求间串值。
+- 异常、安全与边界：
+  - 配置错误：非法端口/环境/日志级别由 Pydantic 拒绝；非 PostgreSQL URL 在创建数据库时失败，不带错误 URL 输出启动日志。
+  - 数据安全：Python 没有 Java 业务 Entity/Repository；当前共享开发数据库角色仍是权限隔离缺口，生产前需独立数据库或 Schema/角色。
+  - Trace 安全：拒绝空格、换行、超长和非白名单字符；日志只复制白名单附加字段。
+- 未完成项与已知问题：
+  - 未完成项：Java HTTP Client、Pydantic Java 响应 Schema、Tool/错误/重试、readiness、Run/Step 表和端到端 Trace 尚未实现。
+  - 已知问题/阻塞：无功能阻塞。本机 PostgreSQL 与 Docker 都监听 5432，宿主机 `127.0.0.1:5432` 优先连接本机实例，直接运行 Alembic 会得到“role agent does not exist”；本地 Compose 仍共用 Java 数据库角色；Java 测试仍有 Mockito 动态 Agent 警告。
+- 替代方案：
+  - 采用原因：将根级 `agent-migrate` 放到 Compose 容器内执行，避免宿主端口冲突、`postgres` 容器主机名不可解析和凭据漂移；M1.1 暂不创建独立数据库/角色，以免扩大 M0 数据初始化范围。
+  - 已覆盖/未覆盖：覆盖 Alembic 在与应用一致的 Python 3.12、锁定依赖、Compose 网络和环境变量下运行；不提供宿主机直连，也没有权限层阻止 Python 查询已有 Java 表。
+  - 局限与移除条件：生产部署或开始持久化 Run/Step 前，应建立独立 Agent 数据库/Schema 与最小权限角色，再调整 `DATABASE_URL`；若宿主机开发需要直连，应使用未冲突端口和本地专用凭据。
+- 后续影响：
+  - 对后续任务/里程碑：T109～T117 可直接复用 Settings、lifespan、Trace 上下文、pytest/httpx 和结构化日志；Java Client 应把当前 Trace 透传到 `X-Trace-Id`，并在未来 Step 中同时保存 Run/Step/Trace。
+  - 对接口/数据/测试/部署：`/health` 响应体保持兼容并新增/稳定 Trace Header；未修改 Java API、固定数据或前端。Agent 镜像现在依赖 `pyproject.toml`/`uv.lock`，依赖变更必须重新 lock；数据库只新增空的 Agent Alembic 版本表，尚无 Run/Step 等业务表。
+- 测试与验证：
+  - `[预期失败] uv lock && uv run --frozen pytest -q` — 收集阶段 3 个导入错误，目标数据库、可观测性和应用工厂尚未实现。
+  - `[失败后修复] pytest` — 首轮 5/6，Alembic `%(here)s` 已展开而测试比较原文本；改为绝对路径后 6/6。
+  - `[失败后修复] mypy app tests` — 测试中的 `get_main_option` 为 `str | None`；增加显式非空断言后通过。
+  - `[通过] make test-agent-foundation` — pytest 6/6。
+  - `[通过] make quality` — Ruff 全部通过；mypy strict 检查 9 个文件无问题。
+  - `[通过] uv lock --check` — 锁文件有效；Python 3.12.13。
+  - `[通过] docker compose build agent-service && docker compose up --detach agent-service` — 镜像构建和容器启动成功。
+  - `[通过] 容器 HTTP/JSON 日志验收` — 健康检查 200、Trace Header 一致，请求日志含 Trace/方法/路径/状态/耗时。
+  - `[通过] docker compose exec -T agent-service /service/.venv/bin/alembic current` — 异步连接成功，无 revision/数据变更。
+  - `[通过] make agent-migrate` — 容器内 `upgrade head` 成功，创建独立 `agent_alembic_version`，无 Agent 业务 revision。
+  - `[通过] make test-business-data` — 迁移后 Java 固定数据与状态一致性 7/7，证明空 Agent 版本表未影响业务基线。
+  - `[通过] make smoke` — Agent、Business、Web 健康检查通过。
+  - `[通过] make test` — Python 6/6、Java M0 56/56、Web 7/7 和生产构建全部通过。
+- 变更文件：
+  - `agent-service/.python-version`、`pyproject.toml`、`uv.lock`
+  - `agent-service/app/main.py`、`settings.py`、`database.py`、`observability.py`
+  - `agent-service/alembic.ini`、`migrations/env.py`、`migrations/script.py.mako`、`migrations/versions/.gitkeep`
+  - `agent-service/tests/test_health.py`、`test_database.py`、`test_observability.py`、`test_alembic.py`
+  - `agent-service/Dockerfile`、`.dockerignore`、`README.md`
+  - `Makefile`、`scripts/smoke-services.sh`、`docker-compose.yml`、`.env.example`、`README.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`、`doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；数据库权限隔离、readiness 和跨服务 Trace 尚未完成。
+  - 后续兼容注意事项：不得在 Python 添加 Java 业务表 ORM；T109 应复用 Settings 而不是散落环境读取；T112 应透传当前 Trace；后续迁移必须使用 `agent_alembic_version` 并先解决生产数据库权限边界。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。价值不在 FastAPI/uv 样板，而在已落地的 Agent 自有状态与 Java 业务事实边界、Trace 安全传播和结构化日志基础，同时明确记录了尚未完成的数据库权限隔离与 Run/Step 追踪。
+- 下一建议任务：
+  - `[T109] 定义 Java Client 配置模型`。
+
+## 2026-08-01 18:31 — `[DOC-004] 整理 Python 工程学习手册`
+
+- 里程碑：M1 Python Tool 层（配套知识文档）
+- 任务类型：文档 / 重构 / 校验
+- 目标与范围：
+  - 本次实现：以当前 `agent-service` 真实实现为唯一事实来源，重构
+    `doc/pythonKnowledge.md`；合并原文与 M1.1 代码讲解，去除重复内容，并持续使用
+    Java Spring Boot、Node.js 类比帮助第一次接触 Python 项目的开发者理解。
+  - 明确不实现：不修改 Python/Java/Web 运行代码、接口、配置、依赖、数据库、固定数据、
+    `doc/needCare.md`、项目状态或测试报告。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：手册明确 Python 只能保存 Agent 自有状态，不能映射 Java 的订单、
+    任务、质检、复核和交付表；本次不变更 `ORDER-003` 黄金链路。
+  - 方案选择及原因：按照“工程对应关系 → 目录与依赖 → 核心模块 → 生命周期 → 迁移/测试/
+    容器 → Python 语法 → 能力边界”组织知识，通用概念直接放入对应项目文件章节，不保留
+    脱离仓库的重复教程。
+  - 事实更正：删除旧项目的目录、数据库、镜像、迁移、健康接口和 Make 命令；改为当前
+    `agent-service/`、根级 Compose、`pgvector/pgvector:pg16`、`remote_sensing_agent`、
+    `/health` liveness、空 Agent Alembic 版本表及当前根级命令。
+  - 契约、状态或兼容性影响：无运行时契约变化；文档明确 Compose 中 Java URL/模型变量尚未被
+    `Settings` 消费，Run/Step、Client、Schema、Tool、Workflow 和 RAG 均未实现。
+- 核心实现：
+  - `doc/pythonKnowledge.md` — 当前项目 Python 入门手册：说明 Python/Java/Node 工程对应、
+    Uvicorn/FastAPI/Pydantic/SQLAlchemy/asyncpg/Alembic 协作、启动/请求/关闭顺序、迁移测试与
+    初学者语法重点。
+  - 必要的最小关键片段：无运行时代码；核心调用链统一为：
+
+    ```text
+    uv/Python 3.12 → Uvicorn → FastAPI lifespan → TraceIdMiddleware
+    → /health + Pydantic 响应 → JSON 日志 → lifespan 释放 Engine
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：手册先说明三服务边界，再沿当前 Python 进程的配置、应用、数据库、
+    可观测性和生命周期解释代码，最后收束到尚未实现的 T109+ 目录。
+  - 核心类、函数、接口或配置项：解释 `HealthResponse`、`create_app`、lifespan、`Settings`、
+    `Base`、`Database`、`JsonFormatter`、`TraceIdMiddleware` 和 `/health` 的实际职责与类比。
+  - 输入、输出、异常和边界：说明环境变量经 Pydantic 校验、数据库 URL 转换、Trace 白名单、
+    Session 生命周期及 liveness 不检查数据库；避免把占位环境变量或 pgvector 镜像描述为能力。
+  - 关键文档位置：`doc/pythonKnowledge.md:1`（定位与范围）、`:15`（工程类比）、`:230`
+    （应用入口）、`:356`（配置）、`:401`（数据库）、`:593`（执行顺序）、`:883`（Python
+    语法）、`:984`（能力边界）。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：本次没有运行时输入；文档如实标注共享开发数据库角色尚未做到
+    权限级隔离，未来 Java Client 的超时、错误映射和重试尚未实现。
+  - 幂等、并发或人工确认：本次无写接口；手册仅解释 `ContextVar` 的异步并发隔离，不把未来
+    Approval 或写入幂等描述为已完成。
+- 未完成项与已知问题：
+  - 未完成项：本次文档整理范围内无；T109 之后的 Client、Schema 和 Tool 仍按计划待开发。
+  - 已知问题/阻塞：无。
+- 替代方案：
+  - 采用的替代方案及原因：无。
+  - 已覆盖/未覆盖的验收要求：已覆盖当前仓库文件、符号、命令、结构和错误事实清理；不运行
+    业务测试，因为没有修改运行时代码。
+  - 局限、风险和转正/移除条件：无阶段性替代方案；后续实现变化时需同步维护手册。
+- 后续影响：
+  - 对后续任务/里程碑：为 T109 Java Client 和后续 Tool 开发提供当前工程基线，预计目录明确
+    标为计划而不是已实现能力。
+  - 对接口/数据/测试/部署：无影响；没有修改接口、数据、依赖或部署配置。
+- 测试与验证：
+  - `[通过] 旧项目标识搜索` — 指定的 10 类旧路径、数据库、镜像、接口、迁移和 Make 命令
+    均为 0 处匹配。
+  - `[通过] 文档结构检查` — 154 个代码围栏成对、标题层级连续、无重复标题。
+  - `[通过] 仓库事实检查` — 文档链接的 20 个文件均存在；9 个核心类/函数和 6 个 Make 目标
+    均可在当前仓库定位。
+  - `[通过] make validate` — M0.1 基础文件检查通过，Compose 配置有效。
+  - `[通过] git diff --check` — 追加记录前检查无空白错误；追加后再次复验。
+  - `[未运行] Java/Python/Web 业务测试` — 本次只整理知识文档，不修改运行时代码或配置。
+- 变更文件：
+  - `doc/pythonKnowledge.md`
+  - `doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无。
+  - 后续兼容注意事项：实现 T109+ 后应更新 `Settings`、Client、Schema、Tool 和执行链章节；
+    不得继续把预计目录当成已存在文件。
+- Agent 面试价值评估：
+  - 无新增条目，未修改 `doc/needCare.md`。本次只是整理由 M1.1 已实现内容产生的学习材料，
+    没有新增 Agent、Tool、Workflow、RAG、Approval、评测或可靠性实现证据。
+- 下一建议任务：
+  - `[T109] 定义 Java Client 配置模型`。

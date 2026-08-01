@@ -1,48 +1,84 @@
-"""Minimal M0.1 HTTP entry point.
-
-FastAPI and the production application structure are introduced in M1.1. This
-dependency-free server keeps the foundation independently startable meanwhile.
-"""
+"""FastAPI application entry point for the Agent service."""
 
 from __future__ import annotations
 
-import json
-import os
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-# HealthHandler 处理请求
-class HealthHandler(BaseHTTPRequestHandler):
-    """Serve the foundation health endpoint."""
+import uvicorn
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
-        if self.path != "/health":  # 只有 /health 返回成功
-            self.send_error(HTTPStatus.NOT_FOUND)  # 其他路径返回 404 Not Found
-            return
+from app.database import Database
+from app.observability import TraceIdMiddleware, configure_logging
+from app.settings import Settings, get_settings
 
-        body = json.dumps(
-            {"service": "agent-service", "status": "UP"},
-            separators=(",", ":"),
-        ).encode()
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+logger = logging.getLogger("agent-service.lifecycle")
 
-    def log_message(self, format: str, *args: object) -> None:
-        print(f"agent-service: {format % args}", flush=True)
+# Pydantic 响应模型
+class HealthResponse(BaseModel):
+    """Stable probe contract shared with the existing Compose smoke test."""
+
+    service: str
+    status: str
+
+# 应用工厂，负责创建 FastAPI应用
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build an application with explicit settings for production and tests."""
+
+    resolved_settings = settings or get_settings()
+    # lifespan 表示应用从启动到停止的生命周期
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        configure_logging(resolved_settings.log_level)
+        database = Database(resolved_settings.database_url)
+        # FastAPI 应用级共享状态，用于在路由处理中访问数据库连接
+        application.state.database = database
+        logger.info(
+            "service_started",
+            extra={
+                "service": resolved_settings.service_name,
+                "environment": resolved_settings.environment,
+            },
+        )
+        try:
+            yield
+        finally:
+            await database.dispose()
+            logger.info("service_stopped", extra={"service": resolved_settings.service_name})
+
+    application = FastAPI(
+        title="Productline Agent Service",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+    application.state.settings = resolved_settings
+    # 注册中间件，用于在每个请求中添加跟踪 ID
+    application.add_middleware(TraceIdMiddleware)
+    # 定义 HTTP接口
+    @application.get("/health", response_model=HealthResponse, tags=["system"])
+    async def health() -> HealthResponse:
+        return HealthResponse(service=resolved_settings.service_name, status="UP")
+
+    return application
+
+# 供 Uvicorn查找的应用实例
+app = create_app()
 
 
 def main() -> None:
-    """Start the HTTP server on the configured port."""
+    """Start Uvicorn with host and port supplied by validated settings."""
 
-    port = int(os.getenv("PORT", "8000"))  # 从环境变量读取端口，默认 8000
-    server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)  # 使用 ThreadingHTTPServer 支持并发请求
-    print(f"agent-service listening on 0.0.0.0:{port}", flush=True)
-    server.serve_forever()
+    settings = get_settings()
+    # Uvicorn是真正监听8000端口的服务器。
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
+        log_config=None,
+    )
 
 
 if __name__ == "__main__":
     main()
-

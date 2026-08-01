@@ -291,3 +291,30 @@
 - 最终失败：0
 - 未运行：Java 测试未重复运行，因为本次未修改 Java、API、DTO、Store 或业务状态映射；应用内浏览器列表重试后仍为空，未完成真实桌面/移动端截图和像素视觉验收
 - 已知非阻塞问题：真实浏览器视觉验收仍是证据缺口；当前以 jsdom 组件回归、CSS 静态检查、TypeScript 检查和生产构建作为阶段性替代，不把这些证据表述为像素级视觉通过
+
+## M1.1 Python 工程初始化
+
+- 验证时间：2026-07-31
+- 运行环境：uv 0.12.0、uv 管理的 CPython 3.12.13、FastAPI 0.141.1、Pydantic 2.13.4、SQLAlchemy 2.0.51、Alembic 1.18.5、pytest 9.1.1、Ruff 0.16.1、mypy 1.20.2
+- 测试先行基线：`uv lock && uv run --frozen pytest -q` 在收集阶段产生 3 个导入错误，目标 `app.database`、`app.observability` 和 FastAPI 应用工厂尚不存在
+- 首轮实现：pytest 6 个测试中 5 个通过、1 个失败；Alembic 会把 `%(here)s` 自动展开为绝对路径，测试仍比较未展开文本。修正后 6/6
+- `make test-agent-foundation`：通过，pytest 6/6
+  - FastAPI 健康检查保留安全 Trace ID、替换非法 Trace ID：2/2
+  - PostgreSQL URL 转 asyncpg、异步 Session Factory：2/2
+  - JSON 日志字段和 Trace 上下文：1/1
+  - Alembic 路径与模板：1/1
+- `make quality`：通过
+  - Ruff：全部通过
+  - mypy strict：9 个源/测试文件无问题
+- `uv lock --check`：通过，共解析 42 个直接及传递依赖；`uv run --frozen python --version` 为 Python 3.12.13
+- `docker compose build agent-service && docker compose up --detach agent-service`：通过；生产镜像使用锁文件安装 26 个非开发依赖并成功启动
+- 容器 HTTP 验收：`GET /health` 返回 `200` 和 `{"service":"agent-service","status":"UP"}`，响应 `X-Trace-Id=trace-m11-container`
+- 容器日志验收：同一请求输出 JSON，包含 `trace_id`、`method=GET`、`path=/health`、`status_code=200` 和 `duration_ms`
+- `docker compose exec -T agent-service /service/.venv/bin/alembic current`：通过；当前尚无 Agent 表迁移，因此没有 revision 输出或数据变更
+- `make agent-migrate`：通过；在 Compose 网络内执行 `upgrade head`，创建独立空版本表 `agent_alembic_version`，未创建或修改业务表
+- 迁移后 `make test-business-data`：通过，Java 固定数据与状态一致性 7/7，无业务数据回归
+- `make smoke`：Agent、Business、Web 三项健康检查通过
+- `make test`：通过；基础/Compose、三服务冒烟、Python M1.1 6/6、Java M0 56/56、Web 7/7 和生产构建全部通过
+- 最终失败：0
+- 未运行：没有运行 Python Tool/Java Client 测试，因为 T109 以后尚未实现；M1.1 尚无 Run/Step 等 Agent 业务表 revision
+- 已知非阻塞问题：宿主机 `127.0.0.1:5432` 同时存在本机 PostgreSQL，直接运行 Alembic 会连到错误实例并报角色不存在；根级迁移命令改为在 Compose 容器内执行。开发 Compose 尚未为 Agent 数据配置独立数据库角色；健康检查当前只验证进程存活

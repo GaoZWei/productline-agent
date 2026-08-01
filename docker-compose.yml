@@ -45,6 +45,8 @@ services:
       context: ./agent-service
     environment:
       PORT: 8000
+      ENVIRONMENT: development
+      LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
       BUSINESS_SERVICE_URL: http://business-service:8080
       DATABASE_URL: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local-only}@postgres:5432/${POSTGRES_DB:-remote_sensing_agent}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-openai}

@@ -34,13 +34,13 @@ wait_for_health() {
     done
 }
 
-if command -v python3 >/dev/null 2>&1; then
-    PORT=18000 python3 agent-service/app/main.py >"$task_tmp_dir/agent.log" 2>&1 &
+if command -v uv >/dev/null 2>&1; then
+    PORT=18000 uv run --directory agent-service --frozen python -m app.main >"$task_tmp_dir/agent.log" 2>&1 &
     agent_pid=$!
     wait_for_health http://127.0.0.1:18000/health
     echo "agent-service smoke test passed"
 else
-    echo "python3 is required for agent-service smoke test" >&2
+    echo "uv is required for agent-service smoke test" >&2
     exit 1
 fi
 

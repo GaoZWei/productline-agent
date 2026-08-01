@@ -2,14 +2,15 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M0.4 Java 查询接口**：Java 服务已包含订单、生产、质检、复核和交付领域模型，通过 Flyway 固定初始化 `ORDER-001`～`ORDER-005` 五组场景，并提供 8 个只读 HTTP 查询接口。`ORDER-003` 的完整黄金链路可从 `/api/orders/ORDER-003/overview` 查询。
+当前进度为 **M1.1 Python 工程初始化**：Java 业务事实接口与 M0 前端基线已经完成；Python 服务已使用 uv 管理 Python 3.12、FastAPI、SQLAlchemy/Alembic、pytest、Ruff 和 mypy，并提供带 Trace ID 的结构化日志基础。Java HTTP Client 和 Tool 从 M1.2 开始实现。
 
 ## 环境要求
 
 - Docker Engine 或 Docker Desktop（支持 `docker compose`）
 - GNU Make
 - Java 21、Maven 3.9（运行 Java 领域测试）
-- 可选：Python 3.12、Node.js 22（用于脱离 Docker 的本地开发）
+- uv（自动安装和管理项目要求的 Python 3.12）
+- Node.js 22（运行前端本地测试和构建）
 
 ## 快速开始
 
@@ -46,6 +47,9 @@ make dev-business     # 只启动 Java 服务及其依赖
 make dev-agent        # 只启动 Python 服务及其依赖
 make dev-web          # 只启动 Web 服务及其依赖
 make test             # 运行基础检查、服务冒烟和 Java 领域集成测试
+make test-agent-foundation # 验证 M1.1 Python 工程基础
+make quality          # 运行 Ruff 和 mypy 严格检查
+make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试
 make test-business-data   # 单独验证固定数据和业务状态组合
 make test-java-contract   # 单独验证 8 个 Java 只读查询接口
@@ -60,7 +64,7 @@ make ps               # 查看服务状态
 
 ```text
 .
-├── agent-service/       # Python Agent 服务（当前为健康检查骨架）
+├── agent-service/       # FastAPI Agent 服务、Agent 自有持久化和后续 Tool/Workflow
 ├── business-service/    # Spring Boot 业务服务与领域模型
 ├── web-console/         # Vue 前端目标目录（当前为静态启动骨架）
 ├── doc/                 # 原始需求、细化计划与开发记录

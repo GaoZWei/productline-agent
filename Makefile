@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -15,10 +15,20 @@ validate: ## 检查 M0.1 必需目录、文件与 Compose 配置
 	./scripts/check-foundation.sh
 	$(COMPOSE) config --quiet
 
-test: validate smoke test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web ## 运行当前阶段全部自动检查
+test: validate smoke test-agent-foundation test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web ## 运行当前阶段全部自动检查
 
 smoke: ## 验证 Java、Python 和 Web 健康检查
 	./scripts/smoke-services.sh
+
+test-agent-foundation: ## 验证 M1.1 FastAPI、数据库、Alembic 和结构化日志基础
+	cd agent-service && uv run --frozen pytest -q
+
+quality: ## 运行 Python Ruff 和 mypy 严格质量检查
+	cd agent-service && uv run --frozen ruff check .
+	cd agent-service && uv run --frozen mypy app tests
+
+agent-migrate: ## 执行 Agent 自有 SQLAlchemy 元数据的 Alembic 迁移
+	$(COMPOSE) run --rm agent-service /service/.venv/bin/alembic upgrade head
 
 test-business-domain: ## 在 PostgreSQL Testcontainers 上验证领域模型
 	mvn --file business-service/pom.xml \

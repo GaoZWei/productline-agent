@@ -524,3 +524,67 @@ Client 中实现并评测。
 - 没有生产混沌工程平台、网络分区、连接池耗尽或容量测试，不能声称完成全面故障演练。
 - 延迟使用阻塞线程，适合固定测试但不能代表响应式、异步或生产级延迟注入方案。
 - 模拟权限失败不等同于真实认证授权测试；真实身份仍未接入。
+
+---
+
+## M1.1 Agent 自有状态边界与最小可观测性
+
+### 面试价值判断
+
+辅助关注。uv、FastAPI 和测试工具配置本身不值得包装成 Agent 简历亮点；真正有价值的
+是从工程入口明确“业务事实”和“Agent 运行状态”两类数据的所有权，并为后续 Tool Step
+建立可贯穿 HTTP 请求的 Trace 基础。
+
+### 与 Agent 开发的关系
+
+Python 的 SQLAlchemy `Base` 只允许承载后续 Run、Step、Approval 和 RAG 元数据，不为
+Java 的订单、任务、质检、复核或交付表建立 ORM 映射。业务事实仍必须通过后续 Java
+HTTP Tool 获取。FastAPI 中间件为每个请求接受或生成安全 Trace ID，并输出结构化请求
+日志，为以后把一次 Tool HTTP 调用关联到 Run/Step 留出稳定字段。
+
+### 需要掌握的设计取舍
+
+- SQLAlchemy Engine 在应用启动时创建，但不会立刻连接数据库；因此存活探针可以证明
+  进程可服务，却不能证明数据库已经就绪。后续需要单独定义 readiness，而不是让健康
+  检查含义模糊。
+- 外部 Trace ID 只接受长度和字符受限的值，非法输入会替换，避免日志注入；Trace ID
+  与未来 Run ID、Step ID 仍是不同维度。
+- JSON 日志固定输出时间、级别、logger、消息和 trace；请求日志再增加方法、路径、状态
+  和耗时。日志不输出数据库 URL、Token、请求正文或任意对象状态。
+- 当前本地 Compose 为降低 M1.1 环境复杂度，Python 与 Java 共用一个 PostgreSQL 实例
+  和开发角色；代码通过不定义业务 ORM、独立 Alembic 版本表保持边界，但权限层尚未强制。
+  生产前应使用独立数据库/Schema 与最小权限角色。
+
+### 可能的面试问题
+
+**为什么 Agent 需要自己的数据库，又为什么不能映射 Java 业务表？**
+
+回答要点：Agent 需要保存运行步骤、上下文、引用和审批草稿，但这些是编排状态，不是
+订单事实。直接映射业务表会绕过 Java 权限、状态校验和审计，并把数据库结构耦合进 Tool；
+两类数据应分别由 Python 和 Java 负责。
+
+**Trace ID、Run ID 和 Step ID 应该如何配合？**
+
+回答要点：Run ID 标识一次 Agent 执行，Step ID 标识其中一个节点或 Tool 调用，Trace ID
+关联一次具体 HTTP 链路。一个 Run 可以包含多个 Step 和多个 Trace，持久化时应同时保存，
+才能从最终回答定位到某个上游请求。
+
+**为什么 `/health` 不直接查询数据库？**
+
+回答要点：存活和就绪是不同语义。进程存活不应因暂时数据库故障被平台反复重启；需要
+数据库的流量应由 readiness 控制。M1.1 只实现 liveness，readiness 尚未实现。
+
+### 简历表述建议
+
+不建议把 M1.1 单独作为成果。可在后续 Run/Step 和 Tool 链路完成后作为架构支撑说明：
+
+> 区分 Java 业务事实与 Python Agent 运行状态的持久化边界，并以安全 Trace ID 和结构化
+> 请求日志为 Tool 调用与 Run/Step 关联提供可观测性基础。
+
+### 不能过度声称
+
+- 当前没有 Java HTTP Client、Tool、Workflow、模型调用或 Agent 诊断。
+- `Base` 只是 Agent 自有元数据入口，尚未实现 Run、Step、Approval 或 RAG 表。
+- Trace 已覆盖 Python 请求日志，但尚未透传到 Java Tool，也没有端到端 Trace/Run 查询。
+- 本地开发尚未实现数据库角色级隔离，不能声称已经完成生产级数据权限边界。
+- `/health` 是存活探针，没有数据库 readiness、指标平台或分布式追踪。
