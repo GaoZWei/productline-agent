@@ -2,13 +2,13 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M1.2 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
 当前 `agent-service` 是一个独立的 Python 后端服务，主要承担未来的 Tool 封装、Workflow、
 Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架
-和最小可观测性，尚未调用 Java 接口或大模型。
+和最小可观测性，并已建立调用 Java 的异步 HTTP Client；尚未实现 Tool 或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -63,7 +63,11 @@ agent-service/
 │   ├── main.py                     # FastAPI 应用工厂、健康接口、Uvicorn 入口
 │   ├── settings.py                 # 环境变量与配置校验
 │   ├── database.py                 # 异步 Engine、Session 和 ORM 元数据根
-│   └── observability.py            # JSON 日志和 Trace ID 中间件
+│   ├── observability.py            # JSON 日志和 Trace ID 中间件
+│   ├── clients/
+│   │   └── business.py             # 调用 Java 的异步 HTTP Client
+│   └── schemas/
+│       └── business.py             # 身份、成功信封和强类型响应
 │
 ├── migrations/                     # Alembic 迁移环境
 │   ├── env.py                      # 加载配置、Base.metadata 和异步连接
@@ -75,7 +79,8 @@ agent-service/
     ├── test_health.py
     ├── test_database.py
     ├── test_observability.py
-    └── test_alembic.py
+    ├── test_alembic.py
+    └── test_business_client.py
 ```
 
 本地运行后还会看到以下生成目录：
@@ -372,6 +377,11 @@ host: str = "0.0.0.0"
 port: int = Field(default=8000, ge=1, le=65535)
 log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 database_url: str = "postgresql://..."
+business_service_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8080")
+business_connect_timeout_seconds: float = 2.0
+business_read_timeout_seconds: float = 3.0
+business_write_timeout_seconds: float = 3.0
+business_pool_timeout_seconds: float = 1.0
 ```
 
 例如 `PORT=99999` 会因超过 65535 在启动时被 Pydantic 拒绝，而不是等 Uvicorn 绑定端口
@@ -392,9 +402,9 @@ postgresql+asyncpg://user:password@host:5432/database
 `@lru_cache` 让 `get_settings()` 在一个进程中只构建一次 Settings，类似 Spring 单例配置 Bean
 或 Node 在模块顶层导出的单例配置对象。
 
-当前 Compose 还会传入 `BUSINESS_SERVICE_URL` 和模型相关变量，但 `Settings` 尚未定义这些
-字段，因此当前代码不会使用它们。`BUSINESS_SERVICE_URL` 将从 T109 Java Client 配置开始接入，
-模型配置则要等后续 Agent 阶段，不能把环境变量存在误认为功能已实现。
+M1.2 已读取 `BUSINESS_SERVICE_URL` 和四项分离的 HTTP 超时。Base URL 只接受 HTTP/HTTPS，
+超时必须大于 0 且不超过 60 秒。Compose 传入的模型相关变量仍未被 `Settings` 定义或使用，
+模型配置要等后续 Agent 阶段，不能把环境变量存在误认为功能已实现。
 
 ## 5. 数据库基础
 
@@ -588,9 +598,139 @@ trace-<UUID>
 
 finally 中必须重置 ContextVar，否则工作进程复用异步上下文时可能污染后续请求。
 
-## 7. 启动、请求和关闭顺序
+## 7. Java HTTP Client
 
-### 7.1 标准本地启动
+M1.2 新增的调用链是：
+
+```text
+未来的 Tool
+→ BusinessHttpClient
+→ httpx.AsyncClient 连接池
+→ Java /api/**
+→ 校验 HTTP 状态
+→ 校验统一成功信封
+→ 校验端点 data Schema
+→ 返回 BusinessResponse[DataT]
+```
+
+它类似 Java 中封装好的 WebClient/Feign Client，也类似 Node 服务中带统一拦截和 Schema
+校验的 Axios Client。Client 只负责可靠的 HTTP 边界，不负责决定调用哪个业务接口。
+
+### 7.1 `BusinessIdentity` 与响应 Schema
+
+[`agent-service/app/schemas/business.py`](../agent-service/app/schemas/business.py) 定义三类契约：
+
+- `BusinessIdentity`：单次调用的用户 ID、角色和可选 Token；
+- `BusinessSuccessEnvelope`：Java 成功响应的六个固定字段；
+- `BusinessResponse[DataT]`：已校验的响应元数据和具体业务 data。
+
+Token 使用 `SecretStr`，对象被打印或调试时不会直接显示原值。用户 ID 和角色禁止空值、
+换行和超长内容，避免非法 Header 或日志污染。
+
+成功信封使用严格 Pydantic Schema：
+
+```text
+success = true
+code = SUCCESS
+message = string
+data = 必须存在
+trace_id = 安全格式
+retryable = false
+```
+
+`data: object` 只表示第一层必须存在；随后 Client 使用调用方传入的具体 Pydantic Model 再
+校验一次。这样统一信封和订单、任务、质检等业务 DTO 不会混成一个巨型模型。
+
+### 7.2 `BusinessHttpClient` 生命周期与连接池
+
+[`agent-service/app/clients/business.py`](../agent-service/app/clients/business.py) 中的
+`BusinessHttpClient` 只创建一个 `httpx.AsyncClient`。FastAPI lifespan 启动时创建它并放入：
+
+```python
+application.state.business_client
+```
+
+应用停止时执行：
+
+```python
+await business_client.aclose()
+```
+
+不能每次 Tool 调用都新建 Client，因为那会反复建立 TCP/TLS 连接，失去连接池复用，并增加
+端口和资源泄漏风险。这个生命周期近似 Spring 单例 HTTP Client Bean，或 Node 应用级 Axios
+实例。
+
+Client 使用：
+
+```python
+trust_env=False
+```
+
+因此内部 Java 请求不会继承宿主机 `HTTP_PROXY`、`HTTPS_PROXY` 或 SOCKS 代理。M1.2 测试
+实际发现本机代理会让 Client 初始化失败，所以内部服务地址只由 `BUSINESS_SERVICE_URL`
+决定。
+
+### 7.3 身份、Trace 和写请求幂等键
+
+Client 根据 `BusinessIdentity` 生成：
+
+```text
+X-User-Id
+X-User-Role
+Authorization: Bearer <token>  # Token 存在时
+```
+
+Trace 优先使用方法参数；未显式传入时读取当前 `ContextVar`，再发送 `X-Trace-Id`。因此未来
+请求路径可以保持：
+
+```text
+浏览器 Trace → Python 中间件 → ContextVar → Java Client → Java 日志与响应
+```
+
+POST 还必须传入安全格式的 `Idempotency-Key`。Client 只保证 Header 存在和格式合法，Java
+仍负责判断相同用户、相同键和相同请求是否可以重放。当前没有 Approval 或写 Tool，不能因为
+Client 支持 POST 就声称 Agent 已经可以安全回写。
+
+### 7.4 GET、POST 与响应校验顺序
+
+GET 支持查询参数，POST 支持 JSON Body。两者都只接受 `/api/` 开头的相对业务路径，避免
+调用方传入绝对 URL 绕过配置的 Java 服务地址。
+
+一次正常请求的顺序为：
+
+```text
+校验相对路径
+→ 构造身份与 Trace Header
+→ httpx 使用连接池和分项超时发送请求
+→ response.raise_for_status() 检查 HTTP 状态
+→ Pydantic 解析并校验 Java 成功信封
+→ TypeAdapter 校验具体 data Model
+→ 比较响应 Header 与 Body 的 Trace ID
+→ 返回 BusinessResponse[DataT]
+```
+
+HTTP 200 不等于业务响应可信。例如 Java 故障模拟返回缺少 `data` 的 JSON 时，Client 会抛出
+`BusinessResponseValidationError`，不会把它当成空订单继续交给 Agent 归纳。这是防止模型基于
+不完整事实生成结论的第一道边界。
+
+### 7.5 超时和当前错误边界
+
+当前四项超时分别控制 connect、read、write 和等待连接池的 pool timeout。它们必须大于 0
+且不超过 60 秒。分开配置可以区分“连接不上 Java”和“Java 已接收但业务处理过慢”，为后续
+重试决策提供依据。
+
+M1.2 不自动重试，也不把异常映射成 Tool 错误：
+
+- 4xx/5xx 当前保留为 `httpx.HTTPStatusError`；
+- 连接和读写超时当前保留为 `httpx.TimeoutException` 子类；
+- JSON、信封、data 或 Trace 不合法时抛出 `BusinessResponseValidationError`。
+
+M1.3 会将这些异常映射为统一错误码，M1.6 才会对明确可重试的只读调用增加有限重试。POST
+不能因为超时或 500 就直接自动重试，否则服务端可能已经完成写入但响应在途中丢失。
+
+## 8. 启动、请求和关闭顺序
+
+### 8.1 标准本地启动
 
 ```bash
 cd agent-service
@@ -613,7 +753,7 @@ uv run uvicorn app.main:app --reload
 
 `--reload` 适合本地调试，会监控代码变化并重启进程；它不是项目标准生产启动方式。
 
-### 7.2 应用启动顺序
+### 8.2 应用启动顺序
 
 ```text
 uv 读取 .python-version
@@ -625,13 +765,14 @@ uv 读取 .python-version
 → FastAPI 进入 lifespan
 → 配置 JSON 日志
 → 创建惰性 Database/Engine
+→ 创建共享 BusinessHttpClient/HTTP 连接池
 → 服务开始接收请求
 ```
 
 `python -m app.main` 中的 `-m` 表示按 Python 模块运行，而不是把文件当作无包上下文的脚本。
 这样 `from app.settings import Settings` 等绝对包导入能保持一致。
 
-### 7.3 一次 `/health` 请求
+### 8.3 一次 `/health` 请求
 
 请求：
 
@@ -672,20 +813,21 @@ curl -H "X-Trace-Id: trace-001" http://127.0.0.1:8000/health
 `/health` 是 liveness，只证明 Python 应用进程可以响应，不访问 PostgreSQL。当前没有数据库
 readiness 接口，不能声称数据库健康已由该接口验证。
 
-### 7.4 应用关闭顺序
+### 8.4 应用关闭顺序
 
 ```text
 进程收到停止信号
 → Uvicorn 停止接收新请求
 → FastAPI lifespan 进入 yield 之后
+→ BusinessHttpClient.aclose() 释放 HTTP 连接池
 → Database.dispose() 释放 Engine/连接池
 → 输出 service_stopped
 → 进程退出
 ```
 
-## 8. Alembic 数据库迁移
+## 9. Alembic 数据库迁移
 
-### 8.1 文件职责
+### 9.1 文件职责
 
 ```text
 agent-service/
@@ -701,7 +843,7 @@ agent-service/
 - `script.py.mako`：创建新 revision 时生成 Python 文件的模板；
 - `versions/`：保存实际迁移版本。
 
-### 8.2 `target_metadata`
+### 9.2 `target_metadata`
 
 ```python
 target_metadata = Base.metadata
@@ -710,7 +852,7 @@ target_metadata = Base.metadata
 未来 Alembic 可以比较 SQLAlchemy Model 与数据库结构，并生成迁移差异。当前 `Base` 下还
 没有 Agent Model，因此没有 Run/Step 等业务 revision。
 
-### 8.3 独立版本表
+### 9.3 独立版本表
 
 ```python
 version_table = "agent_alembic_version"
@@ -722,7 +864,7 @@ Java Flyway 使用 `flyway_schema_history`，Python Alembic 使用 `agent_alembi
 当前数据库只创建了空的 `agent_alembic_version`，`migrations/versions/` 没有业务迁移文件。
 `.gitkeep` 仅用于让 Git 保留空目录，没有运行时逻辑。
 
-### 8.4 当前迁移命令
+### 9.4 当前迁移命令
 
 从仓库根目录执行：
 
@@ -745,9 +887,9 @@ make agent-migrate
 
 不能在 Python 迁移中创建或修改 Java 订单等业务表。
 
-## 9. 测试和质量检查
+## 10. 测试和质量检查
 
-### 9.1 pytest 配置
+### 10.1 pytest 配置
 
 `pyproject.toml` 中定义：
 
@@ -759,7 +901,7 @@ integration  覆盖应用组件边界的测试
 `asyncio_mode="auto"` 让 pytest 能执行 `async def` 测试；严格标记可以防止拼错 marker 后
 测试被静默分类错误。
 
-### 9.2 当前测试文件
+### 10.2 当前测试文件
 
 [`agent-service/tests/test_health.py`](../agent-service/tests/test_health.py)：
 
@@ -787,7 +929,14 @@ integration  覆盖应用组件边界的测试
 - 验证迁移目录、`env.py` 和模板存在；
 - 不执行数据库迁移。
 
-### 9.3 Ruff 与 mypy
+[`agent-service/tests/test_business_client.py`](../agent-service/tests/test_business_client.py)：
+
+- 验证 Base URL 和 connect/read/write/pool 超时；
+- 验证 FastAPI 启动/关闭与共享 Client 生命周期；
+- 验证 GET/POST、身份、Token、Trace 和幂等键 Header；
+- 验证正常信封、data Schema、非法 JSON、字段缺失和 Trace 不一致。
+
+### 10.3 Ruff 与 mypy
 
 Ruff 检查：
 
@@ -816,21 +965,22 @@ def get_name() -> str:
 代码可能被 Python 加载，但 mypy 会报告返回值类型错误。因此 Python 项目的可靠类型边界
 依赖明确类型提示、mypy 和 Pydantic 各自承担不同职责。
 
-### 9.4 根级验收命令
+### 10.4 根级验收命令
 
 [`Makefile`](../Makefile) 提供：
 
 ```bash
 make test-agent-foundation  # 运行 M1.1 的 6 个 Python 测试
+make test-agent-client      # 运行 M1.2 的 10 个 Client 测试
 make quality                # Ruff + mypy strict
 make agent-migrate          # 容器内执行 Alembic upgrade head
 make smoke                  # 验证 Java、Python、Web 健康检查
 make test                   # 当前仓库完整回归
 ```
 
-## 10. Docker 与 Compose
+## 11. Docker 与 Compose
 
-### 10.1 `agent-service/Dockerfile`
+### 11.1 `agent-service/Dockerfile`
 
 [`agent-service/Dockerfile`](../agent-service/Dockerfile) 使用多阶段构建：
 
@@ -856,7 +1006,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 类比 Java 是“构建可运行 JAR 后 `java -jar`”，类比 Node 是“`npm ci --omit=dev` 后
 `node server.mjs`”。
 
-### 10.2 根级 `docker-compose.yml`
+### 11.2 根级 `docker-compose.yml`
 
 [`docker-compose.yml`](../docker-compose.yml) 中的 Agent 服务：
 
@@ -878,9 +1028,9 @@ pgvector/pgvector:pg16
 默认开发数据库名为 `remote_sensing_agent`，用户和密码由根级 `.env`/Compose环境变量提供。
 真实密钥不得写入本文、源码、日志或提交记录。
 
-## 11. Python 初学时需要重点理解的语法
+## 12. Python 初学时需要重点理解的语法
 
-### 11.1 缩进就是代码结构
+### 12.1 缩进就是代码结构
 
 Java和TypeScript用 `{}` 表示代码块，Python用缩进：
 
@@ -892,7 +1042,7 @@ if condition:
 
 缩进错误不仅影响格式，还可能改变逻辑或直接导致语法错误。
 
-### 11.2 import 会执行模块顶层代码
+### 12.2 import 会执行模块顶层代码
 
 ```python
 from app.main import app
@@ -903,7 +1053,7 @@ from app.main import app
 
 因此应避免在 import 阶段进行网络调用、写数据库或调用模型。
 
-### 11.3 装饰器
+### 12.3 装饰器
 
 ```python
 @application.get("/health")
@@ -916,7 +1066,7 @@ async def health():
 
 它与Java注解用途相似，但Python装饰器本身是运行时可执行函数，不只是元数据。
 
-### 11.4 类型提示与运行时校验
+### 12.4 类型提示与运行时校验
 
 ```python
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -935,7 +1085,7 @@ class HealthResponse(BaseModel):
 
 会在运行时校验外部输入或输出。后续 Tool 的输入输出必须使用Pydantic，不能只依赖类型提示。
 
-### 11.5 `async def` 与 `await`
+### 12.5 `async def` 与 `await`
 
 ```python
 async def load_order():
@@ -950,7 +1100,7 @@ Python Agent后续会调用多个Java接口、模型和数据库，异步I/O可�
 
 不能在异步函数中随意执行长时间阻塞操作，例如直接 `time.sleep(5)`，否则会阻塞事件循环。
 
-### 11.6 `async with`
+### 12.6 `async with`
 
 ```python
 async with database.session() as session:
@@ -960,7 +1110,7 @@ async with database.session() as session:
 它用于异步资源的进入和释放，类似Java try-with-resources或Node `try/finally`。即使代码抛出
 异常，Session仍能执行清理。
 
-### 11.7 `yield` 与 lifespan
+### 12.7 `yield` 与 lifespan
 
 在 `@asynccontextmanager` 中：
 
@@ -974,14 +1124,14 @@ async def lifespan(...):
 `yield`之前是进入上下文，之后是退出上下文。FastAPI用它表达应用启动和停止，而不是普通
 接口返回值。
 
-### 11.8 `ContextVar`
+### 12.8 `ContextVar`
 
 `ContextVar` 保存当前异步调用链中的值，适合Trace、请求用户或Run ID。普通全局变量会在
 并发请求间共享，`threading.local` 又不能完整表达异步任务上下文，因此需要专门的上下文变量。
 
-## 12. 当前能力边界和后续目录
+## 13. 当前能力边界和后续目录
 
-### 12.1 M1.1 已完成
+### 13.1 M1.1～M1.2 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -990,15 +1140,18 @@ async def lifespan(...):
 - 异步SQLAlchemy Engine/Session基础；
 - Alembic骨架和独立版本表；
 - JSON日志和安全Trace ID；
+- 共享异步Java HTTP Client和连接池；
+- 身份、Token、Trace ID和幂等键透传；
+- GET/POST封装与分项超时；
+- Java统一成功信封和调用方data Schema校验；
 - pytest、Ruff、mypy；
 - Docker/Compose运行。
 
-### 12.2 当前尚未实现
+### 13.2 当前尚未实现
 
-- Java HTTP Client；
-- Java统一响应的Pydantic Schema；
 - Tool基类、注册表和具体只读Tool；
-- Tool错误映射、超时和重试；
+- HTTP/超时/响应校验异常到Tool错误的统一映射；
+- 只读Tool的有限重试；
 - 数据库readiness；
 - Run/Step实体和持久化；
 - Workflow、动态Agent、模型调用；
@@ -1006,17 +1159,15 @@ async def lifespan(...):
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 12.3 T109以后可能增加的结构
+### 13.3 T118 以后可能增加的结构
 
 后续可能逐步形成：
 
 ```text
 app/
-├── clients/
-│   └── business_client.py       # 调用Java API，类似Feign/Axios Client
 ├── schemas/
-│   ├── business.py              # Java响应Pydantic模型
-│   └── errors.py                # 标准错误模型
+│   ├── errors.py                # 标准错误模型
+│   └── order.py                 # 端点业务DTO
 ├── tools/
 │   ├── base.py                  # Tool协议
 │   ├── registry.py              # Tool注册与查找
@@ -1025,15 +1176,14 @@ app/
     └── internal_tools.py        # 无Agent时调试Tool的内部接口
 ```
 
-这些是基于开发计划的预计结构，不代表文件已经存在；实际实现时仍以对应任务和测试为准。
+这些是基于开发计划的预计结构，不代表文件已经存在；已实现的 `clients/business.py` 和
+`schemas/business.py` 不再列为预计目录。实际实现时仍以对应任务和测试为准。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 
 ```text
-Python Client如何配置Java Base URL和超时
-→ Python如何透传用户身份与Trace ID
-→ Java统一信封如何转换为Pydantic模型
-→ 400/403/404/409/500如何映射为稳定错误
+400/403/404/409/500如何从HTTP异常映射为稳定Tool错误
 → 哪些只读错误允许有限重试
+→ 每个Java data如何定义端点级Pydantic模型
 → 为什么Python只能通过Java API取得业务事实
 ```

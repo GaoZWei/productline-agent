@@ -13,6 +13,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.settings import Settings
 
+
 # 异步数据库
 class Base(DeclarativeBase):
     """Metadata root for future Agent Run, Step and Approval tables."""

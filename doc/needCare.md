@@ -271,10 +271,11 @@ DELIVERY-003 = BLOCKED
 
 ### 不能过度声称
 
-- 当前完成的是 Java HTTP 事实接口，尚未实现 Python HTTP Client、Tool Schema 或
-  Agent 实际调用。
+- Java HTTP 事实接口和 Python 通用 HTTP Client 已完成；正式端点 data Schema、具体 Tool 和
+  Agent 实际调用尚未实现。
 - M0.4 完成时尚未实现权限校验、统一错误响应、Trace ID、超时重试或故障模拟；其中
-  Java 统一错误响应和 Trace ID 已在 M0.6 完成，Python Tool 重试和故障模拟仍未实现。
+  Java 统一错误响应和 Trace ID 已在 M0.6 完成，Java 故障模拟已在 M0.7 完成；Python Tool
+  错误映射和重试仍未实现。
 - 聚合接口已通过固定规模集成测试，但没有生产规模性能数据，不能声称已解决 N+1 或
   达到某项吞吐/延迟指标。
 - 尚未实现动态 Tool 路由和 Agent E2E 评测，不能把接口测试等同于 Agent 准确率。
@@ -433,7 +434,7 @@ Tool 可以把同一 ID 保存到 Run/Step，用一条标识串联 Agent 决策�
 
 ### 不能过度声称
 
-- 当前完成的是 Java API 契约；Python HTTP Client、Pydantic 错误 Schema、Tool 分支和
+- Python HTTP Client 和成功信封 Schema 已在 M1.2 实现；Pydantic 错误 Schema、Tool 分支和
   自动重试策略尚未实现。
 - Trace ID 已进入 Java Header、响应体和 MDC，但尚未接入 Agent Run/Step、SSE 或跨服务
   可观测平台，不能声称已完成端到端链路追踪。
@@ -518,9 +519,10 @@ Client 中实现并评测。
 
 ### 不能过度声称
 
-- 当前完成的是 Java 故障提供端；Python HTTP Client、ToolResult 错误映射、重试次数、
-  退避、熔断和 Workflow 降级尚未实现。
-- 已验证 Java `HttpClient` 能发生超时，不等于已经验证 httpx 的具体超时配置。
+- Java 故障提供端和 Python HTTP Client 已完成；ToolResult 错误映射、重试次数、退避、
+  熔断和 Workflow 降级尚未实现。
+- M1.2 已验证 httpx 分项超时配置和 MockTransport `ReadTimeout` 传播，但尚未通过该 Client
+  对真实 Java timeout 故障完成错误码映射。
 - 没有生产混沌工程平台、网络分区、连接池耗尽或容量测试，不能声称完成全面故障演练。
 - 延迟使用阻塞线程，适合固定测试但不能代表响应式、异步或生产级延迟注入方案。
 - 模拟权限失败不等同于真实认证授权测试；真实身份仍未接入。
@@ -583,8 +585,106 @@ HTTP Tool 获取。FastAPI 中间件为每个请求接受或生成安全 Trace I
 
 ### 不能过度声称
 
-- 当前没有 Java HTTP Client、Tool、Workflow、模型调用或 Agent 诊断。
+- 当前已有 Java HTTP Client，但没有 Tool、Workflow、模型调用或 Agent 诊断。
 - `Base` 只是 Agent 自有元数据入口，尚未实现 Run、Step、Approval 或 RAG 表。
-- Trace 已覆盖 Python 请求日志，但尚未透传到 Java Tool，也没有端到端 Trace/Run 查询。
+- Trace 已由 Python Client 透传到真实 Java 查询链路，但尚未进入 Tool/Run/Step，也没有
+  端到端 Trace/Run 查询。
 - 本地开发尚未实现数据库角色级隔离，不能声称已经完成生产级数据权限边界。
 - `/health` 是存活探针，没有数据库 readiness、指标平台或分布式追踪。
+
+---
+
+## M1.2 Java HTTP Client 事实门禁与跨服务上下文
+
+### 面试价值判断
+
+核心关注。M1.2 的价值不在“会用 httpx 发请求”，而在于把 Java 业务事实进入 Tool 和模型
+之前的可靠性边界落实为强类型响应门禁、身份与 Trace 透传、写请求幂等约束和明确的错误/
+重试停止线。
+
+### 与 Agent 开发的关系
+
+当前调用链已经可以真实执行：
+
+```text
+Python ContextVar Trace
+→ 共享 BusinessHttpClient
+→ Java /api/**
+→ Java 六字段成功信封
+→ Pydantic 信封校验
+→ 端点 data Schema 校验
+→ Header/Body Trace 一致性校验
+→ 强类型 BusinessResponse
+```
+
+真实容器验收读取了 `ORDER-003=QUALITY_CHECKING` 并保持 `trace-m12-real`，证明 Python 已经
+通过 Java API 获取业务事实，而不是直接读取 Java 数据库。非法 JSON、缺少 `data`、端点字段
+缺失和 Trace 不一致都会在进入 Tool/模型前被拒绝。
+
+简略描述：
+1. FastAPI启动时创建一个共享Java Client。
+2. Tool未来调用Client，Client补齐身份和Trace。
+3. Java查询数据库并把DTO包装成统一响应。
+4. Python先校验信封，再校验业务data，最后才交给Tool/Agent。
+
+### 需要掌握的设计取舍
+
+- FastAPI lifespan 只创建一个 `httpx.AsyncClient`，复用连接池，并在应用关闭时显式释放；
+  不能让每次 Tool 调用都新建 Client。
+- connect/read/write/pool timeout 分开配置。连接失败、上游处理慢、发送阻塞和连接池耗尽
+  是不同故障，后续是否重试和如何观测也不同。
+- 统一信封和端点 data 分两层校验。信封保证 `success/code/message/data/trace_id/retryable`
+  完整，调用方模型保证订单或任务字段完整，避免 HTTP 200 下的不完整事实诱发模型幻觉。
+- `BusinessIdentity` 透传用户、角色和可选 Bearer Token，Token 使用 `SecretStr` 避免对象
+  调试输出泄露；Java 仍必须重新校验权限，Python Header 不是权限事实。
+- POST 强制传递幂等键，但 Client 不自动重试。超时或 500 时写入结果可能未知，必须依赖
+  Java 幂等、版本校验和后续状态查询，不能盲目重放。
+- Client 只接受 `/api/` 相对路径，防止绝对 URL 绕过固定上游；`trust_env=False` 防止内部
+  Java 流量被宿主机代理改道。这个决策来自测试实际发现的 SOCKS 代理初始化失败。
+- M1.2 保留 `HTTPStatusError`、`TimeoutException` 和 `BusinessResponseValidationError`，
+  M1.3 才做统一 Tool 错误映射，M1.6 才做只读有限重试，避免层次混杂。
+
+### 可能的面试问题
+
+**为什么 HTTP 200 后还要做两层 Schema 校验？**
+
+回答要点：状态码只说明 HTTP 传输成功，不能证明统一信封完整或业务对象字段可靠。先验证
+信封，再验证具体 data，可以把协议漂移和业务 DTO 漂移分开定位，并阻止模型用不完整数据
+补造事实。
+
+**为什么 AsyncClient 要跟随应用生命周期，而不是每次请求创建？**
+
+回答要点：共享实例复用 TCP/TLS 连接池，降低延迟和端口消耗；lifespan 统一创建和关闭，
+测试也能验证资源已释放。它类似 Spring 中的单例 WebClient/连接池。
+
+**为什么内部调用设置 `trust_env=False`？**
+
+回答要点：默认继承宿主机代理可能让服务间流量离开预期网络，或因缺少代理扩展导致启动
+失败。内部上游应只由受控 Base URL 和部署网络决定。本项目是在测试中真实发现 SOCKS 环境
+变量问题后做出的修复。
+
+**POST 超时为什么不能直接重试？**
+
+回答要点：超时只代表客户端没有收到结果，服务端可能已经提交。安全恢复需要稳定幂等键、
+版本校验、操作日志和必要时的状态查询；自动重试策略必须区分读写和剩余时间预算。
+
+**Trace ID 和身份 Header 能被 Python 信任吗？**
+
+回答要点：不能。Python 负责安全格式和上下文透传，Java 仍负责身份、权限和业务状态校验。
+Trace 用于关联而不是授权；未来还要把 Trace 与 Run/Step 一起持久化。
+
+### 简历表述建议
+
+> 设计并实现 Python Agent 到 Java 业务服务的异步 HTTP Client，使用共享连接池和分项超时，
+> 透传身份与 Trace；通过统一信封、端点 Pydantic Schema 和 Trace 一致性三重校验拦截不完整
+> 业务事实，并以幂等键和“写请求不盲目重试”约束后续 Agent 回写边界。
+
+### 不能过度声称
+
+- 当前完成的是 Client，不是可被模型调用的 Tool；尚无 ToolRegistry、ToolContext 或具体
+  订单查询 Tool。
+- 4xx/5xx、超时和响应校验异常尚未映射为统一 Tool 错误码，也没有自动重试、退避或熔断。
+- 当前只有统一成功信封和测试用端点 data Model；正式订单、任务、质检等 Tool DTO 尚未实现。
+- POST 能发送身份和幂等键不等于 Approval 已完成；没有用户确认、草稿持久化或 Agent 写回。
+- 已验证真实 `ORDER-003` 成功链路；真实 Java 故障到 Python 标准错误的端到端评测仍待 M1.3。
+- Token 只是安全透传能力，当前 Java 最小认证仍主要使用用户/角色 Header，不是生产级 JWT/RBAC。

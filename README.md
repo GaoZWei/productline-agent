@@ -2,7 +2,7 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M1.1 Python 工程初始化**：Java 业务事实接口与 M0 前端基线已经完成；Python 服务已使用 uv 管理 Python 3.12、FastAPI、SQLAlchemy/Alembic、pytest、Ruff 和 mypy，并提供带 Trace ID 的结构化日志基础。Java HTTP Client 和 Tool 从 M1.2 开始实现。
+当前进度为 **M1.2 Java HTTP Client**：Python 服务已具备共享的 `httpx.AsyncClient`、分项超时、身份/Trace 透传、GET/POST 封装和严格成功响应校验。M1.3 将继续实现统一错误映射，当前尚未进入 Tool 或模型调用。
 
 ## 环境要求
 
@@ -48,6 +48,7 @@ make dev-agent        # 只启动 Python 服务及其依赖
 make dev-web          # 只启动 Web 服务及其依赖
 make test             # 运行基础检查、服务冒烟和 Java 领域集成测试
 make test-agent-foundation # 验证 M1.1 Python 工程基础
+make test-agent-client # 验证 M1.2 Java HTTP Client
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试

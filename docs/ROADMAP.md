@@ -11,7 +11,8 @@
   - [x] M0.8 最小前端业务页面（T050～T057）
 - [ ] M1 Python Tool 层
   - [x] M1.1 Python 工程初始化（T101～T108）
-  - [ ] M1.2 Java HTTP Client（T109～T117）
+  - [x] M1.2 Java HTTP Client（T109～T117）
+  - [ ] M1.3 标准错误模型（T118～T126）
 - [ ] M2 确定性订单诊断
 - [ ] M3 页面上下文与路由
 - [ ] M4 RAG

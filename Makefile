@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -15,13 +15,16 @@ validate: ## 检查 M0.1 必需目录、文件与 Compose 配置
 	./scripts/check-foundation.sh
 	$(COMPOSE) config --quiet
 
-test: validate smoke test-agent-foundation test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web ## 运行当前阶段全部自动检查
+test: validate smoke test-agent-foundation test-agent-client test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web ## 运行当前阶段全部自动检查
 
 smoke: ## 验证 Java、Python 和 Web 健康检查
 	./scripts/smoke-services.sh
 
 test-agent-foundation: ## 验证 M1.1 FastAPI、数据库、Alembic 和结构化日志基础
-	cd agent-service && uv run --frozen pytest -q
+	cd agent-service && uv run --frozen pytest -q tests/test_health.py tests/test_database.py tests/test_observability.py tests/test_alembic.py
+
+test-agent-client: ## 验证 M1.2 Java HTTP Client 配置、生命周期和响应契约
+	cd agent-service && uv run --frozen pytest -q tests/test_business_client.py
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查
 	cd agent-service && uv run --frozen ruff check .

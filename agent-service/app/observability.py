@@ -49,7 +49,7 @@ def resolve_trace_id(candidate: str | None) -> str:
         return candidate
     return f"trace-{uuid4()}"
 
-# JSON 格式化器，更方便后续日志系统按字段查询日志
+# JSON 格式化器方便后续日志系统按字段查询日志。
 class JsonFormatter(logging.Formatter):
     """Serialize stable log fields without leaking arbitrary object state."""
 
@@ -79,7 +79,7 @@ def configure_logging(level: str) -> None:
     root_logger.addHandler(handler)
     root_logger.setLevel(level)
 
-# Trace ID 中间件，用于在每个请求中绑定一个 Trace ID
+# Trace ID 中间件为每个请求绑定一个 Trace ID。
 class TraceIdMiddleware(BaseHTTPMiddleware):
     """Bind one safe Trace ID to the response and every request log."""
 
@@ -88,7 +88,9 @@ class TraceIdMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
+        # 中间件读取 Header 中的 Trace ID
         trace_id = resolve_trace_id(request.headers.get(TRACE_ID_HEADER))
+        # 然后写入 ContextVar
         token = set_trace_id(trace_id)
         started_at = perf_counter()
         try:

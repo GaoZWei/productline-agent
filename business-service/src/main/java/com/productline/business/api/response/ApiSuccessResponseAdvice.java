@@ -33,12 +33,13 @@ public class ApiSuccessResponseAdvice implements ResponseBodyAdvice<Object> {
         if (body instanceof ApiResponse<?>) {
             return body;
         }
+        // 也就是把 OrderDto 放到 data 字段中
         return ApiResponse.success(body, currentTraceId());
     }
 
     private String currentTraceId() {
-        ServletRequestAttributes attributes =
-                (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder
+                .currentRequestAttributes();
         HttpServletRequest request = attributes.getRequest();
         return TraceIdFilter.currentTraceId(request);
     }

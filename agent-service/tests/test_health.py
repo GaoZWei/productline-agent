@@ -11,8 +11,9 @@ async def test_health_endpoint_preserves_safe_trace_id() -> None:
     app = create_app(Settings(environment="test"))
 
     async with app.router.lifespan_context(app):
+        # 直接在测试进程中调用 FastAPI 应用。测试不监听真实端口。
         async with AsyncClient(
-            transport=ASGITransport(app=app),  # 直接在测试进程中调用FastAPI应用，不需要真的启动8000端口
+            transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
             response = await client.get("/health", headers={"X-Trace-Id": "trace-test-001"})

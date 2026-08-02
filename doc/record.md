@@ -1127,3 +1127,119 @@
     没有新增 Agent、Tool、Workflow、RAG、Approval、评测或可靠性实现证据。
 - 下一建议任务：
   - `[T109] 定义 Java Client 配置模型`。
+
+## 2026-08-01 18:54 — `[T109-T117] M1.2 Java HTTP Client`
+
+- 里程碑：M1 Python Tool 层
+- 任务类型：功能 / Schema / 测试 / 配置 / 文档
+- 目标与范围：
+  - 本次实现：建立 Python 到 Java 的共享异步 HTTP Client，完成 Base URL、分项超时、
+    生命周期、身份/Token/Trace 透传、GET/POST、幂等键以及成功响应双层 Schema 校验。
+  - 明确不实现：不实现 M1.3 标准 Tool 错误映射、M1.4 Tool 协议、M1.5 端点 Tool、M1.6
+    自动重试、Workflow、模型调用、RAG、Run/Step 或 Approval。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：Python 只通过 Java `/api/**` 获取事实；真实容器验收读取
+    `ORDER-003=QUALITY_CHECKING`，没有为 Java 订单表增加 Python ORM。
+  - 方案选择及原因：统一成功信封与具体 data 分两层校验。第一层固定六字段，第二层由调用方
+    传入 Pydantic Model；避免 HTTP 200 或统一信封正常时把缺字段业务数据交给 Tool/模型。
+  - 生命周期：FastAPI lifespan 创建一个共享 `httpx.AsyncClient` 并在关闭时释放连接池，避免
+    每次 Tool 调用新建连接；数据库和 HTTP Client 的关闭使用嵌套 `finally`，保证一方关闭失败
+    时仍尝试释放另一方。
+  - 网络边界：只接受 `/api/` 相对路径，内部 Client 设置 `trust_env=False`。首轮测试实际发现
+    宿主机 SOCKS 代理会导致无 Mock Client 初始化失败，内部服务流量改为只服从受控 Base URL。
+  - 写安全：POST 要求身份和安全格式幂等键，但不自动重试。超时/500 下服务端写入结果可能
+    未知，M1.2 不绕过 Java 幂等、版本和操作日志边界。
+  - 契约、状态或兼容性影响：httpx 从开发依赖转为生产依赖；新增四个可配置超时环境变量。
+    未修改 Java API、固定数据或 Web 契约。
+- 核心实现：
+  - `agent-service/app/clients/business.py` — `BusinessHttpClient`：共享连接池、GET/POST、相对
+    路径限制、身份/Trace/幂等 Header、HTTP 状态检查和成功响应校验；
+    `BusinessResponseValidationError` 不包含原始响应 Body，避免错误信息泄露上游数据。
+  - `agent-service/app/schemas/business.py` — `BusinessIdentity` 使用 `SecretStr` 隐藏 Token；
+    `BusinessSuccessEnvelope` 严格校验 Java 六字段；`BusinessResponse[DataT]` 返回强类型 data。
+  - `agent-service/app/settings.py` — `AnyHttpUrl` Base URL，以及 connect/read/write/pool 四项
+    `>0` 且 `<=60s` 配置。
+  - `agent-service/app/main.py` — lifespan 创建 `BusinessHttpClient`、保存到
+    `application.state.business_client`，停止时先关闭 HTTP 连接池再释放数据库 Engine。
+  - 必要的最小关键片段：
+
+    ```text
+    HTTP status
+    → BusinessSuccessEnvelope
+    → TypeAdapter(endpoint data model)
+    → Header/Body Trace equality
+    → BusinessResponse[DataT]
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：未来 Tool 取得应用级 Client → Client 构造身份和 Trace Header → httpx
+    使用连接池与分项超时请求 Java → 先校验 HTTP，再校验信封和 data → 返回可供 Tool 使用的
+    强类型事实。当前还没有具体 Tool。
+  - 核心类、函数、接口或配置项：`BusinessHttpClient`（第 33 行）、`get`（第 66 行）、`post`
+    （第 82 行）、`_build_headers`（第 112 行）、`_validate_success_response`（第 132 行）；
+    `BusinessIdentity`（Schema 第 13 行）、`BusinessSuccessEnvelope`（第 33 行）、
+    `BusinessResponse`（第 50 行）；Settings HTTP 配置第 27 行；lifespan 集成第 35 行。
+  - 输入、输出、异常和边界：GET 输入相对路径、可选身份/Trace/查询参数；POST 额外要求 JSON、
+    身份和幂等键；输出为 `BusinessResponse[DataT]`。4xx/5xx 保留 `HTTPStatusError`，超时保留
+    httpx 异常，非法 JSON/Schema/Trace 转为 Client 校验异常，等待 M1.3 映射。
+  - 关键代码位置：`agent-service/app/clients/business.py:33`、`:66`、`:82`、`:112`、`:132`；
+    `agent-service/app/schemas/business.py:13`、`:33`、`:50`；`agent-service/app/settings.py:27`；
+    `agent-service/app/main.py:35`；`agent-service/tests/test_business_client.py:36`。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：身份 Header 禁止空值、换行和超长；Token 不进入 repr；Trace 使用
+    既有安全生成规则；超时分四类；Client 不打印原始响应。Java 仍是最终权限校验者。
+  - 幂等、并发或人工确认：共享 AsyncClient 支持并发连接池；POST 强制幂等键但没有自动重试；
+    Approval 未实现，不能将 POST Client 描述为 Agent 已可写回。
+- 未完成项与已知问题：
+  - 未完成项：T118～T126 标准错误映射、端点业务 DTO、具体 Tool、只读重试与真实故障到标准
+    错误的端到端测试尚未实现。
+  - 已知问题/阻塞：无功能阻塞；Java 测试仍输出 Mockito 动态 Agent 的未来 JDK 兼容警告。
+- 替代方案：
+  - 采用的替代方案及原因：无临时替代方案。MockTransport 用于确定性覆盖请求和异常分支，
+    同时使用 Compose 真实 Java 请求补充跨服务成功链路证据，两者是不同层级测试。
+  - 已覆盖/未覆盖的验收要求：已覆盖 T109～T117 和真实 `ORDER-003` 成功调用；未覆盖 M1.3
+    错误码映射和真实故障恢复，因为属于下一子阶段。
+  - 局限、风险和转正/移除条件：MockTransport 不证明真实网络故障分类；M1.3 应接入 Java
+    故障夹具验证 403/404/500/超时/非法响应，并保留当前单元测试。
+- 后续影响：
+  - 对后续任务/里程碑：T118 可直接基于 `HTTPStatusError`、`TimeoutException` 和
+    `BusinessResponseValidationError` 建立标准错误；T127+ Tool 应复用应用级 Client，禁止
+    直接新建 httpx 或信任原始 JSON。
+  - 对接口/数据/测试/部署：Agent 生产镜像新增 httpx 运行依赖；Compose 新增四项超时配置；
+    Java API、数据库和前端不变。部署需要保证 `BUSINESS_SERVICE_URL` 在服务网络内可达。
+- 测试与验证：
+  - `[预期失败] uv run --frozen pytest -q tests/test_business_client.py` — 收集阶段 1 个导入错误，
+    `app.clients` 尚不存在。
+  - `[失败后修复] 同一测试` — 首轮 8/10；宿主机 SOCKS 代理导致 2 个 Client 初始化失败；
+    设置 `trust_env=False` 后 10/10。
+  - `[通过] make test-agent-foundation` — M1.1 6/6。
+  - `[通过] make test-agent-client` — M1.2 10/10。
+  - `[通过] make quality` — Ruff 全部通过；mypy strict 检查 14 个文件无问题。
+  - `[通过] uv lock --check && pytest -q` — 锁文件解析 42 个包；Python 16/16。
+  - `[通过] docker compose up --detach --build business-service agent-service` — 两镜像构建、
+    容器启动成功，Agent 生产环境安装 29 个非开发依赖。
+  - `[通过] 真实容器 Client 验收` — `ORDER-003 QUALITY_CHECKING trace-m12-real`。
+  - `[通过] make smoke` — 三服务通过。
+  - `[通过] make test` — Python 16/16、Java M0 56/56、Web 7/7 与生产构建全部通过。
+  - `[通过] git diff --check` — 无空白错误。
+  - `[未运行] make reset-demo` — 本次没有修改固定数据，且该命令会删除本地数据卷；完整
+    Testcontainers 数据回归和运行容器 `ORDER-003` 查询已覆盖非破坏性验证。
+- 变更文件：
+  - `agent-service/app/clients/__init__.py`、`business.py`
+  - `agent-service/app/schemas/__init__.py`、`business.py`
+  - `agent-service/app/settings.py`、`main.py`、`database.py`、`observability.py`
+  - `agent-service/tests/test_business_client.py`、`test_health.py`
+  - `agent-service/pyproject.toml`、`uv.lock`、`README.md`
+  - `.env.example`、`docker-compose.yml`、`Makefile`、`README.md`
+  - `doc/pythonKnowledge.md`、`doc/needCare.md`、`doc/record.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；标准错误、重试和 Tool 尚未完成是明确停止线，不是隐藏能力。
+  - 后续兼容注意事项：Java 信封或 Trace 契约变化时必须同步 `BusinessSuccessEnvelope` 和测试；
+    写 Tool 必须保持幂等键、版本校验、Approval 和禁止盲重试；内部调用如确需代理，应增加
+    显式受控代理配置，不能重新启用环境隐式代理。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次把业务事实进入 Agent 前的 Schema 门禁、身份/Trace
+    边界、写请求幂等与重试停止线以及代理环境故障定位落实为真实实现和测试。
+- 下一建议任务：
+  - `[T118] 定义 ToolException 基类`。

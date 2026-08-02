@@ -318,3 +318,30 @@
 - 最终失败：0
 - 未运行：没有运行 Python Tool/Java Client 测试，因为 T109 以后尚未实现；M1.1 尚无 Run/Step 等 Agent 业务表 revision
 - 已知非阻塞问题：宿主机 `127.0.0.1:5432` 同时存在本机 PostgreSQL，直接运行 Alembic 会连到错误实例并报角色不存在；根级迁移命令改为在 Compose 容器内执行。开发 Compose 尚未为 Agent 数据配置独立数据库角色；健康检查当前只验证进程存活
+
+## M1.2 Java HTTP Client
+
+- 验证时间：2026-08-01
+- 测试先行基线：`uv run --frozen pytest -q tests/test_business_client.py` 在收集阶段因
+  `app.clients` 尚不存在产生 1 个导入错误
+- 首轮实现：10 个测试中 8 个通过、2 个失败；失败原因是宿主机 SOCKS 代理被 httpx 默认
+  继承，而生产依赖未安装 SOCKS 扩展。内部服务 Client 改为 `trust_env=False` 后 10/10
+- `make test-agent-foundation`：M1.1 回归 6/6
+- `make test-agent-client`：M1.2 10/10
+  - Base URL 和 connect/read/write/pool 超时校验：通过
+  - FastAPI 生命周期创建/关闭共享 Client：通过
+  - GET/POST、身份/Token/Trace/幂等键 Header：通过
+  - 正常 JSON、缺少 data、业务 data 缺字段、非法 JSON、Trace 不一致：通过
+  - `httpx.ReadTimeout` 保留给 M1.3 映射：通过
+- `make quality`：Ruff 全部通过；mypy strict 检查 14 个源/测试文件无问题
+- `uv lock --check`：通过，共解析 42 个直接及传递依赖；httpx 已从开发依赖转为生产依赖
+- `docker compose up --detach --build business-service agent-service`：两个生产镜像构建并启动成功；Agent 镜像安装 29 个非开发依赖
+- 真实容器 Client 验收：通过；Python Client 调用 Java `GET /api/orders/ORDER-003`，返回
+  `ORDER-003 QUALITY_CHECKING trace-m12-real`，响应信封、data Schema 和 Trace 一致性均通过
+- `make smoke`：Agent、Business、Web 健康检查通过
+- `make test`：通过；Python 16/16、Java M0 56/56、Web 7/7 和生产构建全部通过
+- 最终失败：0
+- 未运行：未运行 M1.3 Tool 错误映射、M1.5 具体 Tool 或 M1.6 自动重试测试，对应功能尚未实现
+- 已知非阻塞问题：HTTP 状态、超时和 Client 响应校验异常仍是底层异常；当前仅验证成功
+  `ORDER-003` 真实链路，故障路径由 MockTransport 覆盖；Java 测试仍输出 Mockito 动态 Agent
+  的未来 JDK 兼容警告
