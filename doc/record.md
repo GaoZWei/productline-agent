@@ -1243,3 +1243,114 @@
     边界、写请求幂等与重试停止线以及代理环境故障定位落实为真实实现和测试。
 - 下一建议任务：
   - `[T118] 定义 ToolException 基类`。
+
+## 2026-08-03 21:16 — `[T118-T126] M1.3 标准错误模型`
+
+- 里程碑：M1 Python Tool 层
+- 任务类型：功能 / Schema / 测试 / 文档
+- 目标与范围：
+  - 本次实现：定义 9 类 `ToolErrorCode` 和结构化 `ToolException`；把 Java
+    400/401/403/404/409/500、httpx 四类 timeout、其他网络异常以及非法响应映射为稳定错误。
+  - 明确不实现：不实现 M1.4 Tool 协议、M1.5 业务 Tool/DTO、M1.6 自动重试、M1.7 重复调用
+    检测、Workflow、Run/Step、模型调用或 Approval。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：错误层不修改 `ORDER-003` 或 Java 业务事实；它保证未知资源、权限、
+    上游故障或不完整 data 不会作为正常业务事实进入未来 Tool/Agent。
+  - 方案选择及原因：`ToolException` 保存 `code/message/retryable/trace_id/status_code`。Workflow
+    后续按 code 分支，message 只给人阅读；status_code 保留 401/403 的协议差异。
+  - 双向契约校验：失败响应先由 `BusinessErrorEnvelope` 严格校验，再核对 HTTP 状态、Java
+    code 及 Header/Body Trace；不一致统一归为 `RESPONSE_VALIDATION_ERROR`，避免错误分类漂移。
+  - 安全异常：网络错误只暴露固定文案，原始 httpx 异常通过 Python 异常因果链保留，不把
+    内部 URL、代理或连接细节交给 Workflow/模型。
+  - 重试边界：timeout 和网络错误标记 `retryable=true` 只描述技术可恢复性，Client 本次仍只
+    调用一次。500 继承 Java `retryable=false`；写操作是否允许重放必须由后续 Tool 风险策略、
+    幂等和版本共同决定。
+  - 契约、状态或兼容性影响：`BusinessHttpClient.get/post` 不再向上泄露 `HTTPStatusError`、
+    `TimeoutException` 或响应校验异常，而是统一抛 `ToolException`；Java API、固定数据、前端和
+    数据库不变。
+- 核心实现：
+  - `agent-service/app/errors.py` — `ToolErrorCode` 定义 9 类机器错误；`ToolException` 提供安全
+    文案、可重试性、Trace 与 HTTP 状态。
+  - `agent-service/app/schemas/business.py` — `BusinessErrorEnvelope` 严格限定 Java 失败信封、
+    允许错误码、`data=null`、安全 Trace 和当前 `retryable=false` 契约。
+  - `agent-service/app/clients/business.py` — `_raise_request_error` 映射网络/超时；
+    `_validate_response` 分流成功与失败；`_raise_java_error` 完成状态/code/Trace 门禁；
+    `_raise_response_validation_error` 统一隐藏原始响应内容。
+  - `agent-service/tests/test_tool_errors.py` — 参数化覆盖 Java 六类 HTTP 映射、四类 timeout、
+    网络故障和五类响应契约错误，并断言 Client 不提前重试。
+  - 必要的最小关键片段：
+
+    ```text
+    Java/网络失败
+    → 识别传输错误或校验 BusinessErrorEnvelope
+    → 核对 HTTP status + Java code + Header/Body Trace
+    → ToolException(code, retryable, trace_id, status_code)
+    → 后续 Tool/Workflow 按 code 分支
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：未来 Tool 调用共享 Client；正常响应继续走成功信封和 data 双层校验；
+    非正常响应先区分传输异常和 Java HTTP 错误，校验后只向上暴露标准异常。
+  - 输入、输出、异常和边界：输入仍是 M1.2 的路径、身份、Trace、params/json；成功输出仍是
+    `BusinessResponse[DataT]`，失败输出变为 `ToolException`。本地非法路径/幂等键仍是调用方
+    编程错误，端点输入 Schema 的 `PARAM_VALIDATION_ERROR` 留给具体 Tool。
+  - `DUPLICATE_CALL` 和 `UNKNOWN_TOOL_ERROR` 只定义词汇；没有在 Client 层制造不属于它的触发
+    逻辑，分别等待 M1.7 重复调用检测和 M1.4 Tool 执行边界。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：400、401/403、404、409 均不可重试；Java 500 映射上游不可用
+    但保留不可重试；网络和 timeout 标记技术上可恢复；Schema/Trace 漂移不可重试。
+  - 幂等、并发或人工确认：没有自动重试；尤其 POST timeout 仍可能服务端已经提交，未来写
+    Tool 必须继续依赖稳定幂等键、版本校验、状态重查和 Approval。
+- 未完成项与已知问题：
+  - 未完成项：Tool 协议、端点 DTO、具体只读 Tool、有限重试、重复调用检测、Run/Step 和 Agent
+    E2E 尚未实现。
+  - 已知问题/阻塞：无功能阻塞；Java 测试仍输出 Mockito 动态 Agent 的未来 JDK 兼容警告。
+- 替代方案：
+  - 采用的替代方案及原因：参数化测试使用 `httpx.MockTransport` 精确覆盖所有分支；同时对
+    已运行的真实 Java 容器执行 6 条故障验收。Mock 用于确定性和边界组合，真实请求用于证明
+    两服务契约能实际对接，两者不是功能降级。
+  - 已覆盖/未覆盖的验收要求：覆盖 T118～T126、真实 400/403/404/500/超时/非法响应和完整
+    M0 回归；未覆盖自动恢复成功率或 Tool/Workflow 错误展示，因为对应能力尚未实现。
+  - 局限、风险和转正/移除条件：真实故障验收使用开发环境故障 Header 和一次性传输适配器，
+    不进入生产代码；未来正式跨服务集成测试可复用 Java 测试容器并自动管理服务生命周期。
+- 后续影响：
+  - 对后续任务/里程碑：T127+ Tool 应只消费 `ToolException.code`，不得解析 message；M1.6 只能
+    对明确只读、`retryable=true` 的错误设置有限重试，并设置次数、退避和总预算。
+  - 对接口/数据/测试/部署：无数据库、Java、Web 或部署配置变化；Python 调用方若曾捕获原始
+    httpx 异常需改为捕获 `ToolException`，当前仓库只有测试调用方且已同步。
+- 测试与验证：
+  - `[预期失败] uv run --frozen pytest -q tests/test_tool_errors.py tests/test_business_client.py` —
+    收集阶段 2 个导入错误，目标 `app.errors` 尚不存在。
+  - `[通过] make test-agent-errors` — M1.3 18/18。
+  - `[通过] make test-agent-client` — M1.2 回归 10/10。
+  - `[通过] make test-agent-foundation` — M1.1 回归 6/6。
+  - `[通过] agent-service 内 uv run --frozen pytest -q` — Python 汇总 34/34。
+  - `[通过] make quality` — Ruff 全部通过；mypy strict 检查 16 个文件无问题。
+  - `[通过] uv lock --check` — 解析 42 个包。
+  - `[通过] 真实 Java 故障验收` — 400/403/404/500/timeout/invalid-response 共 6/6，Trace 均
+    保持对应 `trace-m13-*`。
+  - `[通过] make test` — foundation/Compose、三服务 smoke、Python 34/34、Java M0 56/56、
+    Web 7/7 与生产构建全部通过。
+  - `[通过] docker compose up --detach --build agent-service && make smoke` — Agent 与依赖的
+    Java 生产镜像构建、容器重建和三服务 smoke 通过。
+  - `[通过] 生产容器 Python 导入验收` — `ToolErrorCode.TOOL_TIMEOUT` 输出 `TOOL_TIMEOUT`。
+  - `[通过] make validate + Markdown code fence 检查 + git diff --check` — 基础结构、Compose、
+    文档代码围栏和空白检查通过。
+  - `[失败后修复] 根目录 uv run pytest` — 根目录不是 Python 项目导致找不到 pytest；切换到
+    `agent-service` 后 34/34。首次 Ruff 因既有中文注释标点和新类型别名写法失败，修正后通过。
+  - `[未运行] make reset-demo` — 本次没有修改固定数据，且该命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/errors.py`、`app/clients/business.py`、`app/schemas/business.py`
+  - `agent-service/tests/test_tool_errors.py`、`tests/test_business_client.py`
+  - `Makefile`、`README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；标准错误还没有 ToolResult、Run/Step 或前端展示消费者。
+  - 后续兼容注意事项：如果 Java 将特定 5xx 改为 `retryable=true` 或新增错误码，必须同步
+    `BusinessErrorEnvelope`、状态/code 映射、读写重试策略和契约测试，不能只放宽 Pydantic。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次形成了模型/Workflow 可消费的稳定错误语义、失败
+    信封一致性门禁、安全异常链和“可恢复性不等于重试授权”的真实实现证据。
+- 下一建议任务：
+  - `[T127] 定义 Tool 基类`。

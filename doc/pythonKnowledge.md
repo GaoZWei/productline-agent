@@ -2,13 +2,13 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M1.2 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M1.3 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
 当前 `agent-service` 是一个独立的 Python 后端服务，主要承担未来的 Tool 封装、Workflow、
-Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架
-和最小可观测性，并已建立调用 Java 的异步 HTTP Client；尚未实现 Tool 或大模型调用。
+Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
+最小可观测性、Java 异步 HTTP Client 和标准错误映射；尚未实现具体 Tool 或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -607,10 +607,9 @@ M1.2 新增的调用链是：
 → BusinessHttpClient
 → httpx.AsyncClient 连接池
 → Java /api/**
-→ 校验 HTTP 状态
-→ 校验统一成功信封
-→ 校验端点 data Schema
-→ 返回 BusinessResponse[DataT]
+→ 按 HTTP 状态校验成功/失败信封
+→ 成功时校验端点 data Schema 并返回 BusinessResponse[DataT]
+→ 失败时映射为 ToolException
 ```
 
 它类似 Java 中封装好的 WebClient/Feign Client，也类似 Node 服务中带统一拦截和 Schema
@@ -618,10 +617,11 @@ M1.2 新增的调用链是：
 
 ### 7.1 `BusinessIdentity` 与响应 Schema
 
-[`agent-service/app/schemas/business.py`](../agent-service/app/schemas/business.py) 定义三类契约：
+[`agent-service/app/schemas/business.py`](../agent-service/app/schemas/business.py) 定义四类契约：
 
 - `BusinessIdentity`：单次调用的用户 ID、角色和可选 Token；
 - `BusinessSuccessEnvelope`：Java 成功响应的六个固定字段；
+- `BusinessErrorEnvelope`：Java 失败响应的六个固定字段和错误码集合；
 - `BusinessResponse[DataT]`：已校验的响应元数据和具体业务 data。
 
 Token 使用 `SecretStr`，对象被打印或调试时不会直接显示原值。用户 ID 和角色禁止空值、
@@ -702,31 +702,61 @@ GET 支持查询参数，POST 支持 JSON Body。两者都只接受 `/api/` 开�
 校验相对路径
 → 构造身份与 Trace Header
 → httpx 使用连接池和分项超时发送请求
-→ response.raise_for_status() 检查 HTTP 状态
-→ Pydantic 解析并校验 Java 成功信封
-→ TypeAdapter 校验具体 data Model
-→ 比较响应 Header 与 Body 的 Trace ID
-→ 返回 BusinessResponse[DataT]
+→ 根据 HTTP 状态进入成功或失败分支
+→ 成功：校验成功信封 → 校验具体 data Model → 校验 Trace → 返回 BusinessResponse
+→ 失败：校验错误信封 → 核对 HTTP/Java code/Trace → 返回结构化 ToolException
 ```
 
 HTTP 200 不等于业务响应可信。例如 Java 故障模拟返回缺少 `data` 的 JSON 时，Client 会抛出
-`BusinessResponseValidationError`，不会把它当成空订单继续交给 Agent 归纳。这是防止模型基于
-不完整事实生成结论的第一道边界。
+`RESPONSE_VALIDATION_ERROR` 对应的 `ToolException`，不会把它当成空订单继续交给 Agent
+归纳。这是防止模型基于不完整事实生成结论的第一道边界。
 
-### 7.5 超时和当前错误边界
+### 7.5 `ToolException` 标准错误模型
 
-当前四项超时分别控制 connect、read、write 和等待连接池的 pool timeout。它们必须大于 0
-且不超过 60 秒。分开配置可以区分“连接不上 Java”和“Java 已接收但业务处理过慢”，为后续
+[`agent-service/app/errors.py`](../agent-service/app/errors.py) 中的 `ToolErrorCode` 是稳定机器
+错误码，`ToolException` 保存：
+
+```text
+code         # Workflow 应据此分支
+message      # 给人阅读，不用于字符串匹配
+retryable    # 故障技术上是否可能恢复
+trace_id     # 关联 Python、Java 日志
+status_code  # 保留 HTTP 语义，例如区分 401 和 403
+```
+
+Java 错误映射如下：
+
+| Java HTTP/code | Python `ToolErrorCode` | 当前 `retryable` |
+| --- | --- | --- |
+| 400 / `PARAM_VALIDATION_ERROR` | `PARAM_VALIDATION_ERROR` | `false` |
+| 401、403 / `PERMISSION_DENIED` | `PERMISSION_DENIED` | `false` |
+| 404 / `RESOURCE_NOT_FOUND` | `RESOURCE_NOT_FOUND` | `false` |
+| 409 / `BUSINESS_CONFLICT` | `BUSINESS_CONFLICT` | `false` |
+| 500 / `INTERNAL_SERVER_ERROR` | `UPSTREAM_UNAVAILABLE` | `false` |
+| httpx 四类 timeout | `TOOL_TIMEOUT` | `true` |
+| 其他 httpx 网络错误 | `UPSTREAM_UNAVAILABLE` | `true` |
+| 非法 JSON/信封/data/Trace | `RESPONSE_VALIDATION_ERROR` | `false` |
+
+错误响应也必须通过 Pydantic 信封校验，并核对 HTTP 状态、Java `code`、响应 Header/Body Trace。
+例如“HTTP 404 + `BUSINESS_CONFLICT`”不是可信业务错误，而是契约漂移，会统一映射为
+`RESPONSE_VALIDATION_ERROR`。网络异常只暴露固定安全文案，不把内部 URL 或连接详情交给
+Workflow/模型；原异常仍保存在 Python 的异常因果链中，供日志排障。
+
+### 7.6 超时、可重试性和当前边界
+
+四项超时分别控制 connect、read、write 和等待连接池的 pool timeout。它们必须大于 0 且
+不超过 60 秒。分开配置可以区分“连接不上 Java”和“Java 已接收但业务处理过慢”，为后续
 重试决策提供依据。
 
-M1.2 不自动重试，也不把异常映射成 Tool 错误：
+M1.3 只完成“错误分类”，仍然不会自动重试。timeout/网络错误上的 `retryable=true` 只说明
+故障在技术上可能恢复，不代表每个调用都允许重放：
 
-- 4xx/5xx 当前保留为 `httpx.HTTPStatusError`；
-- 连接和读写超时当前保留为 `httpx.TimeoutException` 子类；
-- JSON、信封、data 或 Trace 不合法时抛出 `BusinessResponseValidationError`。
+- M1.6 只能为明确的只读 Tool 增加有限次数、退避和总预算；
+- POST 超时或网络中断时，Java 可能已经完成写入，不能仅凭 `retryable=true` 自动重放；
+- 500 当前继承 Java 的保守 `retryable=false`，尤其不能对写请求猜测执行结果。
 
-M1.3 会将这些异常映射为统一错误码，M1.6 才会对明确可重试的只读调用增加有限重试。POST
-不能因为超时或 500 就直接自动重试，否则服务端可能已经完成写入但响应在途中丢失。
+`DUPLICATE_CALL` 和 `UNKNOWN_TOOL_ERROR` 已纳入统一错误码词汇，但它们的触发分别依赖后续
+M1.7 重复 Tool 调用检测和 M1.4 Tool 执行边界，当前 Client 不会伪造这两类错误。
 
 ## 8. 启动、请求和关闭顺序
 
@@ -972,6 +1002,7 @@ def get_name() -> str:
 ```bash
 make test-agent-foundation  # 运行 M1.1 的 6 个 Python 测试
 make test-agent-client      # 运行 M1.2 的 10 个 Client 测试
+make test-agent-errors      # 运行 M1.3 的 18 个标准错误测试
 make quality                # Ruff + mypy strict
 make agent-migrate          # 容器内执行 Alembic upgrade head
 make smoke                  # 验证 Java、Python、Web 健康检查
@@ -1131,7 +1162,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M1.2 已完成
+### 13.1 M1.1～M1.3 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1144,13 +1175,14 @@ async def lifespan(...):
 - 身份、Token、Trace ID和幂等键透传；
 - GET/POST封装与分项超时；
 - Java统一成功信封和调用方data Schema校验；
+- Java失败信封、HTTP/code/Trace一致性校验；
+- HTTP、超时、网络和响应契约异常到`ToolException`的统一映射；
 - pytest、Ruff、mypy；
 - Docker/Compose运行。
 
 ### 13.2 当前尚未实现
 
 - Tool基类、注册表和具体只读Tool；
-- HTTP/超时/响应校验异常到Tool错误的统一映射；
 - 只读Tool的有限重试；
 - 数据库readiness；
 - Run/Step实体和持久化；
@@ -1159,14 +1191,13 @@ async def lifespan(...):
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 T118 以后可能增加的结构
+### 13.3 T127 以后可能增加的结构
 
 后续可能逐步形成：
 
 ```text
 app/
 ├── schemas/
-│   ├── errors.py                # 标准错误模型
 │   └── order.py                 # 端点业务DTO
 ├── tools/
 │   ├── base.py                  # Tool协议
@@ -1176,13 +1207,14 @@ app/
     └── internal_tools.py        # 无Agent时调试Tool的内部接口
 ```
 
-这些是基于开发计划的预计结构，不代表文件已经存在；已实现的 `clients/business.py` 和
-`schemas/business.py` 不再列为预计目录。实际实现时仍以对应任务和测试为准。
+这些是基于开发计划的预计结构，不代表文件已经存在；已实现的 `errors.py`、
+`clients/business.py` 和 `schemas/business.py` 不再列为预计目录。实际实现时仍以对应任务和
+测试为准。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 
 ```text
-400/403/404/409/500如何从HTTP异常映射为稳定Tool错误
+Tool如何把输入Schema错误统一成PARAM_VALIDATION_ERROR
 → 哪些只读错误允许有限重试
 → 每个Java data如何定义端点级Pydantic模型
 → 为什么Python只能通过Java API取得业务事实

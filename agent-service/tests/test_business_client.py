@@ -4,7 +4,8 @@ import httpx
 import pytest
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
-from app.clients.business import BusinessHttpClient, BusinessResponseValidationError
+from app.clients.business import BusinessHttpClient
+from app.errors import ToolErrorCode, ToolException
 from app.main import create_app
 from app.observability import reset_trace_id, set_trace_id
 from app.schemas.business import BusinessIdentity
@@ -189,7 +190,7 @@ async def test_client_builds_separate_httpx_timeouts() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_httpx_timeout_remains_available_for_m13_error_mapping() -> None:
+async def test_httpx_timeout_is_mapped_to_standard_tool_error() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("simulated read timeout", request=request)
 
@@ -198,10 +199,12 @@ async def test_httpx_timeout_remains_available_for_m13_error_mapping() -> None:
         transport=httpx.MockTransport(handler),
     )
 
-    with pytest.raises(httpx.ReadTimeout):
+    with pytest.raises(ToolException) as caught:
         await client.get("/api/orders/ORDER-003", OrderData)
 
     await client.aclose()
+
+    assert caught.value.code is ToolErrorCode.TOOL_TIMEOUT
 
 
 @pytest.mark.unit
@@ -241,7 +244,9 @@ async def test_invalid_java_response_is_rejected(response: httpx.Response) -> No
         transport=httpx.MockTransport(handler),
     )
 
-    with pytest.raises(BusinessResponseValidationError):
+    with pytest.raises(ToolException) as caught:
         await client.get("/api/orders/ORDER-003", OrderData)
 
     await client.aclose()
+
+    assert caught.value.code is ToolErrorCode.RESPONSE_VALIDATION_ERROR

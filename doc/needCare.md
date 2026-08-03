@@ -641,8 +641,8 @@ Python ContextVar Trace
   Java 幂等、版本校验和后续状态查询，不能盲目重放。
 - Client 只接受 `/api/` 相对路径，防止绝对 URL 绕过固定上游；`trust_env=False` 防止内部
   Java 流量被宿主机代理改道。这个决策来自测试实际发现的 SOCKS 代理初始化失败。
-- M1.2 保留 `HTTPStatusError`、`TimeoutException` 和 `BusinessResponseValidationError`，
-  M1.3 才做统一 Tool 错误映射，M1.6 才做只读有限重试，避免层次混杂。
+- M1.2 原先保留 `HTTPStatusError`、`TimeoutException` 和 `BusinessResponseValidationError`；
+  M1.3 已完成统一 Tool 错误映射，M1.6 才做只读有限重试，保持层次分离。
 
 ### 可能的面试问题
 
@@ -683,8 +683,98 @@ Trace 用于关联而不是授权；未来还要把 Trace 与 Run/Step 一起持
 
 - 当前完成的是 Client，不是可被模型调用的 Tool；尚无 ToolRegistry、ToolContext 或具体
   订单查询 Tool。
-- 4xx/5xx、超时和响应校验异常尚未映射为统一 Tool 错误码，也没有自动重试、退避或熔断。
+- 4xx/5xx、超时和响应校验异常已由 M1.3 映射为统一错误码，但仍没有具体 Tool、自动重试、
+  退避或熔断。
 - 当前只有统一成功信封和测试用端点 data Model；正式订单、任务、质检等 Tool DTO 尚未实现。
 - POST 能发送身份和幂等键不等于 Approval 已完成；没有用户确认、草稿持久化或 Agent 写回。
-- 已验证真实 `ORDER-003` 成功链路；真实 Java 故障到 Python 标准错误的端到端评测仍待 M1.3。
+- 已验证真实 `ORDER-003` 成功链路；M1.3 又验证了 6 条真实 Java 故障映射，但尚未进入
+  Tool/Workflow/Agent 端到端链路。
 - Token 只是安全透传能力，当前 Java 最小认证仍主要使用用户/角色 Header，不是生产级 JWT/RBAC。
+
+---
+
+## M1.3 面向 Workflow 的标准 Tool 错误语义
+
+### 面试价值判断
+
+核心关注。M1.3 的价值不是“把异常换个名字”，而是把 HTTP、Java 业务错误、网络故障和
+响应契约漂移收敛成 Workflow 可稳定分支的机器语义，同时保留 Trace 和原始异常因果链，避免
+模型或流程通过易变文案猜测失败原因。
+
+### 与 Agent 开发的关系
+
+当前失败链路已经可以真实执行：
+
+```text
+Java 业务错误 / 网络异常 / timeout / 非法响应
+→ BusinessHttpClient
+→ 校验失败信封或识别 httpx 异常
+→ ToolException(code, message, retryable, trace_id, status_code)
+→ 后续 ToolResult / Workflow 根据 code 分支
+```
+
+真实 Java 故障验收覆盖 400、403、404、500、超时和 HTTP 200 缺少 `data` 六条路径。参数、
+权限、资源和冲突属于不可重试业务错误；500 继承 Java 的保守不可重试契约；网络和 timeout
+标记技术上可恢复；非法响应会在事实进入 Tool/模型前被阻断。
+
+### 需要掌握的原理和设计取舍
+
+- Workflow 依据 `ToolErrorCode` 分支，不解析 `message`。文案可改、可本地化，也可能含业务
+  对象；错误码才是稳定契约。
+- 非 2xx 也不能只看状态码。Python 使用 `BusinessErrorEnvelope` 校验
+  `success/code/message/data/trace_id/retryable`，再交叉核对 HTTP 状态、Java code 和
+  Header/Body Trace；`404 + BUSINESS_CONFLICT` 会被当作契约错误而不是资源不存在。
+- 401 和 403 都映射 `PERMISSION_DENIED`，便于 Workflow 统一停止，但 `status_code` 仍保留，
+  让 API/UI 可以区分“未认证”和“已认证但无权限”。
+- 网络异常对外使用固定安全文案，不泄露内部 URL、代理或连接详情；原始 `httpx` 异常通过
+  `__cause__` 保留，日志和排障仍能定位技术原因。
+- `retryable` 是故障属性，不是重试授权。timeout/网络错误可以是 `true`，但写请求结果可能
+  未知；只有后续 M1.6 的只读 Tool 策略才能结合方法风险、次数、退避和总预算真正重试。
+- `BUSINESS_CONFLICT` 不应盲重试。409 通常表示状态或版本已变化，应重新读取最新事实，再由
+  Workflow 或用户重新决策。
+- 响应 Schema 错误不可重试，因为它通常表示契约漂移；重复请求相同版本并不会让缺失字段
+  自动恢复，还可能放大故障。
+
+### 可能的面试问题及回答要点
+
+**为什么不能让 Tool 直接抛 `HTTPStatusError`？**
+
+回答要点：HTTP 只表达传输层，Agent Workflow 需要参数、权限、资源、冲突、超时、上游和
+响应契约等稳定语义。统一异常使不同 Tool 使用相同分支、展示和后续 Run/Step 错误码，同时
+不耦合 httpx 实现。
+
+**既然已经有 HTTP 状态，为什么还校验 Java 错误信封？**
+
+回答要点：网关 HTML、服务契约漂移或状态/code 配错都可能产生“看似合理”的 HTTP 失败。
+严格信封和三方一致性校验可以防止 Workflow 用错误分类继续执行，也能把业务失败和协议失败
+分开定位。
+
+**`retryable=true` 为什么没有在 Client 里直接重试？**
+
+回答要点：Client 只能判断网络故障可能恢复，不知道调用是只读还是写入。POST 超时可能是
+响应丢失但事务已提交；重试必须由 Tool 风险策略结合幂等键、版本、次数和总预算决定。
+
+**为什么 Java 500 映射为 `UPSTREAM_UNAVAILABLE`，但当前仍不可重试？**
+
+回答要点：对 Python 而言 Java 是上游，所以类别是上游不可用；但 Java 当前对未知 500 采用
+保守 `retryable=false`，尤其写操作结果未知。类别和重试决策是两个维度，不能混为一谈。
+
+**为什么保留异常因果链？**
+
+回答要点：给 Workflow/模型的错误必须安全稳定，运维排障又需要区分 ConnectError、ReadTimeout
+等真实原因。固定外部文案加 `raise ... from ...` 同时满足安全边界和可诊断性。
+
+### 简历表述建议
+
+> 设计 Python Agent Tool 标准错误模型，将 Java 400/401/403/404/409/500、网络超时及响应
+> 契约漂移统一映射为可供 Workflow 分支的结构化异常；通过错误信封、HTTP/code/Trace 一致性
+> 校验和安全异常因果链，阻断不可信事实进入模型，并区分故障可恢复性与实际重试授权。
+
+### 不能过度声称
+
+- 当前是 Client 到标准异常的边界，还没有 Tool 基类、ToolResult、ToolRegistry 或具体业务
+  Tool，不能声称“所有 Tool 已统一处理错误”。
+- 没有实现自动重试、指数退避、熔断或总耗时预算；`retryable` 只是分类字段。
+- `DUPLICATE_CALL` 和 `UNKNOWN_TOOL_ERROR` 已定义为词汇，但触发逻辑分别等待 M1.7 和 M1.4。
+- 真实故障验收是 6 个确定性开发场景，不是生产错误率、恢复成功率或性能指标。
+- 错误尚未写入 Run/Step，也没有 SSE 错误事件或前端 Agent 错误展示。

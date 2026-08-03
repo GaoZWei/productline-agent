@@ -345,3 +345,43 @@
 - 已知非阻塞问题：HTTP 状态、超时和 Client 响应校验异常仍是底层异常；当前仅验证成功
   `ORDER-003` 真实链路，故障路径由 MockTransport 覆盖；Java 测试仍输出 Mockito 动态 Agent
   的未来 JDK 兼容警告
+
+## M1.3 标准错误模型
+
+- 验证时间：2026-08-03
+- 测试先行基线：`uv run --frozen pytest -q tests/test_tool_errors.py tests/test_business_client.py`
+  在收集阶段产生 2 个导入错误，目标 `app.errors` 尚不存在
+- `make test-agent-errors`：18/18
+  - 9 个 `ToolErrorCode` 词汇及 `ToolException` 结构：通过
+  - Java 400/401/403/404/409/500 参数化映射：6/6
+  - connect/read/write/pool 四类 timeout → `TOOL_TIMEOUT`：4/4，且没有提前实现重试
+  - 网络不可达 → `UPSTREAM_UNAVAILABLE`，固定安全文案且保留异常因果链：通过
+  - 非法 JSON、缺少 data、端点 data 缺字段、HTTP/code 不匹配和 Trace 不匹配 →
+    `RESPONSE_VALIDATION_ERROR`：5/5
+- `make test-agent-client`：M1.2 回归 10/10；原始 timeout/响应校验断言已更新为标准错误契约
+- `make test-agent-foundation`：M1.1 回归 6/6
+- Python 汇总：34/34
+- `make quality`：Ruff 全部通过；mypy strict 检查 16 个源/测试文件无问题
+- `uv lock --check`：通过，共解析 42 个直接及传递依赖
+- 真实 Java 故障链路：6/6
+  - 400 → `PARAM_VALIDATION_ERROR`
+  - 403 → `PERMISSION_DENIED`
+  - 404 → `RESOURCE_NOT_FOUND`
+  - 500 → `UPSTREAM_UNAVAILABLE`
+  - Java 延迟超过 Python read timeout → `TOOL_TIMEOUT`
+  - HTTP 200 缺少 data → `RESPONSE_VALIDATION_ERROR`
+- `make test`：通过；foundation/Compose、三服务 smoke、Python 34/34、Java M0 56/56、
+  Web 7/7 和生产构建全部通过
+- `docker compose up --detach --build agent-service && make smoke`：Agent 与依赖的 Java 生产
+  镜像构建成功、容器重建成功，三服务 smoke 通过
+- 生产容器导入验收：`ToolErrorCode.TOOL_TIMEOUT` 输出 `TOOL_TIMEOUT`
+- `make validate`、Markdown code fence 结构检查和 `git diff --check`：通过
+- 最终失败：0
+- 开发中发现并修复：一次 Python 汇总命令误在仓库根目录执行，uv 找不到 pytest；切换到
+  `agent-service` 后通过。首次 Ruff 检查发现既有中文注释标点和新类型别名写法不符合规则，
+  改为 ASCII 标点和 Python 3.12 `type` 语法后通过
+- 未运行：`make reset-demo` 会删除本地持久卷，本次没有修改固定数据且未获删除授权；没有运行
+  M1.4 Tool 协议、M1.6 自动重试或 Agent E2E 测试，对应功能尚未实现
+- 已知非阻塞问题：错误已完成分类但尚无 ToolResult/Run/Step 持久化；网络错误的
+  `retryable=true` 不代表写请求可以自动重放；Java 测试仍输出 Mockito 动态 Agent 的未来
+  JDK 兼容警告
