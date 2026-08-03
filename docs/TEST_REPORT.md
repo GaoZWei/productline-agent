@@ -385,3 +385,28 @@
 - 已知非阻塞问题：错误已完成分类但尚无 ToolResult/Run/Step 持久化；网络错误的
   `retryable=true` 不代表写请求可以自动重放；Java 测试仍输出 Mockito 动态 Agent 的未来
   JDK 兼容警告
+
+## Python 文档字符串中文化维护
+
+- 验证时间：2026-08-03
+- 范围：Agent Python/Alembic 中 33 处说明性三双引号文档字符串，以及 Alembic revision
+  模板中的版本标识、前置版本和创建时间标签
+- 边界：Java Repository 中两处三双引号内容是可执行 SQL/JPQL 文本块，不是说明文档；为避免
+  改变查询语义而保持原样
+- 首轮功能回归：M1.1 6/6、M1.2 10/10、M1.3 18/18
+- 首轮 `make quality`：失败，Ruff 报告翻译引入的全角逗号，以及目标文件既有学习注释中的
+  全角标点和超长行；保留原意并改用句号、连接词和分行后修复
+- 最终 `make quality`：Ruff 通过；mypy strict 检查 16 个源/测试文件无问题
+- Python 汇总测试：34/34
+- `uv lock --check`：通过，共解析 42 个直接及传递依赖
+- 未运行：Java和Web测试未运行，因为未修改Java SQL/JPQL、接口、业务数据、前端或运行配置
+- 最终失败：0
+
+## Python 中文说明规则固化
+
+- 验证时间：2026-08-03
+- 范围：在根级 `AGENTS.md` 增加后续Python开发的中文文档字符串和解释性注释规则
+- 边界：技术标识保持原文；日志事件名、错误码、API文案、SQL/JPQL、Prompt和第三方协议等
+  运行时字符串不得因说明语言规则被擅自修改
+- 验证：`make validate`、Markdown code fence结构检查和`git diff --check`
+- 业务测试未运行：本次只修改开发治理文档、状态和开发记录，不修改运行时代码

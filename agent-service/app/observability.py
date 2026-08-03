@@ -1,4 +1,4 @@
-"""Minimal JSON logging and request Trace ID propagation."""
+"""最小 JSON 日志和请求 Trace ID 透传能力。"""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def reset_trace_id(token: Token[str]) -> None:
 
 # Trace ID 校验函数
 def resolve_trace_id(candidate: str | None) -> str:
-    """Accept a bounded safe caller ID or replace it with a generated value."""
+    """接受长度受限的安全调用方标识。否则生成新的标识。"""
 
     if candidate and TRACE_ID_PATTERN.fullmatch(candidate):
         return candidate
@@ -51,7 +51,7 @@ def resolve_trace_id(candidate: str | None) -> str:
 
 # JSON 格式化器方便后续日志系统按字段查询日志。
 class JsonFormatter(logging.Formatter):
-    """Serialize stable log fields without leaking arbitrary object state."""
+    """序列化稳定日志字段且不泄露任意对象的内部状态。"""
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -70,7 +70,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: str) -> None:
-    """Install one process-wide JSON handler in an idempotent way."""
+    """以幂等方式安装进程级 JSON 日志处理器。"""
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
@@ -81,7 +81,7 @@ def configure_logging(level: str) -> None:
 
 # Trace ID 中间件为每个请求绑定一个 Trace ID。
 class TraceIdMiddleware(BaseHTTPMiddleware):
-    """Bind one safe Trace ID to the response and every request log."""
+    """为响应和每条请求日志绑定同一个安全 Trace ID。"""
 
     async def dispatch(
         self,

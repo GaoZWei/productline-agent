@@ -8,6 +8,6 @@
 - 失败测试：最终结果 0；测试先行因 `app.errors` 不存在产生 2 个收集错误；首次汇总命令误在仓库根目录执行 `uv run pytest`，因根目录不是 Python 项目而失败，切换到 `agent-service` 后 34/34；首次质量检查发现既有中文注释标点和新类型别名不符合 Ruff，修正后通过
 - 当前阻塞：无
 - 开发环境：OpenJDK 21.0.12、Maven 3.9.16、Python 3.12.13（uv 管理）、uv 0.12.0、Node.js 22.22.2、npm 10.9.7、Docker Desktop 29.6.2
-- 最近更新：M1.3 已完成错误码词汇、`ToolException`、Java 失败信封校验、HTTP/code/Trace 一致性门禁以及网络、超时和响应异常映射
+- 最近更新：M1.3 能力保持不变；已将 Agent Python/Alembic 中 33 处说明性文档字符串及迁移模板标签中文化，并在 `AGENTS.md` 固化“后续Python开发说明默认使用中文”的规则；Java 可执行 SQL/JPQL 文本块保持原样
 - 已知非阻塞问题：本地开发数据库仍无角色级隔离；`/health` 仍只是 liveness；`DUPLICATE_CALL` 和 `UNKNOWN_TOOL_ERROR` 只有错误码定义，等待 Tool 执行层触发；未实现自动重试、端点业务 DTO、Tool、Workflow、RAG、Agent UI、SSE 或 Approval
 - 下一任务：T127 定义 Tool 基类

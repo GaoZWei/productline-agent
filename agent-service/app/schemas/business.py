@@ -1,4 +1,4 @@
-"""Validated transport contracts for calls to the Java business service."""
+"""调用 Java 业务服务时使用的已校验传输契约。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ type BusinessErrorCode = Literal[
 # Java 调用相关 Schema
 # BusinessIdentity: 用户、角色和可选 Token; Token 使用 SecretStr。
 class BusinessIdentity(BaseModel):
-    """Per-call identity forwarded to Java; the optional token is hidden from repr."""
+    """单次调用中透传给 Java 的身份。可选令牌不会显示在对象表示中。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
 
@@ -41,7 +41,7 @@ class BusinessIdentity(BaseModel):
 
 # BusinessSuccessEnvelope: 严格要求 success/code/message/data/trace_id/retryable 六个字段
 class BusinessSuccessEnvelope(BaseModel):
-    """Strict Java success envelope before the endpoint-specific data is validated."""
+    """在校验端点业务数据前使用的严格 Java 成功信封。"""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -55,9 +55,9 @@ class BusinessSuccessEnvelope(BaseModel):
     ]
     retryable: Literal[False]
 
-# Java失败信封Schema（Java返回的错误响应 先用这个校验一遍）
+# Java 失败信封 Schema: Java 返回的错误响应先用这个校验一遍。
 class BusinessErrorEnvelope(BaseModel):
-    """Strict Java failure envelope used before mapping to a Tool error."""
+    """映射 Tool 错误前使用的严格 Java 失败信封。"""
     #  不会自动把字符串或数字转换成布尔值。 
     model_config = ConfigDict(extra="forbid", strict=True)  
 
@@ -75,7 +75,7 @@ class BusinessErrorEnvelope(BaseModel):
 # BusinessResponse: 返回经过端点 Schema 校验的强类型 data
 @dataclass(frozen=True, slots=True)
 class BusinessResponse[DataT]:
-    """Validated Java response metadata plus endpoint-specific typed data."""
+    """已校验的 Java 响应元数据和端点专用强类型数据。"""
 
     data: DataT
     trace_id: str

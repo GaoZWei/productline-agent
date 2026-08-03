@@ -1,4 +1,4 @@
-"""Async HTTP client for the Java business fact and write APIs."""
+"""用于调用 Java 业务事实与写入接口的异步 HTTP 客户端。"""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ _JAVA_ERROR_MAPPING: dict[int, tuple[str, ToolErrorCode]] = {
 
 
 class BusinessResponseValidationError(ValueError):
-    """Signal an invalid Java response without exposing its body."""
+    """表示 Java 响应不合法并避免泄露原始响应体。"""
 
     def __init__(self, status_code: int, reason: str) -> None:
         super().__init__(f"Java response validation failed: {reason}")
@@ -42,7 +42,7 @@ class BusinessResponseValidationError(ValueError):
 
 # Client 构造过程: BusinessHttpClient 持有一个共享 httpx.AsyncClient
 class BusinessHttpClient:
-    """Share one pooled httpx client and strictly validate every success response."""
+    """共享一个带连接池的 httpx 客户端并严格校验每个响应。"""
 
     def __init__(
         self,
@@ -79,7 +79,8 @@ class BusinessHttpClient:
     async def get(
         self,
         path: str,
-        response_type: type[DataT],  # 只在Python内部使用的输入，Java响应中的data应该按照OrderData进行校验
+        # 只在 Python 内部使用的输入。Java 响应中的 data 应该按照 OrderData 进行校验。
+        response_type: type[DataT],
         *,
         identity: BusinessIdentity | None = None,  # 用户、角色和可选 Token
         trace_id: str | None = None,
@@ -261,7 +262,8 @@ class BusinessHttpClient:
             trace_id=envelope.trace_id,
             message=envelope.message,
         )
-    # JSON、信封、data和Trace异常统一转换为 RESPONSE_VALIDATION_ERROR，且不在异常文案中泄露原始响应体
+    # JSON、信封、data 和 Trace 异常统一转换为 RESPONSE_VALIDATION_ERROR。
+    # 异常文案中不泄露原始响应体。
     @staticmethod
     def _raise_response_validation_error(
         status_code: int,

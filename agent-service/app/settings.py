@@ -1,4 +1,4 @@
-"""Environment-backed service configuration."""
+"""由环境变量提供的服务配置。"""
 
 from functools import lru_cache
 from typing import Literal
@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # BaseSettings 会自动从环境变量读取数据
 class Settings(BaseSettings):
-    """Validated process settings; secrets are never included in startup logs."""
+    """经过校验的进程配置。启动日志不会包含密钥。"""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # 数据库 URL转换
     @property
     def async_database_url(self) -> str:
-        """Use asyncpg while accepting the repository's conventional PostgreSQL URL."""
+        """在接受仓库常规 PostgreSQL 地址的同时改用 asyncpg 驱动。"""
 
         if self.database_url.startswith("postgresql+asyncpg://"):
             return self.database_url
@@ -43,6 +43,6 @@ class Settings(BaseSettings):
 # 第一次读取环境变量后缓存 Settings。后续调用返回同一个对象。
 @lru_cache
 def get_settings() -> Settings:
-    """Read and validate process settings once per application process."""
+    """每个应用进程只读取并校验一次配置。"""
 
     return Settings()

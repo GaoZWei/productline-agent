@@ -1,8 +1,8 @@
 """${message}
 
-Revision ID: ${up_revision}
-Revises: ${down_revision | comma,n}
-Create Date: ${create_date}
+版本标识: ${up_revision}
+前置版本: ${down_revision | comma,n}
+创建时间: ${create_date}
 """
 
 from collections.abc import Sequence

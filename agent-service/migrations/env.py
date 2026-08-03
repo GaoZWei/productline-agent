@@ -1,4 +1,4 @@
-"""Alembic environment for the Agent service's async SQLAlchemy metadata."""
+"""Agent 服务异步 SQLAlchemy 元数据使用的 Alembic 运行环境。"""
 # Alembic每次执行迁移时加载的环境代码
 from asyncio import run
 from typing import Any

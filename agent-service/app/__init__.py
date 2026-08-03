@@ -1,1 +1,1 @@
-"""Remote sensing production-line Agent service."""
+"""遥感数据产线 Agent 服务。"""

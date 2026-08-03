@@ -1,4 +1,4 @@
-"""SQLAlchemy foundation for Agent-owned runtime data."""
+"""Agent 自有运行数据的 SQLAlchemy 基础设施。"""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -16,11 +16,11 @@ from app.settings import Settings
 
 # 异步数据库
 class Base(DeclarativeBase):
-    """Metadata root for future Agent Run, Step and Approval tables."""
+    """后续 Agent Run、Step 和 Approval 数据表的元数据根类。"""
 
 
 class Database:
-    """Own the async engine and sessions without connecting during import."""
+    """管理异步引擎和会话。模块导入时不建立数据库连接。"""
     def __init__(self, database_url: str) -> None:
         settings = Settings(database_url=database_url)
         # Engine代表数据库驱动和连接池配置。
@@ -37,12 +37,12 @@ class Database:
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
-        """Provide one transaction-neutral session to a request or workflow step."""
+        """为一次请求或工作流步骤提供不预设事务策略的会话。"""
 
         async with self.session_factory() as session:
             yield session
 
     async def dispose(self) -> None:
-        """Release engine resources during application shutdown."""
+        """在应用关闭时释放数据库引擎资源。"""
 
         await self.engine.dispose()

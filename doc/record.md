@@ -1354,3 +1354,107 @@
     信封一致性门禁、安全异常链和“可恢复性不等于重试授权”的真实实现证据。
 - 下一建议任务：
   - `[T127] 定义 Tool 基类`。
+
+## 2026-08-03 22:05 — `[MAINT-PY-DOCSTRING] Python 文档字符串中文化`
+
+- 里程碑：M1 Python Tool 层维护
+- 任务类型：代码说明 / 迁移模板 / 文档
+- 目标与范围：
+  - 本次实现：将 `agent-service/app`、`agent-service/migrations/env.py` 中 33 处说明性
+    `"""..."""` 文档字符串翻译为中文；将 Alembic revision 模板的 `Revision ID`、
+    `Revises`、`Create Date` 标签翻译为中文。
+  - 明确不实现：不修改 Java Repository 的两个三双引号 SQL/JPQL 文本块，不修改业务逻辑、
+    API、Schema字段、错误码、数据库迁移行为、固定数据、前端或 Agent 能力。
+- 需求与关键决策：
+  - 方案选择及原因：只翻译供开发者阅读的说明内容，保留 FastAPI、Pydantic、SQLAlchemy、
+    Tool、Workflow、Trace ID 等技术标识，避免把可搜索的真实类库和契约名称强行意译。
+  - 运行语义边界：Java 的 `"""` 是 Java text block，内容分别为 JPQL 查询和 PostgreSQL
+    幂等预留 SQL；`select`、`insert`、`on conflict` 等是可执行语法，翻译会直接破坏查询，
+    因此不属于本次“说明文字中文化”。
+  - Alembic影响：后续自动生成 revision 时，文件头的人类可读标签变为中文；`${message}`、
+    revision变量和 upgrade/downgrade 模板保持不变。
+- 核心修改：
+  - `agent-service/app/main.py`、`database.py`、`observability.py`、`settings.py`：应用入口、
+    数据库、日志和配置文档字符串中文化。
+  - `agent-service/app/errors.py`、`clients/business.py`、`schemas/business.py`：M1.2/M1.3 Client、
+    错误和传输Schema文档字符串中文化。
+  - `agent-service/app/**/__init__.py`：包级职责说明中文化。
+  - `agent-service/migrations/env.py`、`script.py.mako`：迁移环境说明和新revision模板标签中文化。
+- 异常、安全与边界：
+  - 参数、权限、超时、上游异常：无行为变化；所有运行时错误分类和安全文案保持不变。
+  - 幂等、并发或人工确认：无变化。
+- 开发中发现并修复：
+  - 首轮Ruff发现中文全角逗号触发 `RUF002`，目标文件已有学习注释还触发 `RUF003/E501/I001`；
+    保留中文含义并使用句号、连接词、分行和必要空行修复，最终Ruff通过。
+- 替代方案：
+  - 采用的替代方案及原因：无临时替代方案。保留Java SQL/JPQL不是降级，而是保护可执行文本
+    语义的必要边界。
+  - 已覆盖/未覆盖：全部说明性Python文档字符串和Alembic模板标签已中文化；可执行SQL/JPQL
+    明确不翻译。
+  - 局限、风险和移除条件：无临时方案需要移除；若未来新增英文说明性文档字符串，应继续按
+    本次规则翻译，运行时文本则按语义判断。
+- 后续影响：
+  - 对接口/数据/测试/部署：无。后续Alembic revision文件头使用中文标签，不影响迁移执行。
+  - 对后续开发：T127仍为下一任务；新增Python类、函数或模块时应使用中文文档字符串，并保留
+    技术专有名词原名。
+- 测试与验证：
+  - `[通过] make test-agent-foundation` — M1.1 6/6。
+  - `[通过] make test-agent-client` — M1.2 10/10。
+  - `[通过] make test-agent-errors` — M1.3 18/18。
+  - `[首次失败后修复] make quality` — 首轮Ruff 17项标点、格式和行长问题；修复后Ruff通过，
+    mypy strict检查16个文件无问题。
+  - `[通过] agent-service内 uv run --frozen pytest -q` — Python汇总34/34。
+  - `[通过] uv lock --check` — 解析42个包。
+  - `[未运行] Java/Web测试` — 没有修改Java可执行文本、Java/前端代码或跨服务契约。
+- 变更文件：
+  - `agent-service/app/__init__.py`
+  - `agent-service/app/clients/__init__.py`、`business.py`
+  - `agent-service/app/schemas/__init__.py`、`business.py`
+  - `agent-service/app/main.py`、`database.py`、`observability.py`、`settings.py`、`errors.py`
+  - `agent-service/migrations/env.py`、`script.py.mako`
+  - `docs/STATUS.md`、`docs/TEST_REPORT.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无。
+  - 后续兼容注意事项：不要把Java text block一律当成注释；必须先判断内容是否参与运行。
+- Agent 面试价值评估：
+  - 无新增价值，未修改 `doc/needCare.md`。本次仅改善代码说明语言，没有新增 Agent、Tool、
+    Workflow、RAG、Approval、评测或可靠性实现证据。
+- 下一建议任务：
+  - `[T127] 定义 Tool 基类`。
+
+## 2026-08-03 22:10 — `[GOV-PY-CN] 固化 Python 中文说明规则`
+
+- 里程碑：M1 Python Tool 层维护
+- 任务类型：开发治理 / 文档
+- 目标与范围：
+  - 本次实现：在根级 `AGENTS.md` 增加持续生效的Python说明语言规则，要求后续模块、类、函数、
+    方法的文档字符串及解释业务原因、设计约束、关键流程的注释默认使用中文。
+  - 明确不实现：不修改运行时代码、Java/Web、业务接口、Schema、固定数据或Agent能力。
+- 需求与关键决策：
+  - 技术标识边界：FastAPI、Pydantic、SQLAlchemy、Tool、Workflow、Trace ID、字段名、类名和
+    函数名保留原文，避免意译造成检索和技术表达失真。
+  - 运行语义边界：中文说明规则不自动作用于日志事件名、错误码、API文案、SQL/JPQL、Prompt、
+    第三方协议或其他运行时字符串；这些内容只有在业务契约和具体任务明确要求时才能修改。
+  - 规则生效方式：根级 `AGENTS.md` 适用于整个仓库，后续每次Python开发均需遵守；若子目录
+    新增更具体规则，应同时遵守并按就近原则处理。
+- 核心修改：
+  - `AGENTS.md` — 在“每次开发的执行规则/实现要求”后增加Python中文说明规则与运行时边界。
+  - `docs/STATUS.md`、`docs/TEST_REPORT.md`、`doc/record.md` — 同步状态、验证范围和历史记录。
+- 测试与验证：
+  - `[通过] make validate` — 基础结构和Compose配置有效。
+  - `[通过] Markdown code fence结构检查` — 修改文档代码围栏成对。
+  - `[通过] git diff --check` — 无空白错误。
+  - `[未运行] 业务测试` — 本次没有修改运行时代码。
+- 未完成项与已知问题：
+  - 未完成项：无。
+  - 已知问题/阻塞：无。
+- 替代方案：
+  - 采用的替代方案及原因：无。
+  - 局限、风险和移除条件：无临时方案；运行时文本仍需逐项依据契约判断，不能机械翻译。
+- 后续影响：
+  - 对后续开发：从T127开始，新增或修改的Python说明性文档字符串和关键解释注释默认使用中文。
+  - 对接口/数据/测试/部署：无。
+- Agent 面试价值评估：
+  - 无新增价值，未修改 `doc/needCare.md`。本次属于开发治理，不构成Agent岗位面试实现证据。
+- 下一建议任务：
+  - `[T127] 定义 Tool 基类`。

@@ -1,1 +1,1 @@
-"""Outbound service clients owned by the Agent service."""
+"""Agent 服务负责管理的外部服务客户端。"""

@@ -1,4 +1,4 @@
-"""FastAPI application entry point for the Agent service."""
+"""Agent 服务的 FastAPI 应用入口。"""
 
 from __future__ import annotations
 
@@ -20,14 +20,14 @@ logger = logging.getLogger("agent-service.lifecycle")
 
 # Pydantic 响应模型
 class HealthResponse(BaseModel):
-    """Stable probe contract shared with the existing Compose smoke test."""
+    """与现有 Compose 冒烟测试共享的稳定探针契约。"""
 
     service: str
     status: str
 
 # 创建 FastAPI 应用主入口
 def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build an application with explicit settings for production and tests."""
+    """使用显式配置构建供生产环境和测试使用的应用。"""
 
     resolved_settings = settings or get_settings()
     # lifespan 表示应用从启动到停止的生命周期
@@ -77,7 +77,7 @@ app = create_app()
 
 
 def main() -> None:
-    """Start Uvicorn with host and port supplied by validated settings."""
+    """使用校验后的主机和端口配置启动 Uvicorn。"""
 
     settings = get_settings()
     # Uvicorn是真正监听8000端口的服务器。
