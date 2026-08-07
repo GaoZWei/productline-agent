@@ -33,3 +33,31 @@ def test_json_formatter_includes_trace_and_request_fields() -> None:
     assert payload["method"] == "GET"
     assert payload["path"] == "/health"
     assert payload["status_code"] == 200
+
+
+@pytest.mark.unit
+def test_json_formatter_includes_tool_failure_fields() -> None:
+    token = set_trace_id("trace-tool-log-001")
+    try:
+        record = logging.LogRecord(
+            name="agent-service.tool",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=42,
+            msg="tool_execution_failed",
+            args=(),
+            exc_info=None,
+        )
+        record.tool_name = "get_order_detail"
+        record.run_id = "run-tool-log-001"
+        record.error_code = "UNKNOWN_TOOL_ERROR"
+        record.trace_id = "trace-tool-context-001"
+
+        payload = json.loads(JsonFormatter().format(record))
+    finally:
+        reset_trace_id(token)
+
+    assert payload["trace_id"] == "trace-tool-context-001"
+    assert payload["tool_name"] == "get_order_detail"
+    assert payload["run_id"] == "run-tool-log-001"
+    assert payload["error_code"] == "UNKNOWN_TOOL_ERROR"

@@ -681,8 +681,7 @@ Trace 用于关联而不是授权；未来还要把 Trace 与 Run/Step 一起持
 
 ### 不能过度声称
 
-- 当前完成的是 Client，不是可被模型调用的 Tool；尚无 ToolRegistry、ToolContext 或具体
-  订单查询 Tool。
+- 当前已完成 Client 和 Tool 基础协议，但还没有订单查询等具体业务 Tool，也没有模型自主调用。
 - 4xx/5xx、超时和响应校验异常已由 M1.3 映射为统一错误码，但仍没有具体 Tool、自动重试、
   退避或熔断。
 - 当前只有统一成功信封和测试用端点 data Model；正式订单、任务、质检等 Tool DTO 尚未实现。
@@ -772,9 +771,103 @@ Java 业务错误 / 网络异常 / timeout / 非法响应
 
 ### 不能过度声称
 
-- 当前是 Client 到标准异常的边界，还没有 Tool 基类、ToolResult、ToolRegistry 或具体业务
-  Tool，不能声称“所有 Tool 已统一处理错误”。
+- 当前已由 Tool 基类把标准异常转换为 `ToolResult`，但没有具体业务 Tool，不能声称“所有订单
+  Tool 已完成”或“Agent 已能自主调用 Tool”。
 - 没有实现自动重试、指数退避、熔断或总耗时预算；`retryable` 只是分类字段。
-- `DUPLICATE_CALL` 和 `UNKNOWN_TOOL_ERROR` 已定义为词汇，但触发逻辑分别等待 M1.7 和 M1.4。
+- `UNKNOWN_TOOL_ERROR` 已由 M1.4 执行边界触发；`DUPLICATE_CALL` 仍等待 M1.7 单次 Run 调用
+  指纹检测，不能把注册表重名混同为重复业务调用。
 - 真实故障验收是 6 个确定性开发场景，不是生产错误率、恢复成功率或性能指标。
 - 错误尚未写入 Run/Step，也没有 SSE 错误事件或前端 Agent 错误展示。
+
+---
+
+## M1.4 Tool 基础协议与可信执行边界
+
+### 面试价值判断
+
+核心关注。M1.4 的价值不是创建一个抽象类，而是把未来每个业务 Tool 都必须遵守的输入、权限、
+超时、输出和错误协议集中到一个不可绕开的公共执行入口。它让 Workflow 或模型只接触稳定的
+Schema 和结果，不直接依赖具体 Tool 的 Python 异常或 Java 响应细节。
+
+### 与 Agent 开发的关系
+
+当前已实现的执行链为：
+
+```text
+raw_input + ToolContext(identity, permissions, trace_id, run_id)
+→ BaseTool.execute
+→ required_permissions 门禁
+→ input_model Pydantic 校验
+→ 整体 timeout
+→ 具体 _execute
+→ output_model Pydantic 校验
+→ ToolResult(success, data, error)
+```
+
+`ToolRegistry` 使用稳定名称注册和获取 Tool，重复名称直接拒绝，避免后注册实例静默覆盖原 Tool。
+具体业务 Tool 尚未实现，但 M1.5 可以只关注 Java 端点输入输出和 `_execute`，不再重复实现通用
+安全边界。
+
+### 需要掌握的原理和设计取舍
+
+- `execute` 使用 Template Method：公共方法固定执行顺序，子类只实现 `_execute`。这样具体 Tool
+  不能因复制粘贴遗漏权限、Schema、超时或错误收敛。
+- 输入和输出都用 Pydantic。输入门禁阻止模型或调用方传入额外字段、空 ID 和错误类型；输出
+  门禁阻止 Java 契约漂移或 Tool 拼装错误成为 Workflow 的业务事实。
+- `ToolResult` 强制成功时只有 `data`、失败时只有 `error`，避免 Agent 面对矛盾状态后自行猜测。
+  Workflow 应按 `error.code` 分支而不是匹配 `message`。
+- 权限做两层校验：Python 根据 Tool 声明的 `required_permissions` 提前拒绝明显越权调用，Java
+  仍是最终权限和业务状态裁决者。页面或模型传入的权限不能替代服务端校验。
+- `timeout` 是单次 Tool 的整体耗时上限；Client 的 connect/read/write/pool timeout 是传输阶段
+  上限。两者作用范围不同，不能只配置其中一个。
+- `max_retries` 当前只是元数据。M1.4 即使得到 `retryable=true` 也只调用一次，M1.6 才结合
+  风险等级、只读属性、次数、退避和总预算执行重试，避免写操作结果未知时被盲目重放。
+- 未知异常对外固定映射 `UNKNOWN_TOOL_ERROR`，不泄露实现细节；原异常通过结构化日志保留，
+  并附带 `tool_name/run_id/error_code`。安全返回和可诊断性需要同时满足。
+- 注册重名是装配错误，使用 `DuplicateToolRegistrationError`；`DUPLICATE_CALL` 是单次 Run 中
+  相同 Tool 和参数重复执行的运行时语义，留给 M1.7。二者不能为了复用错误码而混淆。
+
+### 可能的面试问题及回答要点
+
+**为什么不让每个 Tool 自己实现输入校验和 try/except？**
+
+回答要点：多个 Tool 手写会产生策略漂移，部分 Tool 可能漏权限、漏输出校验或泄露异常。
+Template Method 把通用门禁集中在 `execute`，具体实现只处理业务调用，也更容易用一组协议测试
+覆盖所有 Tool 的共同规则。
+
+**为什么 Tool 输出也要再次做 Pydantic 校验？Java Client 已经校验过响应。**
+
+回答要点：Client 校验 Java 信封和端点 DTO，具体 Tool 还可能聚合、重命名或计算字段。输出
+Schema 是 Tool 与 Workflow 的最终边界，可以拦截 Tool 自身转换错误，防止不可信数据进入模型。
+
+**Python 已检查权限，为什么 Java 还要再检查？**
+
+回答要点：Python 是编排层，只能做快速拒绝；上下文可能来自页面或会话，不能被当作最终事实。
+业务权限、对象归属和状态一致性必须由持有业务数据的 Java 服务重新校验。
+
+**`ToolResult` 和抛异常相比有什么好处？**
+
+回答要点：异常适合服务内部传播，Workflow 更需要可序列化、可展示、可持久化的稳定分支结构。
+执行边界把 `ToolException`、timeout、Schema 错误和未知异常收敛为统一结果，后续 Run/Step、SSE
+和评测可以复用同一错误语义。
+
+**为什么 `max_retries=3` 的测试仍只调用一次？**
+
+回答要点：本阶段只建立协议，重试需要同时判断 Tool 风险、错误可恢复性和操作是否只读。提前
+在基类里按次数重试会让写 Tool 在超时后产生重复副作用，因此 M1.6 才实现受约束的 RetryPolicy。
+
+### 简历表述建议
+
+> 设计 Python Agent Tool 基础协议，以泛型 Pydantic Schema 和 Template Method 统一 Tool 元数据、
+> 身份权限上下文、输入输出校验、整体超时及错误结果；通过稳定注册表和结构化异常收敛，阻断
+> 非法参数、越权调用、响应漂移和未知异常进入 Workflow，同时为后续重试、Run/Step 与评测提供
+> 可复用契约。
+
+### 不能过度声称
+
+- 当前只有协议和测试用 Echo Tool，没有实现订单、任务、进度、质检、复核或交付业务 Tool。
+- 没有接入 LLM、LangGraph 或动态 Tool Calling，不能声称模型已能选择和调用 Tool。
+- `max_retries` 只是元数据，没有指数退避、自动重试或总耗时预算。
+- `run_id` 只在上下文和未知异常日志中关联调用，没有 Run/Step 表、持久化或 SSE 展示。
+- 风险等级已建模，但写 Tool、Approval、人工确认和 Agent 写回仍未实现。
+- Python 权限门禁不等于生产级 RBAC，Java 仍必须执行最终权限、对象和状态校验。

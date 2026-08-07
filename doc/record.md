@@ -1458,3 +1458,119 @@
   - 无新增价值，未修改 `doc/needCare.md`。本次属于开发治理，不构成Agent岗位面试实现证据。
 - 下一建议任务：
   - `[T127] 定义 Tool 基类`。
+
+## 2026-08-04 21:51 — `[T127-T132] M1.4 Tool 基础协议`
+
+- 里程碑：M1 Python Tool 层
+- 任务类型：功能 / Schema / 测试 / 文档 / 配置
+- 目标与范围：
+  - 本次实现：建立 Tool 八项统一元数据、`ToolContext`、互斥 `ToolResult`、`BaseTool.execute`
+    公共执行门禁和 `ToolRegistry`，完成 T127～T132。
+  - 明确不实现：不实现订单等具体业务 Tool、自动重试、单次 Run 重复调用检测、调试 API、
+    Workflow、模型调用、Run/Step 持久化或 Approval。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：本阶段不读取或修改 Java 业务事实，不改变 `ORDER-003`。M1.5 具体
+    Tool 将通过当前协议调用已有 `BusinessHttpClient`，Python 仍禁止直接访问业务数据库。
+  - 方案选择及原因：公共 `execute` 使用 Template Method 固定权限、输入 Schema、整体超时、
+    具体调用、输出 Schema 和异常收敛顺序；子类只实现 `_execute`，避免不同 Tool 策略漂移。
+  - 结果契约：`ToolResult` 由 Pydantic 保证成功时只有 `data`、失败时只有 `error`；Workflow
+    后续根据稳定 `ToolError.code` 分支，不解析文案或 Python 异常类型。
+  - 权限边界：Python 根据 `required_permissions` 提前拒绝明显越权调用，但 Java 仍负责最终
+    用户权限、对象归属、业务状态和写入一致性校验。
+  - 重试边界：`max_retries` 只作为 M1.6 策略元数据。本阶段即使 timeout 返回
+    `retryable=true` 也只执行一次，防止提前产生写请求重放风险。
+  - 重名边界：注册表重复名称属于装配错误，使用 `DuplicateToolRegistrationError`；不复用
+    M1.7 的 `DUPLICATE_CALL`，后者表示单次 Run 中相同 Tool 和参数的重复业务调用。
+  - 兼容性影响：新增 Python 内部协议和根级测试命令；不修改 Java API、前端、数据库、Compose
+    或现有 Client 的成功/异常契约。
+- 核心实现：
+  - `agent-service/app/tools/models.py` — `ToolContext` 保存脱敏身份、权限、Trace 和 Run；
+    `ToolError` 映射标准异常；泛型 `ToolResult` 校验成功/失败互斥。
+  - `agent-service/app/tools/base.py` — `ToolRiskLevel` 定义 LOW/MEDIUM/HIGH；`BaseTool` 暴露八项
+    只读元数据；`execute` 统一权限、双向 Schema、整体 timeout 和错误处理。
+  - `agent-service/app/tools/registry.py` — `ToolRegistry.register/get/names` 提供确定性注册与查找，
+    独立异常阻止重名静默覆盖并报告未知名称。
+  - `agent-service/app/observability.py` — JSON 日志增加 `tool_name/run_id/error_code` 白名单字段；
+    未知异常对结果隐藏内部详情，但通过 `logging.exception` 保留堆栈用于排障。
+  - `agent-service/tests/test_tool_protocol.py` — 测试用 Echo Tool 覆盖协议正常和异常路径，不代表
+    已实现业务 Tool。
+  - 必要的最小关键片段：
+
+    ```text
+    raw_input + ToolContext
+    → 权限门禁
+    → input_model
+    → timeout 内执行 _execute
+    → output_model
+    → ToolResult(success, data, error)
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：未来 Workflow 或调试 API 从注册表获取 Tool，构造上下文并调用公共
+    `execute`；具体 Tool 通过 `_execute` 调 Java Client；上层只收到标准结果。
+  - 核心类、函数、接口或配置项：`ToolContext`、`ToolError`、`ToolResult`、`ToolRiskLevel`、
+    `BaseTool.execute/_execute`、`ToolRegistry.register/get/names`、Make 的
+    `test-agent-tool-protocol`。
+  - 输入、输出、异常和边界：输入是 Pydantic Model 或字段映射加严格上下文；成功输出是经过
+    `output_model` 校验的 Model；参数、权限、超时、输出漂移、标准异常和未知异常分别映射稳定
+    错误。未知异常只向结果暴露固定文案，日志保留堆栈和调用标识。
+  - 关键代码位置：`models.py` 第22、33、62行；`base.py` 第23、31、97行；`registry.py`
+    第8、16、24、30、37行；`Makefile` 第32行。行号代表本次记录时版本。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：输入错误为 `PARAM_VALIDATION_ERROR`；缺权限为
+    `PERMISSION_DENIED`；整体 timeout 为可恢复的 `TOOL_TIMEOUT`；Client 的 `ToolException`
+    保留 code/retryable/Trace/HTTP 状态；非法输出为 `RESPONSE_VALIDATION_ERROR`；其他异常为
+    `UNKNOWN_TOOL_ERROR`。
+  - 幂等、并发或人工确认：无业务写入；没有自动重试。`ToolContext` 冻结且 Token 由
+    `SecretStr` 脱敏；Approval 尚未实现。
+- 未完成项与已知问题：
+  - 未完成项：T133～T139 具体只读 Tool、T140～T144 RetryPolicy、T145～T149 重复调用检测、
+    T150～T153 调试 API 及 M2+ 能力。
+  - 已知问题/阻塞：无阻塞。`run_id` 当前只用于上下文和未知异常日志，没有 Run/Step 持久化；
+    风险等级已经建模但尚无写 Tool/Approval 消费者；Java 回归仍输出 Mockito 动态 Agent 的
+    未来 JDK 兼容警告。
+- 替代方案：
+  - 采用的替代方案及原因：无临时替代方案。测试使用本地 Echo Tool 是协议单元夹具，不冒充
+    业务实现；M1.5 将在相同协议上接入真实 Java 端点。
+  - 已覆盖/未覆盖的验收要求：完整覆盖 T127～T132 的基类、上下文、结果、注册、重复名称和
+    正常/异常自动化测试；不覆盖下一阶段业务 Tool 和跨服务 Tool 调用。
+  - 局限、风险和转正/移除条件：测试 Echo Tool 只存在于测试文件，无生产替换任务；具体业务
+    能力必须由 T133+ 的端点 DTO 和 Tool 测试举证。
+- 后续影响：
+  - 对后续任务/里程碑：M1.5 Tool 必须继承 `BaseTool`、使用明确 Pydantic 输入输出、声明权限
+    与风险并注册到 `ToolRegistry`；M1.6 不得把 `max_retries` 当成无条件重放次数。
+  - 对接口/数据/测试/部署：无 Java/API/数据迁移/前端/部署影响；Python 测试总数增加，根级
+    `make test` 新增 M1.4 协议目标。
+- 测试与验证：
+  - `[预期失败] agent-service 内 uv run --frozen pytest -q tests/test_tool_protocol.py` — 收集
+    阶段 1 个 `ModuleNotFoundError`，`app.tools` 尚不存在。
+  - `[首次失败后修复] 同一测试` — 首轮 11/16；5 个元数据用例错误实例化抽象基类，改用具体
+    测试 Tool 后 16/16，没有放宽生产校验。
+  - `[通过] make test-agent-tool-protocol` — M1.4 16/16。
+  - `[通过] make test-agent-foundation` — M1.1 7/7，包含 Tool 日志字段格式化回归。
+  - `[通过] make test-agent-client` — M1.2 10/10。
+  - `[通过] make test-agent-errors` — M1.3 18/18。
+  - `[通过] agent-service 内 uv run --frozen pytest -q` — Python 汇总 51/51。
+  - `[首次失败后修复] Ruff` — 先报告两个旧式 Generic 声明，改用 Python 3.12 类型参数语法后
+    报告 import 分组；排序后通过。mypy strict 检查21个源/测试文件无问题。
+  - `[通过] uv lock --check` — 解析42个包。
+  - `[通过] make validate` — 基础结构和 Compose 配置有效。
+  - `[通过] make test` — 三服务 smoke、Python分项、Java M0 56/56、Web 7/7和生产构建通过。
+  - `[通过] git diff --check` — 无空白错误。
+  - `[未运行] make reset-demo` — 本次没有修改固定数据，且该命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/tools/__init__.py`、`base.py`、`models.py`、`registry.py`
+  - `agent-service/app/observability.py`
+  - `agent-service/tests/test_tool_protocol.py`、`test_observability.py`
+  - `Makefile`、`README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；M1 停止线尚未达到，因为只读业务 Tool 尚未实现。
+  - 后续兼容注意事项：不要绕过公共 `execute` 直接调用 `_execute`；风险等级、权限名和 Tool 名
+    将成为 Registry、Workflow、评测及未来模型 Tool Schema 的稳定契约，变更时需同步测试。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次形成了 Tool Schema 双向门禁、模型/Workflow 与业务
+    异常隔离、两层权限、整体超时、重试停止线、稳定注册和安全可观测性的真实实现证据。
+- 下一建议任务：
+  - `[T133] 实现 get_order_detail Tool`。

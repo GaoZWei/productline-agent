@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -15,7 +15,7 @@ validate: ## 检查 M0.1 必需目录、文件与 Compose 配置
 	./scripts/check-foundation.sh
 	$(COMPOSE) config --quiet
 
-test: validate smoke test-agent-foundation test-agent-client test-agent-errors test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web ## 运行当前阶段全部自动检查
+test: validate smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web ## 运行当前阶段全部自动检查
 
 smoke: ## 验证 Java、Python 和 Web 健康检查
 	./scripts/smoke-services.sh
@@ -28,6 +28,9 @@ test-agent-client: ## 验证 M1.2 Java HTTP Client 配置、生命周期和响�
 
 test-agent-errors: ## 验证 M1.3 标准 Tool 错误模型和跨服务错误映射
 	cd agent-service && uv run --frozen pytest -q tests/test_tool_errors.py
+
+test-agent-tool-protocol: ## 验证 M1.4 Tool 基础协议、执行门禁和注册表
+	cd agent-service && uv run --frozen pytest -q tests/test_tool_protocol.py
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查
 	cd agent-service && uv run --frozen ruff check .

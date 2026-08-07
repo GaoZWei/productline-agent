@@ -2,13 +2,14 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M1.3 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M1.4 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
 当前 `agent-service` 是一个独立的 Python 后端服务，主要承担未来的 Tool 封装、Workflow、
 Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
-最小可观测性、Java 异步 HTTP Client 和标准错误映射；尚未实现具体 Tool 或大模型调用。
+最小可观测性、Java 异步 HTTP Client、标准错误映射和 Tool 基础协议；尚未实现具体业务 Tool
+或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -755,8 +756,56 @@ M1.3 只完成“错误分类”，仍然不会自动重试。timeout/网络错�
 - POST 超时或网络中断时，Java 可能已经完成写入，不能仅凭 `retryable=true` 自动重放；
 - 500 当前继承 Java 的保守 `retryable=false`，尤其不能对写请求猜测执行结果。
 
-`DUPLICATE_CALL` 和 `UNKNOWN_TOOL_ERROR` 已纳入统一错误码词汇，但它们的触发分别依赖后续
-M1.7 重复 Tool 调用检测和 M1.4 Tool 执行边界，当前 Client 不会伪造这两类错误。
+`UNKNOWN_TOOL_ERROR` 现在由 M1.4 `BaseTool.execute` 在具体实现抛出未知异常时生成；
+`DUPLICATE_CALL` 仍依赖后续 M1.7 重复调用检测。Client 不会伪造这两类错误。
+
+### 7.7 Tool 基础协议如何协作
+
+M1.4 新增的 [`agent-service/app/tools/`](../agent-service/app/tools/) 可以类比为：
+
+| Python | Java 类比 | Node.js/TypeScript 类比 | 职责 |
+| --- | --- | --- | --- |
+| `BaseTool` | 抽象基类 + Template Method | 抽象类中的公共执行包装器 | 固定调用门禁和异常收敛顺序 |
+| `_execute` | 子类受保护的抽象方法 | 子类实现的 `protected executeCore` | 只写具体业务调用 |
+| `ToolContext` | 不可变请求上下文 DTO | readonly context object | 携带身份、权限、Trace 和 Run |
+| `ToolResult` | 泛型结果对象 | discriminated result object | 用 `success/data/error` 表达结果 |
+| `ToolRegistry` | Spring Bean 注册表 | `Map<string, Tool>` 容器 | 按稳定名称注册和查找 Tool |
+
+公共调用顺序为：
+
+```text
+Workflow 或调试入口准备 raw_input + ToolContext
+→ BaseTool.execute 检查 required_permissions
+→ input_model 校验输入
+→ asyncio.timeout 限制本次 Tool 的整体耗时
+→ 具体 Tool._execute 调用 Java Client
+→ output_model 再校验输出
+→ 返回 ToolResult(success=true, data=...)
+```
+
+失败不会把不同异常类型直接泄露给上层：
+
+```text
+输入不合法                 → PARAM_VALIDATION_ERROR
+缺少 Tool 所需权限         → PERMISSION_DENIED
+ToolException              → 保留标准 code/retryable/Trace/HTTP 状态
+整体执行超时               → TOOL_TIMEOUT
+输出不符合 output_model    → RESPONSE_VALIDATION_ERROR
+其他未知异常               → UNKNOWN_TOOL_ERROR
+```
+
+未知异常返回固定安全文案，避免实现细节进入 Workflow 或模型；原始异常通过
+`logging.exception` 写入带 `tool_name`、`run_id` 和 `error_code` 的结构化日志，供开发排障。
+`ToolResult` 还通过 Pydantic 校验保证成功时只有 `data`、失败时只有 `error`，避免上层遇到
+“`success=true` 但同时有错误”这类矛盾状态。
+
+`risk_level`、`required_permissions`、`timeout` 和 `max_retries` 都是 Tool 元数据。当前已经执行
+权限检查和整体超时，但 `max_retries` 只是为 M1.6 预留的策略参数；M1.4 不会因为错误标记为
+`retryable=true` 就自动重放调用。`ToolContext.run_id` 当前用于调用关联和日志字段，不代表已经
+实现 Run/Step 数据表或持久化。
+
+`ToolRegistry.register` 遇到相同名称会抛 `DuplicateToolRegistrationError`，这是启动/装配错误；
+它不是一次 Run 中相同参数被重复调用，因此不能使用 `DUPLICATE_CALL`。后者仍由 M1.7 实现。
 
 ## 8. 启动、请求和关闭顺序
 
@@ -1162,7 +1211,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M1.3 已完成
+### 13.1 M1.1～M1.4 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1177,13 +1226,17 @@ async def lifespan(...):
 - Java统一成功信封和调用方data Schema校验；
 - Java失败信封、HTTP/code/Trace一致性校验；
 - HTTP、超时、网络和响应契约异常到`ToolException`的统一映射；
+- Tool统一元数据、`ToolContext`和互斥的`ToolResult`；
+- `BaseTool.execute`权限、输入、整体超时、输出和异常门禁；
+- `ToolRegistry`名称注册、查找和重复名称拦截；
 - pytest、Ruff、mypy；
 - Docker/Compose运行。
 
 ### 13.2 当前尚未实现
 
-- Tool基类、注册表和具体只读Tool；
+- 订单、任务、进度、质检、复核和交付等具体只读Tool；
 - 只读Tool的有限重试；
+- 单次Run内的重复Tool调用检测；
 - 数据库readiness；
 - Run/Step实体和持久化；
 - Workflow、动态Agent、模型调用；
@@ -1191,7 +1244,7 @@ async def lifespan(...):
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 T127 以后可能增加的结构
+### 13.3 T133 以后可能增加的结构
 
 后续可能逐步形成：
 
@@ -1200,16 +1253,17 @@ app/
 ├── schemas/
 │   └── order.py                 # 端点业务DTO
 ├── tools/
-│   ├── base.py                  # Tool协议
-│   ├── registry.py              # Tool注册与查找
+│   ├── base.py                  # 已实现的Tool协议
+│   ├── models.py                # 已实现的上下文和结果Schema
+│   ├── registry.py              # 已实现的Tool注册与查找
 │   └── get_order_detail.py      # 具体只读Tool
 └── api/
     └── internal_tools.py        # 无Agent时调试Tool的内部接口
 ```
 
-这些是基于开发计划的预计结构，不代表文件已经存在；已实现的 `errors.py`、
-`clients/business.py` 和 `schemas/business.py` 不再列为预计目录。实际实现时仍以对应任务和
-测试为准。
+其中 `tools/base.py`、`tools/models.py` 和 `tools/registry.py` 已存在；`order.py`、
+`get_order_detail.py` 和内部调试接口仍是预计结构，不代表功能已经实现。实际实现时仍以对应
+任务和测试为准。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 

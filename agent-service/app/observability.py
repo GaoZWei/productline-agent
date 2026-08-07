@@ -27,6 +27,9 @@ _LOG_EXTRA_FIELDS = (
     "path",
     "status_code",
     "duration_ms",
+    "tool_name",
+    "run_id",
+    "error_code",
 )
 
 
@@ -59,7 +62,7 @@ class JsonFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
-            "trace_id": get_trace_id(),
+            "trace_id": getattr(record, "trace_id", get_trace_id()),
         }
         for field in _LOG_EXTRA_FIELDS:
             if hasattr(record, field):

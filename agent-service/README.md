@@ -1,8 +1,8 @@
 # Agent Service
 
-M1.3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
-调用 Java 的共享异步 HTTP Client 和标准 Tool 错误映射；尚未包含具体 Tool、Workflow、
-RAG 或模型调用。
+M1.4 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射和 Tool 基础协议；尚未包含具体业务
+Tool、Workflow、RAG 或模型调用。
 
 ## 本地开发
 
@@ -30,6 +30,17 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 不会自动重试；`retryable` 只描述故障是否具有技术可恢复性，后续 M1.6 仍须根据只读/写入
 风险决定是否允许重试。
 
+## Tool 基础协议
+
+`app.tools.BaseTool` 统一声明名称、说明、Pydantic 输入/输出模型、风险等级、所需权限、整体
+超时和最大重试次数。公共 `execute` 先检查权限和输入 Schema，再在整体超时内调用具体 Tool
+的 `_execute`，最后校验输出 Schema。标准 `ToolException`、超时、非法输出和未知异常都会
+转换为互斥的 `ToolResult(success, data, error)`，未知异常的内部详情只写入结构化日志。
+
+`ToolContext` 携带 `BusinessIdentity`、权限集合、Trace ID 和 Run ID。`ToolRegistry` 按稳定
+名称注册和获取 Tool，重复名称会被拒绝而不会静默覆盖。当前 `max_retries` 仅是策略元数据，
+M1.4 不执行自动重试；当前也没有具体订单 Tool、Run/Step 持久化或 Approval。
+
 ## 测试与质量
 
 ```bash
@@ -44,6 +55,7 @@ uv run --frozen alembic upgrade head
 ```bash
 make test-agent-client
 make test-agent-errors
+make test-agent-tool-protocol
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP

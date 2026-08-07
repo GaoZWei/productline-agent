@@ -410,3 +410,34 @@
   运行时字符串不得因说明语言规则被擅自修改
 - 验证：`make validate`、Markdown code fence结构检查和`git diff --check`
 - 业务测试未运行：本次只修改开发治理文档、状态和开发记录，不修改运行时代码
+
+## M1.4 Tool 基础协议
+
+- 验证时间：2026-08-04
+- 测试先行基线：`uv run --frozen pytest -q tests/test_tool_protocol.py` 在收集阶段产生 1 个
+  `ModuleNotFoundError`，目标 `app.tools` 尚不存在
+- `make test-agent-tool-protocol`：16/16
+  - `ToolContext` 身份、权限、Trace、Run、严格不可变和 Token 脱敏：通过
+  - `ToolResult` 成功/失败互斥约束：通过
+  - Tool 八项元数据及非法名称、说明、权限、超时、重试次数：通过
+  - 权限门禁、输入/输出 Pydantic 校验、整体 timeout：通过
+  - `ToolException`、未知异常到标准失败结果：通过
+  - 未知异常固定安全文案及 `tool_name/run_id/error_code` 排障日志：通过
+  - 注册、查找、稳定名称列表、重复注册和未知名称：通过
+  - `max_retries` 不会在 M1.4 提前触发自动重试：通过，timeout 场景只调用 1 次
+- Python 分项回归：M1.1 7/7、M1.2 10/10、M1.3 18/18；Python 汇总 51/51
+- `make quality`：Ruff 全部通过；mypy strict 检查 21 个源/测试文件无问题
+- `uv lock --check`：通过，共解析 42 个直接及传递依赖
+- `make validate`：通过，基础结构和 Compose 配置有效
+- `make test`：通过；三服务 smoke、Python 分项、Java M0 56/56、Web 7/7 和生产构建全部通过
+- `git diff --check`：通过
+- 开发中发现并修复：
+  - 首轮实现后 11/16；5 个元数据测试错误地尝试实例化抽象 `BaseTool`，改为具体测试 Tool 后
+    16/16。这是测试夹具问题，不是放宽生产校验。
+  - 首次 Ruff 报告两个旧式 `Generic` 声明；改用 Python 3.12 类型参数语法后又提示 import
+    分组，完成排序后 Ruff 和 mypy 均通过。
+- 最终失败：0
+- 未运行：`make reset-demo` 未运行，因为本次没有修改固定数据且该命令会删除本地持久卷
+- 已知非阻塞问题：没有具体业务 Tool；`max_retries` 仍是元数据；没有 Run/Step 持久化、
+  重复调用检测、Workflow、模型调用或 Approval；Java 测试仍输出 Mockito 动态 Agent 的未来
+  JDK 兼容警告
