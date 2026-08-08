@@ -27,6 +27,7 @@ class ToolRiskLevel(StrEnum):
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
 
+
 # 所有 Tool 的公共模板
 class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
     """在具体业务实现外统一输入、权限、超时、输出和错误处理。"""
@@ -39,10 +40,12 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
         input_model: type[InputT],
         output_model: type[OutputT],
         risk_level: ToolRiskLevel,
-        required_permissions: frozenset[str],  # 不能为空， Python 会先做快速权限检查，但它不能替代 Java 的权限检查
-        timeout: float,  # 整个 _execute + 输出校验的耗时上限
+        required_permissions: frozenset[str],
+        timeout: float,
         max_retries: int,
     ) -> None:
+        # Python 先做快速权限检查, 但它不能替代 Java 的最终权限校验。
+        # timeout 限制整个 _execute 和输出校验的耗时。
         self._validate_metadata(
             name=name,
             description=description,
@@ -93,7 +96,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
     @property
     def max_retries(self) -> int:
         return self._max_retries
-    
+
     # 完整执行顺序
     async def execute(
         self,
@@ -101,7 +104,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
         context: ToolContext,
     ) -> ToolResult[OutputT]:
         """执行固定门禁并把所有预期失败收敛为 ToolResult。"""
-        # 第一步：权限检查
+        # 第一步: 权限检查
         if not self.required_permissions.issubset(context.permissions):
             return self._failure(
                 ToolError(
@@ -111,7 +114,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     trace_id=context.trace_id,
                 )
             )
-        # 第二步：输入Schema校验
+        # 第二步: 输入 Schema 校验
         try:
             validated_input = self.input_model.model_validate(raw_input)
         except ValidationError:
@@ -123,12 +126,12 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     trace_id=context.trace_id,
                 )
             )
-        # 第三步：执行超时控制
+        # 第三步: 执行超时控制
         try:
             async with asyncio.timeout(self.timeout):  # 这个异步代码块必须在指定时间内完成
-                # 第四步：调用具体 _execute()
+                # 第四步: 调用具体 _execute()
                 raw_output = await self._execute(validated_input, context)
-                try:  # 第五步：输出Schema校验
+                try:  # 第五步: 输出 Schema 校验
                     validated_output = self.output_model.model_validate(raw_output)
                 except ValidationError:
                     return self._failure(
@@ -139,7 +142,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                             trace_id=context.trace_id,
                         )
                     )
-        # 第七步：异常处理
+        # 第六步: 异常处理
         # 1. 标准 ToolException
         except ToolException as exception:
             return self._failure(
@@ -177,10 +180,11 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     trace_id=context.trace_id,
                 )
             )
-        # 第六步：返回成功结果
+        # 第七步: 返回成功结果
         return ToolResult[OutputT](success=True, data=validated_output)
 
-    # 第四步：调用具体 _execute()  execute()负责通用规则  _execute()只负责业务接口调用和必要转换
+    # 第四步的具体实现: execute() 负责通用规则,
+    # _execute() 只负责业务接口调用和必要转换。
     # _execute() 才是未来真正调用 Java Client 的地方。
     @abstractmethod
     async def _execute(

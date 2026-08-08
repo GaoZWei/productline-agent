@@ -114,7 +114,9 @@ class BusinessHttpClient:
             raise ValueError(
                 "idempotency_key must contain 1-128 safe letters, numbers, '.', '_', ':' or '-'"
             )
+        # 路径校验（只允许相对 /api/ 路径）
         validated_path = self._validate_path(path)
+        # 构造请求 Header
         headers = self._build_headers(identity=identity, trace_id=trace_id)
         headers["Idempotency-Key"] = idempotency_key
         try:
@@ -127,7 +129,7 @@ class BusinessHttpClient:
             self._raise_request_error(exc, headers["X-Trace-Id"])
         return self._validate_response(response, response_type, headers["X-Trace-Id"])
 
-    # 校验业务 API路径是否符合要求
+    # 校验业务 API路径是否符合要求（只允许相对 /api/ 路径）
     @staticmethod
     def _validate_path(path: str) -> str:
         if not path.startswith("/api/") or "://" in path:
@@ -229,7 +231,7 @@ class BusinessHttpClient:
             trace_id=envelope.trace_id,
             status_code=response.status_code,
         )
-
+    # 成功响应校验（校验最外层和最内层 Schema）
     @staticmethod
     def _validate_success_response(
         response: httpx.Response,
@@ -237,9 +239,9 @@ class BusinessHttpClient:
         request_trace_id: str,
     ) -> BusinessResponse[DataT]:
         try:
-            # 统一信封 Schema 校验
+            # 统一信封 Schema 校验（校验最外层）
             envelope = BusinessSuccessEnvelope.model_validate_json(response.content)
-            # 具体 data Schema 校验
+            # 具体 data Schema 校验（校验最内层业务数据格式）
             data = TypeAdapter(response_type).validate_python(envelope.data)
         except ValidationError as exc:
             BusinessHttpClient._raise_response_validation_error(

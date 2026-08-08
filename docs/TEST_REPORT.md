@@ -441,3 +441,33 @@
 - 已知非阻塞问题：没有具体业务 Tool；`max_retries` 仍是元数据；没有 Run/Step 持久化、
   重复调用检测、Workflow、模型调用或 Approval；Java 测试仍输出 Mockito 动态 Agent 的未来
   JDK 兼容警告
+
+## M1.5 七个只读 Tool
+
+- 验证时间：2026-08-07
+- 测试先行基线：`uv run --frozen pytest -q tests/integration/tools/test_read_tools.py` 在收集
+  阶段产生 1 个 `ImportError`，目标 `READ_TOOL_NAMES` 和只读 Tool 尚不存在
+- `make test-tools`：M1.4 协议 16/16，M1.5 只读 Tool 69/69
+  - 七个名称、Java GET 路径、身份和 Trace ID 透传及成功输出：通过
+  - 空 ID、非法 ID、缺少权限均在 HTTP 前拒绝：通过
+  - Java 404、500 和 timeout 到稳定 `ToolResult.error`，且当前只调用一次：通过
+  - Java 缺少字段、非法状态和资源 ID 不一致的响应拒绝：通过
+  - tasks、steps、issues、reviews 和 records 空数组保留为成功：通过
+  - Registry 精确包含七个 Tool，FastAPI lifespan 装配并共享 Client：通过
+- 真实 Java 固定数据验收：七个 Tool 针对 `ORDER-003` / `TASK-003` 依次调用，7/7 成功
+- Python 全量：120/120
+- `make quality`：Ruff 全部通过；mypy strict 检查 24 个源/测试文件无问题
+- `make test`：通过；基础与 Compose、三服务 smoke、Python 分项、Java M0 56/56、Web 7/7
+  及生产构建全部通过
+- `docker compose up --detach --build agent-service` 后三服务 smoke：通过；新 Agent 镜像已包含
+  M1.5 Schema、Tool 和启动装配
+- `uv lock --check`、`make validate`、Markdown code fence 检查和 `git diff --check`：通过
+- 开发中发现并修复：首次 Ruff 报告 21 项导出排序、既有中文教学注释格式和固定业务中文标点
+  问题；保留注释含义并调整排版，对不可改的业务响应原文仅做定点 `noqa`，最终通过
+- 验收命令首次误在 `agent-service` 子目录调用根级 Make 目标，第二次又因 shell 的持续 `cd`
+  和未启用 `set -e` 掩盖前置失败；改为子 shell 并启用 `set -e` 后整组检查真实通过
+- 最终失败：0
+- 未运行：`make reset-demo` 未运行；本次不修改固定数据，该命令会删除本地持久卷
+- 已知非阻塞问题：`max_retries=1` 目前只是元数据，M1.5 的 500/timeout 都只调用一次；尚无
+  M1.7 重复调用检测、M1.8 调试 API、Run/Step、Workflow、模型调用或 Approval；Java 测试仍
+  输出 Mockito 动态 Agent 的未来 JDK 兼容警告

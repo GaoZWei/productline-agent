@@ -1574,3 +1574,117 @@
     异常隔离、两层权限、整体超时、重试停止线、稳定注册和安全可观测性的真实实现证据。
 - 下一建议任务：
   - `[T133] 实现 get_order_detail Tool`。
+
+## 2026-08-07 21:40 — `[T133-T139] M1.5 七个只读 Tool`
+
+- 里程碑：M1 Python Tool 层
+- 任务类型：功能 / Schema / HTTP 集成 / 测试 / 文档 / 配置
+- 目标与范围：
+  - 本次实现：完成 `get_order_detail`、`get_related_tasks`、`get_task_detail`、
+    `get_production_progress`、`get_quality_issues`、`get_review_result` 和
+    `get_delivery_status` 七个只读 Tool；装配进 FastAPI lifespan；完成 T133～T139。
+  - 明确不实现：不实现 T140～T144 自动重试、T145～T149 单次 Run 重复调用检测、
+    T150～T153 Tool 调试 API、Workflow、LLM Tool Calling、Run/Step、RAG 或 Approval。
+- 需求与关键决策：
+  - 业务事实边界：Python 只通过 Java API 获取订单、任务、进度、质检、复核和交付数据，不建立
+    Java 业务表 ORM，也不根据模型输出补造事实。
+  - Tool 粒度：保留七个独立 Tool，而不是提前聚合成订单总览。后续 Workflow/Agent 能按问题
+    选择证据路径，Run/Step 和评测也能定位具体查询；聚合与调用预算留给后续里程碑。
+  - Schema 契约：`OrderIdInput` / `TaskIdInput` 限制路径 ID；输出模型以 Java DTO 的 camelCase
+    alias、Literal 状态、必填字段、不可变对象和 `extra=forbid` 建立严格边界。
+  - 资源绑定：除结构校验外，具体 Tool 核对请求 ID、响应顶层父 ID 与嵌套 task/step/issue/
+    delivery 的父 ID。形状合法但属于其他订单或任务的响应映射为非重试
+    `RESPONSE_VALIDATION_ERROR`，避免跨订单事实污染后续 Agent 结论。
+  - 空集合语义：tasks、steps、issues、reviews、records 的 `[]` 是成功结果；404 才表示父资源
+    不存在，二者不合并。
+  - 权限与链路：五类 Python 权限做前置快速拒绝，`BusinessIdentity` 和 Trace ID 原样传给 Java；
+    Java 仍是最终权限和业务事实边界。
+  - 重试停止线：七个 Tool 声明 LOW 风险与 `max_retries=1` 元数据，但没有执行重试；timeout 和
+    Java 500 测试均确认只调用一次，真正策略留给 M1.6。
+- 核心实现：
+  - `agent-service/app/schemas/tools.py` — 定义两种输入和订单、任务、步骤、质检、复核、交付等
+    严格输出 Schema，字段 alias 与 Java DTO 一致。
+  - `agent-service/app/tools/readonly.py` — `_BusinessReadTool` 统一 Client 和静态元数据；七个子类
+    映射精确 GET 路径并执行资源归属校验；`create_read_tool_registry` 确定性注册完整集合。
+  - `agent-service/app/main.py` — lifespan 创建共享 Client 后构建 Registry，应用关闭时复用原有
+    Client 关闭逻辑。
+  - `agent-service/app/tools/__init__.py` — 导出七个 Tool、名称集合和工厂。
+  - `agent-service/tests/integration/tools/test_read_tools.py` — 数据驱动覆盖七个 Tool 的正常、参数、
+    权限、404、500、timeout、缺字段、资源串线、空集合和 Registry 场景。
+  - `agent-service/tests/test_business_client.py` — 增加 lifespan Registry 装配及名称集合断言。
+  - `Makefile` — 新增 `make test-tools`，并让根级 `make test` 覆盖 M1.4 协议与 M1.5 Tool。
+  - 必要调用链：
+
+    ```text
+    Tool name + raw input + ToolContext
+    → ToolRegistry.get
+    → BaseTool.execute 权限/输入/整体超时
+    → 具体 _execute
+    → BusinessHttpClient.get
+    → Java HTTP + 六字段信封 + data
+    → Client 信封与 DTO 校验
+    → Tool 资源归属校验
+    → BaseTool 输出校验
+    → ToolResult(data/error)
+    ```
+
+- 异常、安全与边界：
+  - 空或非法 ID 映射 `PARAM_VALIDATION_ERROR`，缺权限映射 `PERMISSION_DENIED`，两者均不发 HTTP。
+  - Java 404 映射 `RESOURCE_NOT_FOUND`；500 映射 `UPSTREAM_UNAVAILABLE`；传输或整体 timeout
+    映射 `TOOL_TIMEOUT`；缺字段、非法枚举或 ID 串线映射 `RESPONSE_VALIDATION_ERROR`。
+  - Python 前置权限不能代替 Java 授权；没有写操作、幂等、并发更新或人工确认变化。
+- 开发中发现并修复：
+  - 测试先行时因只读 Tool 尚不存在产生 1 个预期收集错误，生产实现后 M1.5 69/69。
+  - 首次 Ruff 报告 21 项：本次导出列表未排序，以及既有中文教学注释的全角标点、行长和业务
+    中文原文歧义检查。保留教学注释含义并调整排版；固定业务响应原文不能修改，仅定点添加
+    `noqa: RUF001`。最终 Ruff 和 mypy 均通过，无残余运行影响。
+  - 最终验收首次误在 `agent-service` 子目录调用根级 `make validate`；第二次多行 shell 中的
+    `cd agent-service` 持续影响后续命令，且未启用 `set -e` 使末尾成功掩盖前置失败。最终改用
+    子 shell 隔离目录并启用 `set -e`，同组锁文件、基础配置、Markdown 和 diff 检查真实通过。
+- 替代方案：
+  - 采用的替代方案及原因：无临时生产替代方案。`httpx.MockTransport` 是自动化 HTTP 边界测试
+    夹具，并已补真实 Java 固定数据 7/7 验收，不作为跨服务验证的替代。
+  - 已覆盖/未覆盖：覆盖七个 Tool 独立调用、异常契约和真实 Java 只读链路；不覆盖下一任务的
+    重试、重复调用检测、HTTP 调试入口和 Agent 自动决策。
+  - 局限、风险和移除条件：无临时方案需要移除；MockTransport 测试继续作为确定性回归保留。
+- 后续影响：
+  - 对后续任务/里程碑：M1.6 RetryPolicy 应只消费 LOW/只读属性与 `error.retryable`，限制次数、
+    退避和总预算；M1.7 可根据稳定 Tool 名与规范化输入检测重复；M2 可直接编排七个 Tool。
+  - 对接口/数据/测试/部署：没有修改 Java API、固定数据、数据库或前端；Python 内部新增稳定
+    Tool 名、权限名和 Schema，未来改名或字段变更必须同步 Workflow、模型 Tool Schema 和评测。
+  - 兼容性风险：Tool 输出严格拒绝 Java 新增额外字段；这是有意的契约漂移门禁，Java DTO 变化
+    时需要同步 Python Schema 和契约测试，不能静默放宽。
+- 测试与验证：
+  - `[预期失败] agent-service 内 uv run --frozen pytest -q tests/integration/tools/test_read_tools.py`
+    — 收集阶段 1 个 `ImportError`，`READ_TOOL_NAMES` 尚不存在。
+  - `[通过] make test-tools` — M1.4 协议 16/16，M1.5 七个只读 Tool 69/69。
+  - `[通过] make test-agent-client` — M1.2/生命周期回归 10/10，包含 Registry 装配。
+  - `[通过] agent-service 内 uv run --frozen pytest -q` — Python 汇总 120/120。
+  - `[通过] make quality` — Ruff 全部通过；mypy strict 检查 24 个源/测试文件无问题。
+  - `[通过] 真实 Java 固定数据验收` — 七个 Tool 针对 `ORDER-003` / `TASK-003` 调用 7/7。
+  - `[通过] make test` — foundation/Compose、三服务 smoke、Python 分项、Java M0 56/56、Web
+    7/7 和生产构建全部通过。
+  - `[通过] docker compose up --detach --build agent-service + 三服务 smoke` — 新 Agent 镜像
+    构建、容器重建和启动装配通过；Compose 同步重建依赖的 Java 镜像，固定数据卷未删除。
+  - `[通过] uv lock --check` — 解析 42 个直接及传递依赖。
+  - `[通过] make validate + Markdown code fence 检查 + git diff --check` — 基础结构、Compose、
+    文档代码围栏和差异空白均有效。
+  - `[未运行] make reset-demo` — 本次未修改固定数据，且该命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/schemas/tools.py`
+  - `agent-service/app/tools/readonly.py`、`__init__.py`
+  - `agent-service/app/main.py`
+  - `agent-service/tests/integration/tools/test_read_tools.py`、`tests/test_business_client.py`
+  - `agent-service/app/tools/base.py`、`models.py`、`registry.py`（只调整既有中文教学注释排版）
+  - `Makefile`、`README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 未完成项：T140～T153 及 M2+ 能力均未实现。
+  - 已知问题/阻塞：无阻塞；`max_retries` 尚不生效；没有 HTTP 调试入口、Run/Step 持久化或
+    Agent 消费者；Java 测试仍有 Mockito 动态 Agent 的未来 JDK 兼容警告。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次形成细粒度 Tool 取证路径、严格业务事实 Schema、
+    请求/响应资源绑定、空集合语义和两层权限边界的真实实现与测试证据。
+- 下一建议任务：
+  - `[T140] 定义只读 RetryPolicy`。

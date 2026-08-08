@@ -1,8 +1,8 @@
 # Agent Service
 
-M1.4 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
-调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射和 Tool 基础协议；尚未包含具体业务
-Tool、Workflow、RAG 或模型调用。
+M1.5 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
+尚未包含自动重试、Workflow、RAG 或模型调用。
 
 ## 本地开发
 
@@ -39,7 +39,18 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 
 `ToolContext` 携带 `BusinessIdentity`、权限集合、Trace ID 和 Run ID。`ToolRegistry` 按稳定
 名称注册和获取 Tool，重复名称会被拒绝而不会静默覆盖。当前 `max_retries` 仅是策略元数据，
-M1.4 不执行自动重试；当前也没有具体订单 Tool、Run/Step 持久化或 Approval。
+M1.5 仍不执行自动重试，也没有 Run/Step 持久化或 Approval。
+
+## 只读业务 Tool
+
+应用 lifespan 使用同一个 `BusinessHttpClient` 注册七个 LOW 风险 Tool：
+`get_order_detail`、`get_related_tasks`、`get_task_detail`、`get_production_progress`、
+`get_quality_issues`、`get_review_result` 和 `get_delivery_status`。它们分别声明 `ORDER_READ`、
+`TASK_READ`、`QUALITY_ISSUE_READ`、`REVIEW_READ` 或 `DELIVERY_READ` 权限。
+
+输入只接受安全格式的 `ORDER-*` 或 `TASK-*` 标识；输出严格对应 Java DTO，禁止额外字段、非法
+状态和缺失字段。集合接口的空数组是成功事实，不等同于资源不存在。除 Schema 校验外，Tool
+还核对响应父 ID 与嵌套资源 ID，阻止形状正确但属于其他订单或任务的数据进入后续 Workflow。
 
 ## 测试与质量
 
@@ -56,6 +67,7 @@ uv run --frozen alembic upgrade head
 make test-agent-client
 make test-agent-errors
 make test-agent-tool-protocol
+make test-tools
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP

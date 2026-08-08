@@ -10,6 +10,7 @@ from app.main import create_app
 from app.observability import reset_trace_id, set_trace_id
 from app.schemas.business import BusinessIdentity
 from app.settings import Settings
+from app.tools import READ_TOOL_NAMES, ToolRegistry
 
 
 class OrderData(BaseModel):
@@ -68,8 +69,11 @@ async def test_fastapi_lifespan_owns_business_client() -> None:
 
     async with app.router.lifespan_context(app):
         client = app.state.business_client
+        registry = app.state.tool_registry
         assert isinstance(client, BusinessHttpClient)
         assert client.is_closed is False
+        assert isinstance(registry, ToolRegistry)
+        assert registry.names == tuple(sorted(READ_TOOL_NAMES))
 
     assert client.is_closed is True
 

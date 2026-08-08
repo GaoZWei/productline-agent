@@ -20,7 +20,9 @@ class ToolNotRegisteredError(LookupError):
         self.name = name
         super().__init__(f"tool is not registered: {name}")
 
-# 注册表本身只负责按名称保存，不负责理解每个 Tool 的输入输出类型；具体类型由 Tool 自己的 input_model/output_model 保证
+
+# 注册表只负责按名称保存, 不理解每个 Tool 的输入输出类型。
+# 具体类型由 Tool 自己的 input_model 和 output_model 保证。
 class ToolRegistry:
     """提供确定性的 Tool 注册、查找和名称枚举能力。"""
 

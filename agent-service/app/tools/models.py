@@ -21,15 +21,18 @@ PermissionName = Annotated[
 
 class ToolContext(BaseModel):
     """保存一次 Tool 调用所需的身份、权限和链路标识。"""
+
     # Pydantic 配置
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     identity: BusinessIdentity
-    permissions: frozenset[PermissionName] = Field(default_factory=frozenset) # Java 的不可变 Set<String> 权限名称只能使用大写稳定标识
-    trace_id: ContextIdentifier # 关联一次分布式请求
-    run_id: ContextIdentifier # 关联一次 Tool 调用
+    # 对应 Java 的不可变 Set<String>, 权限名称只能使用大写稳定标识。
+    permissions: frozenset[PermissionName] = Field(default_factory=frozenset)
+    trace_id: ContextIdentifier  # 关联一次分布式请求
+    run_id: ContextIdentifier  # 关联一次 Tool 调用
 
-# 不是 Python 异常，而是可以放入 ToolResult 的结构化错误数据
+
+# 不是 Python 异常, 而是可以放入 ToolResult 的结构化错误数据。
 class ToolError(BaseModel):
     """供 Workflow 稳定分支且可安全展示的 Tool 错误。"""
 
@@ -58,22 +61,25 @@ class ToolError(BaseModel):
             status_code=exception.status_code,
         )
 
-# 约束对 Agent 很重要
+
+# 约束对 Agent 很重要（定义 Tool 调用结果的结构）
 class ToolResult[DataT](BaseModel):
     """使用互斥的 data 和 error 表示一次 Tool 调用结果。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     success: bool
-    data: DataT | None = None  # 可选的任意类型，或 None  = None表示默认值
+    data: DataT | None = None  # 可选的任意类型或 None; None 表示默认值。
     error: ToolError | None = None
 
     @model_validator(mode="after")
     def validate_result_shape(self) -> Self:
         """保证成功结果有 data 且失败结果只有 error。"""
 
-        if self.success and (self.data is None or self.error is not None): # success=true→ 必须有data →不能有error
+        # success=true 时必须有 data 且不能有 error。
+        if self.success and (self.data is None or self.error is not None):
             raise ValueError("successful tool result must contain data and no error")
-        if not self.success and (self.data is not None or self.error is None): # success=false→ 不能有data →必须有error
+        # success=false 时不能有 data 且必须有 error。
+        if not self.success and (self.data is not None or self.error is None):
             raise ValueError("failed tool result must contain error and no data")
         return self

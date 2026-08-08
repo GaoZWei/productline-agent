@@ -14,6 +14,7 @@ from app.clients.business import BusinessHttpClient
 from app.database import Database
 from app.observability import TraceIdMiddleware, configure_logging
 from app.settings import Settings, get_settings
+from app.tools import create_read_tool_registry
 
 logger = logging.getLogger("agent-service.lifecycle")
 
@@ -40,6 +41,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # FastAPI 应用级共享状态供路由处理访问数据库和业务客户端。
         application.state.database = database
         application.state.business_client = business_client
+        # 使用同一个 Client 创建七个 Tool，并放入 Registry 中(公用连接池)
+        application.state.tool_registry = create_read_tool_registry(business_client)
         logger.info(
             "service_started",
             extra={

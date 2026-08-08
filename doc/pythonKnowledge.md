@@ -2,14 +2,14 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M1.4 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M1.5 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
 当前 `agent-service` 是一个独立的 Python 后端服务，主要承担未来的 Tool 封装、Workflow、
 Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
-最小可观测性、Java 异步 HTTP Client、标准错误映射和 Tool 基础协议；尚未实现具体业务 Tool
-或大模型调用。
+最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
+尚未实现自动重试、Workflow 或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -807,6 +807,62 @@ ToolException              → 保留标准 code/retryable/Trace/HTTP 状态
 `ToolRegistry.register` 遇到相同名称会抛 `DuplicateToolRegistrationError`，这是启动/装配错误；
 它不是一次 Run 中相同参数被重复调用，因此不能使用 `DUPLICATE_CALL`。后者仍由 M1.7 实现。
 
+### 7.8 M1.5 七个只读 Tool 如何协作
+
+M1.5 的业务 Schema 位于 `app/schemas/tools.py`，具体 Tool 位于 `app/tools/readonly.py`。可以类比：
+
+| Python 实现 | Java 类比 | Node.js/TypeScript 类比 | 职责 |
+| --- | --- | --- | --- |
+| `OrderIdInput` / `TaskIdInput` | Controller PathVariable 的校验 DTO | Zod 参数 Schema | 限制路径 ID 格式并拒绝额外字段 |
+| `OrderDetail` 等输出模型 | Java API DTO + Jackson/Validation | API response type + Zod | 严格描述 Java `data` 字段 |
+| 七个 `_BusinessReadTool` 子类 | 七个 Application Service adapter | 七个 typed API adapter | 把稳定 Tool 名映射到精确 Java GET 路径 |
+| `create_read_tool_registry` | Spring 配置中注册七个 Bean | 依赖注入容器注册 provider | 使用共享 Client 装配完整集合 |
+
+七个稳定名称与路径是：
+
+```text
+get_order_detail(order_id)        → GET /api/orders/{orderId}
+get_related_tasks(order_id)       → GET /api/orders/{orderId}/tasks
+get_task_detail(task_id)          → GET /api/tasks/{taskId}
+get_production_progress(task_id)  → GET /api/tasks/{taskId}/progress
+get_quality_issues(task_id)       → GET /api/tasks/{taskId}/quality-issues
+get_review_result(task_id)        → GET /api/tasks/{taskId}/review
+get_delivery_status(order_id)     → GET /api/orders/{orderId}/delivery-status
+```
+
+以 `get_quality_issues` 为例，完整顺序是：
+
+```text
+调用方传 {"task_id": "TASK-003"} 和 ToolContext
+→ Registry 按 get_quality_issues 取出 Tool
+→ BaseTool.execute 检查 QUALITY_ISSUE_READ
+→ TaskIdInput 拒绝空值、非法格式和额外参数
+→ _execute 调 BusinessHttpClient.get
+→ Client 发送身份、角色和 X-Trace-Id
+→ Java 返回 HTTP + 六字段响应信封 + data
+→ Client 校验信封、Trace 和 QualityIssueList
+→ Tool 核对顶层 taskId 及每个 issue.taskId 都是 TASK-003
+→ BaseTool 校验最终输出
+→ 返回 ToolResult(success=True, data=QualityIssueList(...))
+```
+
+这里有三层不同的“校验”，不能混为一层：
+
+1. Client 校验传输协议是否可信，例如 HTTP/code/Trace 是否一致；
+2. Pydantic 校验数据形状、必填字段、枚举状态和 ID 格式；
+3. Tool 校验数据归属，例如请求 `TASK-003` 不能接收结构正确的 `TASK-004` 数据。
+
+集合结果的 `[]` 保持成功语义。例如 `issues=[]` 表示任务存在且没有质检问题；Java 404 才表示
+任务不存在。二者对后续诊断结论完全不同。
+
+应用启动时，FastAPI lifespan 先创建共享 `BusinessHttpClient`，随后用它创建七个 Tool 并保存到
+`app.state.tool_registry`；关闭时只需关闭共享 Client。当前没有 HTTP 调试接口，外部调用方还
+不能通过 REST 直接选择 Tool，但 pytest 和 Python 代码已经可以脱离 Agent 独立调用。
+
+七个 Tool 都是 LOW 风险只读操作，并声明 `max_retries=1`。这个字段现在仍只是元数据；M1.5
+遇到 timeout 或 Java 500 时只调用一次，不能把它理解为已经重试一次。真正的有限重试由 M1.6
+实现并测试次数、退避和总预算。
+
 ## 8. 启动、请求和关闭顺序
 
 ### 8.1 标准本地启动
@@ -1211,7 +1267,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M1.4 已完成
+### 13.1 M1.1～M1.5 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1229,12 +1285,14 @@ async def lifespan(...):
 - Tool统一元数据、`ToolContext`和互斥的`ToolResult`；
 - `BaseTool.execute`权限、输入、整体超时、输出和异常门禁；
 - `ToolRegistry`名称注册、查找和重复名称拦截；
+- 订单、关联任务、任务详情、生产进度、质检问题、复核结果和交付状态七个只读 Tool；
+- 严格 Tool 业务 Schema、父子资源 ID 绑定和空集合成功语义；
+- FastAPI lifespan 中使用共享 Client 装配只读 Tool Registry；
 - pytest、Ruff、mypy；
 - Docker/Compose运行。
 
 ### 13.2 当前尚未实现
 
-- 订单、任务、进度、质检、复核和交付等具体只读Tool；
 - 只读Tool的有限重试；
 - 单次Run内的重复Tool调用检测；
 - 数据库readiness；
@@ -1244,32 +1302,32 @@ async def lifespan(...):
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 T133 以后可能增加的结构
+### 13.3 当前 M1.5 结构和 T140 以后可能增加的内容
 
 后续可能逐步形成：
 
 ```text
 app/
 ├── schemas/
-│   └── order.py                 # 端点业务DTO
+│   └── tools.py                 # 已实现的七个只读Tool输入输出Schema
 ├── tools/
 │   ├── base.py                  # 已实现的Tool协议
 │   ├── models.py                # 已实现的上下文和结果Schema
 │   ├── registry.py              # 已实现的Tool注册与查找
-│   └── get_order_detail.py      # 具体只读Tool
+│   └── readonly.py              # 已实现的七个只读Tool和装配工厂
 └── api/
     └── internal_tools.py        # 无Agent时调试Tool的内部接口
 ```
 
-其中 `tools/base.py`、`tools/models.py` 和 `tools/registry.py` 已存在；`order.py`、
-`get_order_detail.py` 和内部调试接口仍是预计结构，不代表功能已经实现。实际实现时仍以对应
-任务和测试为准。
+其中 `schemas/tools.py` 和 `tools/readonly.py` 已存在；内部调试接口仍是预计结构，不代表功能
+已经实现。M1.6 还会增加受约束的只读 RetryPolicy，实际结构以对应任务和测试为准。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 
 ```text
 Tool如何把输入Schema错误统一成PARAM_VALIDATION_ERROR
+→ 如何验证请求ID与响应父子资源属于同一业务对象
+→ 空集合、404和响应Schema错误为什么是三种不同事实
 → 哪些只读错误允许有限重试
-→ 每个Java data如何定义端点级Pydantic模型
 → 为什么Python只能通过Java API取得业务事实
 ```
