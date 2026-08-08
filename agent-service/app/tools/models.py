@@ -62,7 +62,7 @@ class ToolError(BaseModel):
         )
 
 
-# 约束对 Agent 很重要（定义 Tool 调用结果的结构）
+# 该约束对 Agent 很重要, 用于定义 Tool 调用结果的结构。
 class ToolResult[DataT](BaseModel):
     """使用互斥的 data 和 error 表示一次 Tool 调用结果。"""
 

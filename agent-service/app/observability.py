@@ -30,6 +30,8 @@ _LOG_EXTRA_FIELDS = (
     "tool_name",
     "run_id",
     "error_code",
+    "retry_number",
+    "retry_delay_ms",
 )
 
 

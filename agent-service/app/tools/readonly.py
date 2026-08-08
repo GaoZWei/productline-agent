@@ -20,9 +20,17 @@ from app.schemas.tools import (
 from app.tools.base import BaseTool, ToolRiskLevel
 from app.tools.models import ToolContext
 from app.tools.registry import ToolRegistry
+from app.tools.retry import RetryPolicy
 
 _READ_TOOL_TIMEOUT_SECONDS = 5.0
 _READ_TOOL_MAX_RETRIES = 1
+# 重试策略: 最多重试1次，每次等待避时间200ms，最大等待避时间1s
+_READ_TOOL_RETRY_POLICY = RetryPolicy(
+    max_retries=_READ_TOOL_MAX_RETRIES,
+    initial_backoff_seconds=0.1,
+    backoff_multiplier=2.0,
+    max_backoff_seconds=1.0,
+)
 READ_TOOL_NAMES = frozenset(
     {
         "get_order_detail",
@@ -35,7 +43,7 @@ READ_TOOL_NAMES = frozenset(
     }
 )
 
-# 公共父类（只读 Tool 基础类）
+# 只读 Tool 公共基础类
 class _BusinessReadTool[InputT: BaseModel, OutputT: BaseModel](BaseTool[InputT, OutputT]):
     """保存共享 Client 并统一七个只读 Tool 的静态风险与重试元数据。"""
 
@@ -54,10 +62,11 @@ class _BusinessReadTool[InputT: BaseModel, OutputT: BaseModel](BaseTool[InputT, 
             description=description,
             input_model=input_model,
             output_model=output_model,
-            risk_level=ToolRiskLevel.LOW,  # 只读 Tool，静态风险较低
+            risk_level=ToolRiskLevel.LOW,  # 只读 Tool的静态风险较低。
             required_permissions=frozenset({permission}),  # 调用前必须拥有的权限
             timeout=_READ_TOOL_TIMEOUT_SECONDS,  # 整个 Tool 执行不能超过5秒
-            max_retries=_READ_TOOL_MAX_RETRIES, 
+            max_retries=_READ_TOOL_MAX_RETRIES,
+            retry_policy=_READ_TOOL_RETRY_POLICY,
         )
         self._client = client
 
@@ -73,7 +82,7 @@ class _BusinessReadTool[InputT: BaseModel, OutputT: BaseModel](BaseTool[InputT, 
             status_code=200,
         )
 
-# 订单详情Tool（根据订单 ID 查询订单基础事实）
+# 订单详情 Tool: 根据订单 ID 查询订单基础事实。
 class GetOrderDetailTool(_BusinessReadTool[OrderIdInput, OrderDetail]):
     """根据订单 ID 查询订单基础事实。"""
 
@@ -86,7 +95,7 @@ class GetOrderDetailTool(_BusinessReadTool[OrderIdInput, OrderDetail]):
             output_model=OrderDetail,
             permission="ORDER_READ",
         )
-    # _execute 只处理业务调用，不处理输入输出验证
+    # _execute 只处理业务调用, 不处理输入输出验证。
     async def _execute(
         self,
         tool_input: OrderIdInput,
@@ -133,7 +142,7 @@ class GetRelatedTasksTool(_BusinessReadTool[OrderIdInput, TaskList]):
             self._raise_resource_mismatch(response.trace_id)
         return response.data
 
-# 关联任务Tool（根据订单 ID 查询关联任务）
+# 任务详情 Tool: 根据任务 ID 查询任务事实。
 class GetTaskDetailTool(_BusinessReadTool[TaskIdInput, TaskDetail]):
     """根据任务 ID 查询任务状态、所属订单和版本。"""
 
@@ -162,7 +171,7 @@ class GetTaskDetailTool(_BusinessReadTool[TaskIdInput, TaskDetail]):
             self._raise_resource_mismatch(response.trace_id)
         return response.data
 
-# 生产进度Tool（根据任务 ID 查询生产步骤）
+# 生产进度 Tool: 根据任务 ID 查询生产步骤。
 class GetProductionProgressTool(_BusinessReadTool[TaskIdInput, ProgressResult]):
     """根据任务 ID 查询按业务顺序排列的生产步骤。"""
 
@@ -193,7 +202,7 @@ class GetProductionProgressTool(_BusinessReadTool[TaskIdInput, ProgressResult]):
             self._raise_resource_mismatch(response.trace_id)
         return response.data
 
-# 质检问题Tool（根据任务 ID 查询质检问题）
+# 质检问题 Tool: 根据任务 ID 查询质检问题。
 class GetQualityIssuesTool(_BusinessReadTool[TaskIdInput, QualityIssueList]):
     """根据任务 ID 查询全部质检问题而不自行过滤事实。"""
 
@@ -224,7 +233,7 @@ class GetQualityIssuesTool(_BusinessReadTool[TaskIdInput, QualityIssueList]):
             self._raise_resource_mismatch(response.trace_id)
         return response.data
 
-# 复核记录Tool（根据任务 ID 查询复核记录）
+# 复核记录 Tool: 根据任务 ID 查询复核记录。
 class GetReviewResultTool(_BusinessReadTool[TaskIdInput, ReviewResult]):
     """根据任务 ID 查询全部复核记录并保留空列表语义。"""
 
@@ -253,7 +262,7 @@ class GetReviewResultTool(_BusinessReadTool[TaskIdInput, ReviewResult]):
             self._raise_resource_mismatch(response.trace_id)
         return response.data
 
-# 交付状态Tool（根据订单 ID 查询交付记录）
+# 交付状态 Tool: 根据订单 ID 查询交付记录。
 class GetDeliveryStatusTool(_BusinessReadTool[OrderIdInput, DeliveryStatus]):
     """根据订单 ID 查询全部交付记录而不猜测最新状态。"""
 

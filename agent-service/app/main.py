@@ -41,7 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # FastAPI 应用级共享状态供路由处理访问数据库和业务客户端。
         application.state.database = database
         application.state.business_client = business_client
-        # 使用同一个 Client 创建七个 Tool，并放入 Registry 中(公用连接池)
+        # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。
         application.state.tool_registry = create_read_tool_registry(business_client)
         logger.info(
             "service_started",

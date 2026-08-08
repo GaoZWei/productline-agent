@@ -372,7 +372,7 @@ async def test_each_read_tool_maps_java_errors_without_retrying(
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", READ_TOOL_CASES, ids=lambda case: case.name)
-async def test_each_read_tool_maps_java_timeout_without_retrying(case: ReadToolCase) -> None:
+async def test_each_read_tool_retries_java_timeout_once(case: ReadToolCase) -> None:
     calls = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -394,7 +394,7 @@ async def test_each_read_tool_maps_java_timeout_without_retrying(case: ReadToolC
     assert result.error is not None
     assert result.error.code is ToolErrorCode.TOOL_TIMEOUT
     assert result.error.retryable is True
-    assert calls == 1
+    assert calls == 2
 
 
 @pytest.mark.integration
@@ -406,7 +406,11 @@ async def test_each_read_tool_rejects_java_data_with_missing_fields(
     incomplete_data = copy.deepcopy(case.response_data)
     incomplete_data.pop(case.missing_field)
 
+    calls = 0
+
     async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
         return success_response(incomplete_data)
 
     client = BusinessHttpClient(
@@ -422,6 +426,7 @@ async def test_each_read_tool_rejects_java_data_with_missing_fields(
     assert result.success is False
     assert result.error is not None
     assert result.error.code is ToolErrorCode.RESPONSE_VALIDATION_ERROR
+    assert calls == 1
 
 
 @pytest.mark.integration
@@ -436,7 +441,11 @@ async def test_each_read_tool_rejects_structurally_valid_but_mismatched_resource
         "ORDER-999" if case.input_field == "order_id" else "TASK-999",
     )
 
+    calls = 0
+
     async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
         return success_response(mismatched_data)
 
     client = BusinessHttpClient(
@@ -453,6 +462,37 @@ async def test_each_read_tool_rejects_structurally_valid_but_mismatched_resource
     assert result.error is not None
     assert result.error.code is ToolErrorCode.RESPONSE_VALIDATION_ERROR
     assert result.error.retryable is False
+    assert calls == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", READ_TOOL_CASES, ids=lambda case: case.name)
+async def test_each_read_tool_retries_connection_failure_then_succeeds(
+    case: ReadToolCase,
+) -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("simulated connection failure", request=request)
+        return success_response(case.response_data)
+
+    client = BusinessHttpClient(
+        Settings(environment="test"),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        tool = create_read_tool_registry(client).get(case.name)
+        result = await tool.execute(case.tool_input, tool_context(case.permission))
+    finally:
+        await client.aclose()
+
+    assert result.success is True
+    assert result.data is not None
+    assert calls == 2
 
 
 @pytest.mark.integration

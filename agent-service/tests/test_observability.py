@@ -61,3 +61,31 @@ def test_json_formatter_includes_tool_failure_fields() -> None:
     assert payload["tool_name"] == "get_order_detail"
     assert payload["run_id"] == "run-tool-log-001"
     assert payload["error_code"] == "UNKNOWN_TOOL_ERROR"
+
+
+@pytest.mark.unit
+def test_json_formatter_includes_tool_retry_fields() -> None:
+    record = logging.LogRecord(
+        name="agent-service.tool",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=70,
+        msg="tool_retry_scheduled",
+        args=(),
+        exc_info=None,
+    )
+    record.tool_name = "get_order_detail"
+    record.run_id = "run-retry-log-001"
+    record.error_code = "TOOL_TIMEOUT"
+    record.retry_number = 1
+    record.retry_delay_ms = 100.0
+    record.trace_id = "trace-retry-log-001"
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["trace_id"] == "trace-retry-log-001"
+    assert payload["tool_name"] == "get_order_detail"
+    assert payload["run_id"] == "run-retry-log-001"
+    assert payload["error_code"] == "TOOL_TIMEOUT"
+    assert payload["retry_number"] == 1
+    assert payload["retry_delay_ms"] == 100.0

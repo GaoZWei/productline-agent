@@ -2,14 +2,14 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M1.5 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M1.6 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
 当前 `agent-service` 是一个独立的 Python 后端服务，主要承担未来的 Tool 封装、Workflow、
 Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
 最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
-尚未实现自动重试、Workflow 或大模型调用。
+只读 Tool 已实现一次有限退避重试，尚未实现 Workflow 或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -743,16 +743,16 @@ Java 错误映射如下：
 `RESPONSE_VALIDATION_ERROR`。网络异常只暴露固定安全文案，不把内部 URL 或连接详情交给
 Workflow/模型；原异常仍保存在 Python 的异常因果链中，供日志排障。
 
-### 7.6 超时、可重试性和当前边界
+### 7.6 超时、可重试性和读写边界
 
 四项超时分别控制 connect、read、write 和等待连接池的 pool timeout。它们必须大于 0 且
 不超过 60 秒。分开配置可以区分“连接不上 Java”和“Java 已接收但业务处理过慢”，为后续
 重试决策提供依据。
 
-M1.3 只完成“错误分类”，仍然不会自动重试。timeout/网络错误上的 `retryable=true` 只说明
-故障在技术上可能恢复，不代表每个调用都允许重放：
+M1.3 负责“错误分类”，M1.6 才在具体只读 Tool 上执行重试。timeout/网络错误上的
+`retryable=true` 只说明故障在技术上可能恢复，不代表每个调用都允许重放：
 
-- M1.6 只能为明确的只读 Tool 增加有限次数、退避和总预算；
+- M1.6 只为七个明确的只读 Tool 增加有限次数、退避和总预算；
 - POST 超时或网络中断时，Java 可能已经完成写入，不能仅凭 `retryable=true` 自动重放；
 - 500 当前继承 Java 的保守 `retryable=false`，尤其不能对写请求猜测执行结果。
 
@@ -799,10 +799,11 @@ ToolException              → 保留标准 code/retryable/Trace/HTTP 状态
 `ToolResult` 还通过 Pydantic 校验保证成功时只有 `data`、失败时只有 `error`，避免上层遇到
 “`success=true` 但同时有错误”这类矛盾状态。
 
-`risk_level`、`required_permissions`、`timeout` 和 `max_retries` 都是 Tool 元数据。当前已经执行
-权限检查和整体超时，但 `max_retries` 只是为 M1.6 预留的策略参数；M1.4 不会因为错误标记为
-`retryable=true` 就自动重放调用。`ToolContext.run_id` 当前用于调用关联和日志字段，不代表已经
-实现 Run/Step 数据表或持久化。
+`risk_level`、`required_permissions`、`timeout` 和 `max_retries` 都是 Tool 元数据。M1.4 当时
+只有权限和整体超时生效；M1.6 增加了可选 `RetryPolicy`，并要求策略次数与 Tool 元数据一致。
+仅设置 `max_retries` 不会自动重放，具体 Tool 必须显式绑定策略。这一门禁让未来写 Tool 默认
+保持不重试。`ToolContext.run_id` 当前用于调用关联和日志字段，不代表已经实现 Run/Step 数据表
+或持久化。
 
 `ToolRegistry.register` 遇到相同名称会抛 `DuplicateToolRegistrationError`，这是启动/装配错误；
 它不是一次 Run 中相同参数被重复调用，因此不能使用 `DUPLICATE_CALL`。后者仍由 M1.7 实现。
@@ -859,9 +860,70 @@ get_delivery_status(order_id)     → GET /api/orders/{orderId}/delivery-status
 `app.state.tool_registry`；关闭时只需关闭共享 Client。当前没有 HTTP 调试接口，外部调用方还
 不能通过 REST 直接选择 Tool，但 pytest 和 Python 代码已经可以脱离 Agent 独立调用。
 
-七个 Tool 都是 LOW 风险只读操作，并声明 `max_retries=1`。这个字段现在仍只是元数据；M1.5
-遇到 timeout 或 Java 500 时只调用一次，不能把它理解为已经重试一次。真正的有限重试由 M1.6
-实现并测试次数、退避和总预算。
+七个 Tool 都是 LOW 风险只读操作，并声明 `max_retries=1`。M1.5 完成时该字段只是元数据；
+M1.6 已为这些 Tool 显式绑定 `RetryPolicy`。这里的 1 表示“首次调用失败后最多再调用一次”，
+因此总调用次数最多是 2，而不是总共只调用 1 次。
+
+### 7.9 M1.6 RetryPolicy 如何协作
+
+`app/tools/retry.py` 的 `RetryPolicy` 是不可变策略对象，负责回答两个问题：当前异常能不能重试，
+第 N 次重试前应该等多久。`BaseTool` 负责实际循环和结果收敛，`BusinessHttpClient` 仍只负责
+HTTP 与错误映射。三者的分工是：
+
+```text
+BusinessHttpClient
+把 HTTP/network/timeout 转成 ToolException(code, retryable, trace_id)
+        ↓
+RetryPolicy.should_retry
+同时检查错误码白名单、retryable 标志和剩余次数
+        ↓
+BaseTool._execute_with_retry
+记录日志 → 等待退避 → 再调用具体 _execute
+        ↓
+BaseTool.execute
+最终转成 ToolResult.data 或 ToolResult.error
+```
+
+当前七个只读 Tool 的参数是：
+
+| 参数 | 当前值 | 含义 |
+| --- | --- | --- |
+| `max_retries` | 1 | 首次调用之外最多再调用 1 次 |
+| `initial_backoff_seconds` | 0.1 | 第一次重试前等待 100 ms |
+| `backoff_multiplier` | 2.0 | 后续等待按 2 倍增长 |
+| `max_backoff_seconds` | 1.0 | 单次等待最多 1 秒 |
+| Tool `timeout` | 5.0 | 首次调用、退避、重试和输出校验共享的总预算 |
+
+通用退避公式是：
+
+```text
+delay(N) = min(initial_backoff × multiplier^(N-1), max_backoff)
+```
+
+例如测试策略设置 10 ms 初始值、2 倍增长、50 ms 上限时，前四次退避是 10、20、40、50 ms。
+当前生产策略只允许一次重试，所以实际只使用第一项 100 ms；保留通用公式是为了策略本身可测试、
+以后调整次数时不需要重写执行循环。
+
+允许重试必须同时满足：
+
+```text
+Tool 显式绑定 RetryPolicy
+AND 还有剩余重试次数
+AND exception.retryable = true
+AND code 属于 TOOL_TIMEOUT 或 UPSTREAM_UNAVAILABLE
+```
+
+因此参数、权限、404、409、响应 Schema、资源 ID 串线都不会重试。Java 当前通用 500 虽映射为
+`UPSTREAM_UNAVAILABLE`，但信封明确给出 `retryable=false`，仍不会重试；网络连接失败和 httpx
+timeout 同时满足白名单与 `retryable=true`，才会重试一次。
+
+`asyncio.timeout(self.timeout)` 包在整个重试循环外，而不是每次请求外。这意味着如果首次请求和
+退避已经耗尽 5 秒，第二次请求不会获得新的 5 秒预算。总预算到期后，公共协议返回可重试的
+`TOOL_TIMEOUT`，防止指数退避把一次 Tool 调用无限拖长。
+
+每次安排重试会输出 `tool_retry_scheduled` 结构化日志，记录 `tool_name`、`run_id`、`trace_id`、
+`error_code`、`retry_number` 和 `retry_delay_ms`。它能回答“哪个 Tool 因为什么重试了第几次”，
+但当前还没有 Run/Step 持久化、随机抖动、熔断或跨实例重试预算。
 
 ## 8. 启动、请求和关闭顺序
 
@@ -1105,9 +1167,10 @@ def get_name() -> str:
 [`Makefile`](../Makefile) 提供：
 
 ```bash
-make test-agent-foundation  # 运行 M1.1 的 6 个 Python 测试
+make test-agent-foundation  # 运行工程基础和结构化日志回归
 make test-agent-client      # 运行 M1.2 的 10 个 Client 测试
 make test-agent-errors      # 运行 M1.3 的 18 个标准错误测试
+make test-tools             # 运行 Tool 协议、只读 Tool 和重试策略测试
 make quality                # Ruff + mypy strict
 make agent-migrate          # 容器内执行 Alembic upgrade head
 make smoke                  # 验证 Java、Python、Web 健康检查
@@ -1267,7 +1330,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M1.5 已完成
+### 13.1 M1.1～M1.6 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1288,12 +1351,13 @@ async def lifespan(...):
 - 订单、关联任务、任务详情、生产进度、质检问题、复核结果和交付状态七个只读 Tool；
 - 严格 Tool 业务 Schema、父子资源 ID 绑定和空集合成功语义；
 - FastAPI lifespan 中使用共享 Client 装配只读 Tool Registry；
+- 显式只读 RetryPolicy、封顶指数退避、最大重试次数和整体超时预算；
+- 重试错误白名单与 `retryable` 双门禁，以及重试结构化日志；
 - pytest、Ruff、mypy；
 - Docker/Compose运行。
 
 ### 13.2 当前尚未实现
 
-- 只读Tool的有限重试；
 - 单次Run内的重复Tool调用检测；
 - 数据库readiness；
 - Run/Step实体和持久化；
@@ -1302,7 +1366,7 @@ async def lifespan(...):
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M1.5 结构和 T140 以后可能增加的内容
+### 13.3 当前 M1.6 结构和 T145 以后可能增加的内容
 
 后续可能逐步形成：
 
@@ -1313,14 +1377,16 @@ app/
 ├── tools/
 │   ├── base.py                  # 已实现的Tool协议
 │   ├── models.py                # 已实现的上下文和结果Schema
+│   ├── retry.py                 # 已实现的只读有限重试策略
 │   ├── registry.py              # 已实现的Tool注册与查找
 │   └── readonly.py              # 已实现的七个只读Tool和装配工厂
 └── api/
     └── internal_tools.py        # 无Agent时调试Tool的内部接口
 ```
 
-其中 `schemas/tools.py` 和 `tools/readonly.py` 已存在；内部调试接口仍是预计结构，不代表功能
-已经实现。M1.6 还会增加受约束的只读 RetryPolicy，实际结构以对应任务和测试为准。
+其中 `schemas/tools.py`、`tools/retry.py` 和 `tools/readonly.py` 已存在；内部调试接口仍是预计
+结构，不代表功能已经实现。M1.7 将增加单次 Run 的重复 Tool 调用检测，实际结构以对应任务和
+测试为准。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 
@@ -1328,6 +1394,7 @@ app/
 Tool如何把输入Schema错误统一成PARAM_VALIDATION_ERROR
 → 如何验证请求ID与响应父子资源属于同一业务对象
 → 空集合、404和响应Schema错误为什么是三种不同事实
-→ 哪些只读错误允许有限重试
+→ 为什么 retryable、错误码白名单、只读策略和总预算要同时满足
+→ 如何证明失败后最多调用两次，而非无限重试
 → 为什么Python只能通过Java API取得业务事实
 ```

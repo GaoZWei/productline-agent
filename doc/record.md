@@ -1688,3 +1688,137 @@
     请求/响应资源绑定、空集合语义和两层权限边界的真实实现与测试证据。
 - 下一建议任务：
   - `[T140] 定义只读 RetryPolicy`。
+
+---
+
+## 2026-08-08 — `[T140-T144] M1.6 Tool 重试`
+
+- 里程碑：M1 Python Tool 层
+- 任务类型：功能 / 修复 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：为七个 LOW 风险只读 Tool 增加显式 RetryPolicy、封顶指数退避、最大重试次数、
+    整体耗时预算和结构化重试日志，并验证可重试/不可重试错误的实际调用次数。
+  - 明确不实现：不开发 T145+ 重复调用检测、Tool 调试 API、Run/Step、Workflow、LLM、RAG、
+    Approval、写 Tool 重试、熔断、限流或随机抖动；不修改 Java API、固定数据和前端。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：七个 Tool 仍只通过 Java API 获取订单、任务、生产进度、质检、
+    复核和交付事实；不修改 `ORDER-003 → TASK-003 → ISSUE-001 → PENDING → BLOCKED` 黄金链路。
+  - 方案选择及原因：`BusinessHttpClient` 继续只负责 HTTP 和 `ToolException` 映射，重试策略由
+    具体只读 Tool 显式装配。这样 `retryable=true` 只表达故障可能恢复，不会自动授权未来写 Tool
+    重放。BaseTool 没有 RetryPolicy 时保持 M1.4 单次调用行为。
+  - 次数契约：`max_retries` 是首次 attempt 之外的额外次数；当前值 1，最多发送 2 个 Java 请求。
+    策略和 Tool 元数据次数必须一致，避免展示值与实际执行值漂移。
+  - 错误门禁：仅 `TOOL_TIMEOUT` 或 `UPSTREAM_UNAVAILABLE`、`retryable=true` 且还有剩余次数时
+    重试。参数、权限、404、409、响应 Schema、资源归属错误和 Java 当前保守 500 不重试。
+  - 耗时契约：`asyncio.timeout` 包住首次请求、退避、重试和输出校验的完整循环；重试不会得到
+    新的 5 秒预算。退避使用 `min(initial × multiplier^(N-1), max)`。
+  - 契约、状态或兼容性影响：不修改 Java 六字段信封、DTO、Tool 输入输出 Schema、稳定 Tool
+    名、权限名和固定数据。失败时最终仍返回既有 `ToolResult.error`，只改变明确暂态读失败的
+    请求次数与恢复机会。
+- 核心实现：
+  - `agent-service/app/tools/retry.py` — `RetryPolicy`：不可变/slots 策略，校验最大次数与有限正数
+    退避参数，通过 `should_retry` 做错误白名单、可恢复标志和次数门禁，通过 `backoff_seconds`
+    计算封顶指数退避。
+  - `agent-service/app/tools/base.py` — `BaseTool.execute/_execute_with_retry`：在原整体 timeout 内执行
+    重试循环，只捕获标准 `ToolException`；每次重试前写结构化日志并等待，最终沿用统一结果收敛。
+  - `agent-service/app/tools/readonly.py` — `_READ_TOOL_RETRY_POLICY/_BusinessReadTool`：只给七个只读
+    Tool 显式绑定最大 1 次、100 ms 起步、2 倍增长、1 秒上限的共享不可变策略。
+  - `agent-service/app/observability.py` — `_LOG_EXTRA_FIELDS`：新增 `retry_number` 和
+    `retry_delay_ms` 白名单，重试日志同时保留 Tool、Run、Trace 和错误码。
+  - `agent-service/app/schemas/tools.py` — 更正既有三个类型别名的拼写回归，恢复
+    `OrderIdentifier`、`TaskIdentifier`、`BusinessIdentifier`，不改变字段或 API 契约。
+  - `agent-service/tests/test_retry_policy.py` — 覆盖策略校验、退避上限、门禁、暂态恢复、次数耗尽、
+    总预算和元数据一致性；只读 Tool 集成测试覆盖七条路径的真实调用计数。
+  - 必要的最小关键片段：
+
+    ```text
+    ToolException
+    → 显式 RetryPolicy?
+    → code 属于 timeout/upstream 白名单?
+    → retryable=true?
+    → retries_completed < max_retries?
+    → 记录日志并退避
+    → 再执行 _execute
+    → 最终 ToolResult.data / ToolResult.error
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：`BaseTool.execute` 完成权限和输入校验后进入整体 timeout，再调用
+    `_execute_with_retry`；具体 `_execute` 通过 Client 请求 Java，标准异常由策略决定重试或抛回，
+    最终输出 Schema/异常仍由公共协议转换成稳定 ToolResult。
+  - 核心类、函数、接口或配置项：`RetryPolicy.should_retry/backoff_seconds`、
+    `BaseTool.execute/_execute_with_retry`、`_READ_TOOL_RETRY_POLICY`、`_LOG_EXTRA_FIELDS`、Make 的
+    `test-tools`。
+  - 输入、输出、异常和边界：策略输入是标准 `ToolException` 与已完成重试数，输出是是否重试
+    和等待秒数；非法策略在装配时失败。未知异常、Pydantic 校验错误和没有显式策略的 Tool 不进
+    重试循环，写操作边界不变。
+  - 关键代码位置（本次记录时）：`retry.py` 第20、50、70行；`base.py` 第109、194行；
+    `readonly.py` 第27、46、68行；`observability.py` 第23行；`test_retry_policy.py` 第89、125、
+    164、189、207行；`test_read_tools.py` 第375、471行；`Makefile` 第35行。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：参数、权限、资源、冲突和不可信响应立即失败；网络连接/timeout
+    可有限恢复。Java 500 映射类别虽为上游不可用，但 `retryable=false`，Python 尊重信封不重试。
+  - 幂等、并发或人工确认：本次只有 GET 只读 Tool；没有写操作和 Approval。显式策略门禁防止
+    未来写 Tool 仅因复制 `max_retries` 元数据而被自动重放。
+- 开发中发现并修复：
+  - 首次测试收集先暴露工作区既有 `typeOrderIdentifier`、`typeTaskIdentifier`、
+    `typeBusinessIdentifier` 拼写回归，导致任意 Tool 导入时 `NameError`；恢复既有类型名后全量
+    Python 测试通过，无接口兼容影响。
+  - 修复拼写后测试按预期因 `RetryPolicy` 尚不存在产生 1 个 `ImportError`，随后完成生产实现。
+  - 首次 Ruff 报告 42 项，包含本次导出排序/测试格式及既有中文教学注释的全角标点。保留中文
+    含义、调整标点和排版后 Ruff 与 mypy 全部通过，没有残余运行影响。
+- 未完成项与已知问题：
+  - 未完成项：T145～T153、M2+；jitter、熔断、跨实例重试预算和生产指标未实现。
+  - 已知问题/阻塞：代码无阻塞；当前受限执行环境禁止访问宿主机 localhost 服务，本次无法重复
+    验证真实 Java 重试成功链路和三服务 smoke。Java 当前所有通用 500 都不可重试。
+- 替代方案：
+  - 采用的替代方案及原因：默认 uv 缓存目录在受限环境中不可写，使用
+    `UV_CACHE_DIR=/tmp/productline-agent-m16-uv-cache`；localhost 被限制时使用
+    `httpx.MockTransport` 对七个 Tool 做确定性失败后成功、持续 timeout 和不可重试分支验证。
+  - 已覆盖/未覆盖的验收要求：覆盖 RetryPolicy、指数退避、最大次数、错误拦截、七个实际只读
+    Tool 调用计数、总预算和日志字段；未覆盖本次真实 Java 暂态失败后恢复及完整三服务回归。
+  - 局限、风险和转正/移除条件：临时缓存无生产影响，可随执行环境恢复而删除；MockTransport
+    不能证明真实网络/Java 故障后成功，获得 localhost/容器网络权限后应补一次真实 Java 读重试
+    验收。确定性边界测试仍应长期保留，不因真实验收而移除。
+- 后续影响：
+  - 对后续任务/里程碑：M1.7 应用稳定 Tool 名与规范化输入识别同一 Run 内重复调用，避免重试
+    机制之外的模型重复取证；M2 Workflow 应把 Tool 总预算纳入整条诊断延迟预算。
+  - 对接口/数据/测试/部署：Java/API/数据库/前端无变化；Python Tool 暂态读失败最多产生两个
+    上游请求，日志消费者可读取两个新增字段。未来调整次数、错误白名单或退避需同步测试、文档
+    和容量评估。
+- 测试与验证：
+  - `[预期失败] uv run --frozen pytest ...` — 先发现既有 Schema `NameError`；更正后按预期出现
+    `RetryPolicy` 导入错误，证明测试在生产实现前失败。
+  - `[通过] UV_CACHE_DIR=/tmp/productline-agent-m16-uv-cache make test-tools` — M1.4 16/16，
+    RetryPolicy 与七个只读 Tool 92/92。
+  - `[通过] UV_CACHE_DIR=/tmp/productline-agent-m16-uv-cache make test-agent-foundation` — 8/8。
+  - `[通过] agent-service 内 UV_CACHE_DIR=... uv run --frozen pytest -q` — Python 144/144。
+  - `[通过] UV_CACHE_DIR=/tmp/productline-agent-m16-uv-cache make quality` — Ruff 通过；mypy strict
+    检查 26 个源/测试文件无问题。
+  - `[通过] agent-service 内 UV_CACHE_DIR=... uv lock --check` — 解析 42 个直接及传递依赖。
+  - `[通过] make validate + Markdown code fence 检查 + git diff --check` — 基础结构、Compose、
+    文档围栏和差异空白有效。
+  - `[失败：环境] UV_CACHE_DIR=... make test` — foundation/Compose 配置通过，随后 smoke 无法访问
+    `127.0.0.1:18000/health`；Java/Web 目标未执行，不把该命令记录为通过。
+  - `[失败：环境] .venv/bin/python 真实 Java 只读调用` — localhost 连接被限制；日志显示安排
+    1 次重试，第二次仍连接失败并返回 `UPSTREAM_UNAVAILABLE`，没有成功链路结果。
+  - `[未运行] make reset-demo` — 本次不修改固定数据，且命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/tools/retry.py`、`base.py`、`readonly.py`、`__init__.py`
+  - `agent-service/app/observability.py`、`app/schemas/tools.py`
+  - `agent-service/tests/test_retry_policy.py`、`tests/integration/tools/test_read_tools.py`、
+    `tests/test_observability.py`
+  - `agent-service/app/clients/business.py`、`app/main.py`、`app/tools/models.py`（既有中文注释排版）
+  - `Makefile`、`README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：多实例同时故障时没有 jitter，可能同步重试；只读请求量在暂态故障时最多
+    放大至两倍；没有持久化 Run/Step 和恢复率指标。
+  - 后续兼容注意事项：不能把 Java `UPSTREAM_UNAVAILABLE` 直接视为可重试，必须保留
+    `retryable` 双门禁；写 Tool 必须另行设计幂等、版本和结果未知恢复流程。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次有真实代码和调用次数测试支撑“故障属性不等于重试
+    授权”、只读边界、封顶退避、整体预算和可观测性取舍，直接影响 Agent Tool 结果可靠性。
+- 下一建议任务：
+  - `[T145] 定义单次 Run 的 Tool 调用签名`。

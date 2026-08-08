@@ -274,8 +274,8 @@ DELIVERY-003 = BLOCKED
 - Java HTTP 事实接口和 Python 通用 HTTP Client 已完成；正式端点 data Schema、具体 Tool 和
   Agent 实际调用尚未实现。
 - M0.4 完成时尚未实现权限校验、统一错误响应、Trace ID、超时重试或故障模拟；其中
-  Java 统一错误响应和 Trace ID 已在 M0.6 完成，Java 故障模拟已在 M0.7 完成；Python Tool
-  错误映射和重试仍未实现。
+  Java 统一错误响应和 Trace ID 已在 M0.6 完成，Java 故障模拟已在 M0.7 完成，Python Tool
+  错误映射和只读有限重试已在 M1.3～M1.6 完成。
 - 聚合接口已通过固定规模集成测试，但没有生产规模性能数据，不能声称已解决 N+1 或
   达到某项吞吐/延迟指标。
 - 尚未实现动态 Tool 路由和 Agent E2E 评测，不能把接口测试等同于 Agent 准确率。
@@ -434,13 +434,13 @@ Tool 可以把同一 ID 保存到 Run/Step，用一条标识串联 Agent 决策�
 
 ### 不能过度声称
 
-- Python HTTP Client 和成功信封 Schema 已在 M1.2 实现；Pydantic 错误 Schema、Tool 分支和
-  自动重试策略尚未实现。
+- Python HTTP Client 和成功信封 Schema 已在 M1.2 实现；Pydantic 错误 Schema、ToolResult
+  收敛和只读有限重试已在 M1.3～M1.6 实现。
 - Trace ID 已进入 Java Header、响应体和 MDC，但尚未接入 Agent Run/Step、SSE 或跨服务
   可观测平台，不能声称已完成端到端链路追踪。
 - 401/403 仍基于阶段性的用户/角色 Header，没有 JWT、网关身份或生产级 RBAC。
-- Java 侧故障模拟已在 M0.7 完成，但 Python Tool 错误映射和重试退避仍未实现，不能把
-  Java 故障测试描述为 Agent 已经正确恢复。
+- Java 侧故障模拟已在 M0.7 完成，Python Tool 错误映射和有限重试已在 M1.3～M1.6 完成；
+  仍没有 Workflow 降级或生产恢复率数据，不能把开发测试描述为 Agent 已经全面恢复。
 - 统一 500 已验证隐藏详情，但当前不是完整的错误治理平台，也没有按具体基础设施异常
   建立可重试白名单。
 
@@ -519,7 +519,7 @@ Client 中实现并评测。
 
 ### 不能过度声称
 
-- Java 故障提供端和 Python HTTP Client 已完成；ToolResult 错误映射、重试次数、退避、
+- Java 故障提供端、Python HTTP Client、ToolResult 错误映射、只读重试次数和退避已完成；
   熔断和 Workflow 降级尚未实现。
 - M1.2 已验证 httpx 分项超时配置和 MockTransport `ReadTimeout` 传播，但尚未通过该 Client
   对真实 Java timeout 故障完成错误码映射。
@@ -642,7 +642,7 @@ Python ContextVar Trace
 - Client 只接受 `/api/` 相对路径，防止绝对 URL 绕过固定上游；`trust_env=False` 防止内部
   Java 流量被宿主机代理改道。这个决策来自测试实际发现的 SOCKS 代理初始化失败。
 - M1.2 原先保留 `HTTPStatusError`、`TimeoutException` 和 `BusinessResponseValidationError`；
-  M1.3 已完成统一 Tool 错误映射，M1.6 才做只读有限重试，保持层次分离。
+  M1.3 已完成统一 Tool 错误映射，M1.6 已完成只读有限重试，保持层次分离。
 
 ### 可能的面试问题
 
@@ -682,8 +682,8 @@ Trace 用于关联而不是授权；未来还要把 Trace 与 Run/Step 一起持
 ### 不能过度声称
 
 - 当前已完成 Client 和 Tool 基础协议，但还没有订单查询等具体业务 Tool，也没有模型自主调用。
-- 4xx/5xx、超时和响应校验异常已由 M1.3 映射为统一错误码，但仍没有具体 Tool、自动重试、
-  退避或熔断。
+- 4xx/5xx、超时和响应校验异常已由 M1.3 映射为统一错误码，具体只读 Tool 和有限退避重试已
+  在 M1.5～M1.6 完成，但仍没有熔断。
 - 当前只有统一成功信封和测试用端点 data Model；正式订单、任务、质检等 Tool DTO 尚未实现。
 - POST 能发送身份和幂等键不等于 Approval 已完成；没有用户确认、草稿持久化或 Agent 写回。
 - 已验证真实 `ORDER-003` 成功链路；M1.3 又验证了 6 条真实 Java 故障映射，但尚未进入
@@ -728,7 +728,7 @@ Java 业务错误 / 网络异常 / timeout / 非法响应
 - 网络异常对外使用固定安全文案，不泄露内部 URL、代理或连接详情；原始 `httpx` 异常通过
   `__cause__` 保留，日志和排障仍能定位技术原因。
 - `retryable` 是故障属性，不是重试授权。timeout/网络错误可以是 `true`，但写请求结果可能
-  未知；只有后续 M1.6 的只读 Tool 策略才能结合方法风险、次数、退避和总预算真正重试。
+  未知；M1.6 的只读 Tool 策略已结合错误码、次数、退避和总预算执行有限重试。
 - `BUSINESS_CONFLICT` 不应盲重试。409 通常表示状态或版本已变化，应重新读取最新事实，再由
   Workflow 或用户重新决策。
 - 响应 Schema 错误不可重试，因为它通常表示契约漂移；重复请求相同版本并不会让缺失字段
@@ -771,9 +771,9 @@ Java 业务错误 / 网络异常 / timeout / 非法响应
 
 ### 不能过度声称
 
-- 当前已由 Tool 基类把标准异常转换为 `ToolResult`，但没有具体业务 Tool，不能声称“所有订单
-  Tool 已完成”或“Agent 已能自主调用 Tool”。
-- 没有实现自动重试、指数退避、熔断或总耗时预算；`retryable` 只是分类字段。
+- 当前已由 Tool 基类把标准异常转换为 `ToolResult`，M1.5 已实现具体只读业务 Tool，但不能
+  声称“Agent 已能自主调用 Tool”。
+- M1.6 已实现只读有限重试、封顶指数退避和总耗时预算；仍没有熔断、随机抖动或写 Tool 重试。
 - `UNKNOWN_TOOL_ERROR` 已由 M1.4 执行边界触发；`DUPLICATE_CALL` 仍等待 M1.7 单次 Run 调用
   指纹检测，不能把注册表重名混同为重复业务调用。
 - 真实故障验收是 6 个确定性开发场景，不是生产错误率、恢复成功率或性能指标。
@@ -820,8 +820,8 @@ M1.5 已在这套协议上实现七个只读业务 Tool；公共安全边界仍�
   仍是最终权限和业务状态裁决者。页面或模型传入的权限不能替代服务端校验。
 - `timeout` 是单次 Tool 的整体耗时上限；Client 的 connect/read/write/pool timeout 是传输阶段
   上限。两者作用范围不同，不能只配置其中一个。
-- `max_retries` 当前只是元数据。M1.4 即使得到 `retryable=true` 也只调用一次，M1.6 才结合
-  风险等级、只读属性、次数、退避和总预算执行重试，避免写操作结果未知时被盲目重放。
+- M1.4 完成时 `max_retries` 只是元数据；M1.6 已通过具体只读 Tool 显式绑定 RetryPolicy，
+  结合错误码、`retryable`、次数、退避和总预算执行重试，写 Tool 仍默认不重试。
 - 未知异常对外固定映射 `UNKNOWN_TOOL_ERROR`，不泄露实现细节；原异常通过结构化日志保留，
   并附带 `tool_name/run_id/error_code`。安全返回和可诊断性需要同时满足。
 - 注册重名是装配错误，使用 `DuplicateToolRegistrationError`；`DUPLICATE_CALL` 是单次 Run 中
@@ -851,10 +851,10 @@ Schema 是 Tool 与 Workflow 的最终边界，可以拦截 Tool 自身转换错
 执行边界把 `ToolException`、timeout、Schema 错误和未知异常收敛为统一结果，后续 Run/Step、SSE
 和评测可以复用同一错误语义。
 
-**为什么 `max_retries=3` 的测试仍只调用一次？**
+**为什么 M1.4 的 `max_retries=3` 测试仍只调用一次？**
 
-回答要点：本阶段只建立协议，重试需要同时判断 Tool 风险、错误可恢复性和操作是否只读。提前
-在基类里按次数重试会让写 Tool 在超时后产生重复副作用，因此 M1.6 才实现受约束的 RetryPolicy。
+回答要点：该测试证明元数据本身不授权重试。M1.6 仍保留这条安全基线，只有具体只读 Tool
+显式绑定受约束的 RetryPolicy 才重试，未来写 Tool 不会仅因次数大于零被自动重放。
 
 ### 简历表述建议
 
@@ -867,7 +867,7 @@ Schema 是 Tool 与 Workflow 的最终边界，可以拦截 Tool 自身转换错
 
 - M1.4 当时只有协议和测试用 Echo Tool；具体只读业务能力以随后 M1.5 的实现和测试为证据。
 - 没有接入 LLM、LangGraph 或动态 Tool Calling，不能声称模型已能选择和调用 Tool。
-- `max_retries` 只是元数据，没有指数退避、自动重试或总耗时预算。
+- M1.4 当时 `max_retries` 只是元数据；M1.6 已增加只读有限重试、封顶指数退避和总耗时预算。
 - `run_id` 只在上下文和未知异常日志中关联调用，没有 Run/Step 表、持久化或 SSE 展示。
 - 风险等级已建模，但写 Tool、Approval、人工确认和 Agent 写回仍未实现。
 - Python 权限门禁不等于生产级 RBAC，Java 仍必须执行最终权限、对象和状态校验。
@@ -912,8 +912,8 @@ Python 不映射 Java 业务表，也不让模型直接生成这些事实。
   order/task，防止缓存、路由或上游缺陷造成跨订单事实串线。
 - `[]` 是“查询成功但当前没有记录”，404 是“父资源不存在”，二者必须保留不同语义。把空质检问题当 404 会让诊断误判；把 404 当空集合又会掩盖错误上下文。
 - Python 权限名用于编排层快速拒绝，身份与 Trace 仍透传给 Java；Java 是最终权限和数据边界。
-- 每个 Tool 声明 LOW 风险和 `max_retries=1`，但 M1.5 尚未执行自动重试。元数据不是能力证据，
-  500/timeout 测试均确认当前只发一次请求。
+- 每个 Tool 声明 LOW 风险和 `max_retries=1`。M1.5 当时元数据不执行重试；M1.6 已显式绑定
+  RetryPolicy，timeout/网络暂态错误最多额外调用一次，Java 保守 500 仍只调用一次。
 
 ### 可能的面试问题及回答要点
 
@@ -950,8 +950,96 @@ Python 不映射 Java 业务表，也不让模型直接生成这些事实。
 
 - 已实现七个 Tool 的独立调用与真实 Java 链路，但尚未接入 LangGraph、LLM Tool Calling 或
   前端 Agent 对话，不能声称模型已自主选择 Tool。
-- 未实现 RetryPolicy；`max_retries=1` 只是元数据，当前失败不会自动重试。
+- M1.6 已实现 RetryPolicy；只有明确可恢复的 timeout/网络错误会重试，不能声称所有失败都会恢复。
 - 未实现单次 Run 重复调用检测、并发 Tool 调度、缓存或上下文预算优化。
 - 没有 Run/Step 持久化和统一 Agent 评测，当前证据是 Tool 契约测试与固定数据真实调用。
 - 权限名是 Python 前置门禁，不代表完整 RBAC；最终授权仍依赖 Java。
 - 本阶段只有读取，没有 Approval 或安全写回能力。
+
+---
+
+## M1.6 只读 Tool 的受约束重试与总预算
+
+### 面试价值判断
+
+核心关注。Agent 可能连续调用多个外部 Tool，短暂网络故障若完全不恢复会降低诊断成功率，
+但无条件重试又会放大上游压力、拖长回答时间，甚至让写操作重复执行。M1.6 的价值是把
+“错误可能恢复”和“这次调用被授权重试”分成两层，并用自动化测试证明次数和停止条件。
+
+### 与 Agent 开发的关系
+
+当前只读 Tool 的失败调用链是：
+
+```text
+Java/网络失败
+→ BusinessHttpClient 转成 ToolException(code, retryable, trace_id)
+→ BaseTool._execute_with_retry
+→ RetryPolicy 同时检查错误码白名单、retryable 和剩余次数
+→ 允许：记录 tool_retry_scheduled，等待退避后重新调用
+→ 拒绝或预算耗尽：由 BaseTool.execute 转成 ToolResult.error
+```
+
+七个只读 Tool 最多额外重试 1 次，所以一次 Tool 执行最多发出 2 个 Java 请求。网络连接失败
+和 httpx timeout 可以重试；参数、权限、404、409、响应 Schema 和资源归属错误不重试。
+Java 通用 500 虽映射为 `UPSTREAM_UNAVAILABLE`，但当前信封为 `retryable=false`，因此仍不重试。
+
+### 需要掌握的原理和设计取舍
+
+- `retryable` 是异常的技术属性，不是执行授权。实际重试还要求 Tool 显式绑定策略、错误码属于
+  `TOOL_TIMEOUT`/`UPSTREAM_UNAVAILABLE` 白名单并且仍有剩余次数。
+- `max_retries=1` 表示首次调用之外最多再调用一次，即最多 2 次 attempt。把 retry 和 attempt
+  混用容易产生 off-by-one，测试以调用计数直接锁定语义。
+- 退避采用封顶指数公式 `min(initial × multiplier^(N-1), max)`。当前生产只重试一次、等待
+  100 ms；策略单元测试覆盖多次增长和上限，为以后调参保留确定行为。
+- `asyncio.timeout` 包住整个重试循环，所以首次请求、退避、后续请求和输出校验共享 5 秒预算。
+  如果退避阶段耗尽预算，不会再赠送一次完整 timeout。
+- 重试策略只显式装配到七个 LOW 风险只读 Tool。`BaseTool` 即使声明 `max_retries>0`，没有
+  `RetryPolicy` 也不会重试，避免未来写 Tool 仅因复制元数据就产生副作用重放。
+- 响应 Schema 错误通常代表契约漂移，不是短暂网络抖动；重试相同版本只会重复失败并增加负载，
+  因此明确排除。
+- 每次计划重试记录 Tool、Run、Trace、错误码、序号和退避时间，为后续 Run/Step 和恢复率评测
+  提供字段基础；当前日志还不是持久化执行记录。
+
+### 可能的面试问题及回答要点
+
+**为什么不能看到 `retryable=true` 就直接重试？**
+
+回答要点：异常只知道故障可能恢复，不知道操作是否安全。还要结合读写风险、错误类型、剩余
+次数和总预算。写请求超时可能已经提交，必须使用原幂等键、版本校验和状态查询，而非普通重放。
+
+**`max_retries=1` 到底会请求几次？**
+
+回答要点：最多两次，第一次是正常 attempt，失败后还有一次 retry。本项目同时测试“第一次
+连接失败、第二次成功”和“两次都失败后返回错误”，避免边界语义只停留在文档。
+
+**为什么把总 timeout 放在重试循环外？**
+
+回答要点：Tool 是 Agent 一次步骤，延迟预算应该约束整个步骤。如果每次 attempt 都重新获得
+5 秒，多个 Tool 串行时总体响应时间会失控，也难以给 Workflow 建立可靠 SLA。
+
+**Java 500 已映射为 `UPSTREAM_UNAVAILABLE`，为什么不重试？**
+
+回答要点：错误类别和恢复授权是两个维度。Java 当前对未知 500 保守标记 `retryable=false`，
+Python 尊重上游契约；只有明确的连接/timeout 暂态错误同时满足白名单和标志才重试。
+
+**为什么当前没有 jitter？**
+
+回答要点：当前每个只读 Tool 只重试一次，主要服务固定演示和确定性测试，先采用可预测的封顶
+退避。多实例或更高重试次数时，应加入随机抖动避免惊群，并用指标验证参数，而不是声称当前
+方案已解决大规模故障恢复。
+
+### 简历表述建议
+
+> 为 Agent 七个只读业务 Tool 实现受约束重试：以错误码白名单、上游 `retryable` 和显式读策略
+> 三重门禁控制重放，使用封顶指数退避与整体超时预算限制放大效应，并记录 Trace/Run 关联的
+> 重试日志；通过调用次数、暂态恢复、不可重试错误和预算耗尽测试验证停止条件。
+
+### 不能过度声称
+
+- 当前只有七个只读 Tool 使用重试；没有写 Tool 自动重试、熔断、限流、跨实例协调或自适应策略。
+- 当前生产策略只允许一次重试，实际只用到 100 ms 首次退避；不能声称已验证多轮生产调参效果。
+- 没有随机抖动，多实例并发故障下仍可能出现同步重试；增加 jitter 需要后续负载和指标验证。
+- 本次受限执行环境无法访问宿主机 Java 服务，真实 Java 重试成功链路未重新验收；确定性
+  MockTransport 覆盖七个 Tool 的失败后成功、持续 timeout 和不可重试分支。
+- 没有 LangGraph、LLM Tool Calling、Run/Step 持久化或 Agent E2E 恢复率指标，不能把 Tool
+  层测试描述为完整 Agent 容错能力。

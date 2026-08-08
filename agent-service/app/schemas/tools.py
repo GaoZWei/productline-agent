@@ -3,7 +3,8 @@
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-# 订单状态（固定值，只能取指定的几个）
+
+# 订单状态只能取以下固定值。
 type OrderStatus = Literal[
     "CREATED",
     "PRODUCING",
@@ -18,22 +19,23 @@ type ProductionStatus = Literal["PENDING", "RUNNING", "COMPLETED", "FAILED", "BL
 type QualityIssueStatus = Literal["OPEN", "PROCESSING", "RESOLVED", "CLOSED"]
 type ReviewStatus = Literal["PENDING", "APPROVED", "REJECTED", "REWORK_REQUIRED"]
 type DeliveryState = Literal["NOT_READY", "READY", "DELIVERING", "DELIVERED", "FAILED", "BLOCKED"]
-# 格式限制（订单）
-typeOrderIdentifier = Annotated[
+# 订单标识格式限制
+OrderIdentifier = Annotated[
     str,
     Field(min_length=1, max_length=128, pattern=r"^ORDER-[A-Z0-9][A-Z0-9-]*$"),
 ]
-# 格式限制（任务）
-typeTaskIdentifier = Annotated[
+# 任务标识格式限制
+TaskIdentifier = Annotated[
     str,
     Field(min_length=1, max_length=128, pattern=r"^TASK-[A-Z0-9][A-Z0-9-]*$"),
 ]
-# 格式限制（业务）
-typeBusinessIdentifier = Annotated[
+# 通用业务标识格式限制
+BusinessIdentifier = Annotated[
     str,
     Field(min_length=1, max_length=128, pattern=r"^[A-Z]+-[A-Z0-9][A-Z0-9-]*$"),
 ]
 NonBlankText = Annotated[str, Field(min_length=1, max_length=2048)]
+
 
 # ToolSchema 公共配置
 class ToolSchema(BaseModel):

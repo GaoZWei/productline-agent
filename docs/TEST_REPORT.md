@@ -471,3 +471,43 @@
 - 已知非阻塞问题：`max_retries=1` 目前只是元数据，M1.5 的 500/timeout 都只调用一次；尚无
   M1.7 重复调用检测、M1.8 调试 API、Run/Step、Workflow、模型调用或 Approval；Java 测试仍
   输出 Mockito 动态 Agent 的未来 JDK 兼容警告
+
+## M1.6 Tool 重试
+
+- 验证时间：2026-08-08
+- 测试先行基线：首次收集先暴露既有 `app/schemas/tools.py` 标识符拼写回归并产生
+  `NameError`；恢复 `OrderIdentifier`、`TaskIdentifier` 和 `BusinessIdentifier` 后，测试按预期
+  因 `RetryPolicy` 尚不存在产生 1 个 `ImportError`
+- `make test-tools`：M1.4 Tool 协议 16/16，RetryPolicy 与七个只读 Tool 92/92
+  - 严格策略配置、不可变性、封顶指数退避和非法参数：通过
+  - `max_retries` 的 retry/attempt 边界与次数耗尽：通过
+  - 仅 `TOOL_TIMEOUT`/`UPSTREAM_UNAVAILABLE`、`retryable=true` 且有剩余次数时重试：通过
+  - 首次连接失败、第二次成功：七个 Tool 7/7
+  - timeout 持续失败时每个 Tool 最多调用两次并返回稳定错误：七个 Tool 7/7
+  - Java 404/保守 500、缺字段和资源 ID 串线只调用一次：通过
+  - 首次请求、退避、重试和输出校验共享 Tool 整体 timeout：通过
+  - `tool_retry_scheduled` 日志包含 Tool、Run、Trace、错误码、序号和退避毫秒：通过
+- `make test-agent-foundation`：8/8，包含结构化重试日志字段回归
+- Python 全量：144/144
+- `make quality`：Ruff 全部通过；mypy strict 检查 26 个源/测试文件无问题
+- `uv lock --check`：通过，共解析 42 个直接及传递依赖
+- `make validate`、Markdown code fence 检查和 `git diff --check`：通过，基础结构、Compose、
+  文档围栏和差异空白有效
+- 执行环境替代：默认 uv 缓存 `/Users/gao/.cache/uv` 在受限环境中不可写，改用
+  `UV_CACHE_DIR=/tmp/productline-agent-m16-uv-cache`；只改变依赖缓存位置，不改变锁文件、依赖
+  或测试行为
+- 真实 Java 重试验收：未完成。受限环境拒绝访问 `127.0.0.1:8080`；直接调用确实先记录一次
+  `tool_retry_scheduled`，第二次连接仍被拒绝后返回 `UPSTREAM_UNAVAILABLE`，不能作为 Java
+  成功链路证据
+- 完整 `make test`：未通过环境阶段。基础结构与 Compose 配置检查通过，随后三服务 smoke 因
+  无法访问 `127.0.0.1:18000/health` 停止；Java 和 Web 测试目标未执行。本次 M1.6 不修改 Java
+  或 Web 运行代码，Python 全量和边界测试作为阶段性验证，但不冒充完整跨服务回归
+- 开发中发现并修复：
+  - 既有 Tool Schema 的三个类型别名被误写为 `typeOrderIdentifier` 等名称，导致任意 Tool 导入
+    失败；恢复原名称并由 Python 全量测试验证，无接口字段变化
+  - 首次 Ruff 报告 42 项，主要是既有中文教学注释的全角标点，以及本次导出排序、文档字符串和
+    测试行格式；保留注释语义、调整排版后 Ruff 与 mypy 均通过
+- 未运行：`make reset-demo` 未运行；本次不修改固定数据且该命令会删除本地持久卷
+- 最终代码测试失败：0；完整环境回归仍受本地网络权限阻塞
+- 已知非阻塞问题：当前无 jitter、熔断或跨实例重试预算；Java 通用 500 保持
+  `retryable=false`；尚无重复调用检测、Run/Step、Workflow、模型调用或 Agent E2E 恢复指标

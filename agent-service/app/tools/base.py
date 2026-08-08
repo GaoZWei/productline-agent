@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.errors import ToolErrorCode, ToolException
 from app.tools.models import ToolContext, ToolError, ToolResult
+from app.tools.retry import RetryPolicy
 
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _PERMISSION_PATTERN = re.compile(r"^[A-Z][A-Z0-9_.:-]{0,127}$")
@@ -43,6 +44,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
         required_permissions: frozenset[str],
         timeout: float,
         max_retries: int,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         # Python 先做快速权限检查, 但它不能替代 Java 的最终权限校验。
         # timeout 限制整个 _execute 和输出校验的耗时。
@@ -55,6 +57,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
             required_permissions=required_permissions,
             timeout=timeout,
             max_retries=max_retries,
+            retry_policy=retry_policy,
         )
         self._name = name
         self._description = description.strip()
@@ -64,6 +67,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
         self._required_permissions = required_permissions
         self._timeout = float(timeout)
         self._max_retries = max_retries
+        self._retry_policy = retry_policy
 
     @property
     def name(self) -> str:
@@ -96,6 +100,10 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
     @property
     def max_retries(self) -> int:
         return self._max_retries
+
+    @property
+    def retry_policy(self) -> RetryPolicy | None:
+        return self._retry_policy
 
     # 完整执行顺序
     async def execute(
@@ -130,7 +138,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
         try:
             async with asyncio.timeout(self.timeout):  # 这个异步代码块必须在指定时间内完成
                 # 第四步: 调用具体 _execute()
-                raw_output = await self._execute(validated_input, context)
+                raw_output = await self._execute_with_retry(validated_input, context)
                 try:  # 第五步: 输出 Schema 校验
                     validated_output = self.output_model.model_validate(raw_output)
                 except ValidationError:
@@ -182,6 +190,42 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
             )
         # 第七步: 返回成功结果
         return ToolResult[OutputT](success=True, data=validated_output)
+    
+    # 真正执行重试的是 BaseTool._execute_with_retry()
+    async def _execute_with_retry(
+        self,
+        tool_input: InputT,
+        context: ToolContext,
+    ) -> OutputT | Mapping[str, object]:
+        """在总超时预算内执行并只重试策略明确允许的标准异常。"""
+
+        retries_completed = 0
+        while True:
+            try:
+                return await self._execute(tool_input, context)
+            except ToolException as exception:
+                if self.retry_policy is None or not self.retry_policy.should_retry(
+                    exception,
+                    retries_completed=retries_completed,
+                ):
+                    raise
+
+                retries_completed += 1
+                # 计算当前重试的等待时间
+                delay_seconds = self.retry_policy.backoff_seconds(retries_completed)
+                _LOGGER.warning(
+                    "tool_retry_scheduled",
+                    extra={
+                        "tool_name": self.name,
+                        "run_id": context.run_id,
+                        "error_code": exception.code.value,
+                        "trace_id": exception.trace_id or context.trace_id,
+                        "retry_number": retries_completed,
+                        "retry_delay_ms": round(delay_seconds * 1000, 3),
+                    },
+                )
+                # 重试等待指定时间
+                await asyncio.sleep(delay_seconds)
 
     # 第四步的具体实现: execute() 负责通用规则,
     # _execute() 只负责业务接口调用和必要转换。
@@ -209,6 +253,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
         required_permissions: frozenset[str],
         timeout: float,
         max_retries: int,
+        retry_policy: RetryPolicy | None,
     ) -> None:
         """在 Tool 注册或执行前拒绝不稳定的元数据。"""
 
@@ -237,3 +282,9 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
             raise ValueError("tool timeout must be a positive finite number")
         if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
             raise ValueError("tool max_retries must be a non-negative integer")
+        if retry_policy is not None and not isinstance(retry_policy, RetryPolicy):
+            raise ValueError("retry_policy must be a RetryPolicy or None")
+        # max_retries：Tool 对外暴露的元数据，未来可以展示给 Workflow、调试 API 或评测系统。
+        # retry_policy：实际执行策略。
+        if retry_policy is not None and retry_policy.max_retries != max_retries:
+            raise ValueError("retry_policy max_retries must match tool max_retries")

@@ -18,6 +18,7 @@ from app.tools.registry import (
     ToolNotRegisteredError,
     ToolRegistry,
 )
+from app.tools.retry import RetryPolicy
 
 __all__ = [
     "READ_TOOL_NAMES",
@@ -30,6 +31,7 @@ __all__ = [
     "GetRelatedTasksTool",
     "GetReviewResultTool",
     "GetTaskDetailTool",
+    "RetryPolicy",
     "ToolContext",
     "ToolError",
     "ToolNotRegisteredError",
