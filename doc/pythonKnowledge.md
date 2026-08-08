@@ -2,14 +2,14 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M1.6 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M1.7 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
 当前 `agent-service` 是一个独立的 Python 后端服务，主要承担未来的 Tool 封装、Workflow、
 Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
 最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
-只读 Tool 已实现一次有限退避重试，尚未实现 Workflow 或大模型调用。
+只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测，尚未实现 Workflow 或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -756,8 +756,9 @@ M1.3 负责“错误分类”，M1.6 才在具体只读 Tool 上执行重试。t
 - POST 超时或网络中断时，Java 可能已经完成写入，不能仅凭 `retryable=true` 自动重放；
 - 500 当前继承 Java 的保守 `retryable=false`，尤其不能对写请求猜测执行结果。
 
-`UNKNOWN_TOOL_ERROR` 现在由 M1.4 `BaseTool.execute` 在具体实现抛出未知异常时生成；
-`DUPLICATE_CALL` 仍依赖后续 M1.7 重复调用检测。Client 不会伪造这两类错误。
+`UNKNOWN_TOOL_ERROR` 由 M1.4 `BaseTool.execute` 在具体实现抛出未知异常时生成；
+`DUPLICATE_CALL` 由 M1.7 在同一 `ToolContext` 中检测到同名同参调用时生成。Client 不会伪造
+这两类错误，因为它们分别属于 Tool 执行包装和 Run 调用控制，而不是 Java HTTP 错误。
 
 ### 7.7 Tool 基础协议如何协作
 
@@ -777,6 +778,7 @@ M1.4 新增的 [`agent-service/app/tools/`](../agent-service/app/tools/) 可以�
 Workflow 或调试入口准备 raw_input + ToolContext
 → BaseTool.execute 检查 required_permissions
 → input_model 校验输入
+→ 生成调用指纹并在 Run 账本中原子占位
 → asyncio.timeout 限制本次 Tool 的整体耗时
 → 具体 Tool._execute 调用 Java Client
 → output_model 再校验输出
@@ -802,11 +804,12 @@ ToolException              → 保留标准 code/retryable/Trace/HTTP 状态
 `risk_level`、`required_permissions`、`timeout` 和 `max_retries` 都是 Tool 元数据。M1.4 当时
 只有权限和整体超时生效；M1.6 增加了可选 `RetryPolicy`，并要求策略次数与 Tool 元数据一致。
 仅设置 `max_retries` 不会自动重放，具体 Tool 必须显式绑定策略。这一门禁让未来写 Tool 默认
-保持不重试。`ToolContext.run_id` 当前用于调用关联和日志字段，不代表已经实现 Run/Step 数据表
-或持久化。
+保持不重试。`ToolContext.run_id` 当前用于调用关联、日志字段和 M1.7 进程内账本归属；账本由
+上下文私有持有，不代表已经实现 Run/Step 数据表、持久化或跨实例共享。
 
 `ToolRegistry.register` 遇到相同名称会抛 `DuplicateToolRegistrationError`，这是启动/装配错误；
-它不是一次 Run 中相同参数被重复调用，因此不能使用 `DUPLICATE_CALL`。后者仍由 M1.7 实现。
+它不是一次 Run 中相同参数被重复调用，因此不能使用 `DUPLICATE_CALL`。后者由 M1.7 的调用
+账本在运行时返回，两种“重复”的生命周期和处理对象不同。
 
 ### 7.8 M1.5 七个只读 Tool 如何协作
 
@@ -924,6 +927,68 @@ timeout 同时满足白名单与 `retryable=true`，才会重试一次。
 每次安排重试会输出 `tool_retry_scheduled` 结构化日志，记录 `tool_name`、`run_id`、`trace_id`、
 `error_code`、`retry_number` 和 `retry_delay_ms`。它能回答“哪个 Tool 因为什么重试了第几次”，
 但当前还没有 Run/Step 持久化、随机抖动、熔断或跨实例重试预算。
+
+### 7.10 M1.7 如何识别重复 Tool 调用
+
+M1.7 解决的不是 HTTP retry，而是未来模型或 Workflow 在同一次 Run 中反复请求相同事实的问题。
+两者的区别是：
+
+| 行为 | 发起者 | 是否算重复逻辑调用 |
+| --- | --- | --- |
+| M1.6 retry | BaseTool 为一次调用恢复暂态故障 | 否 |
+| 相同 Tool 和参数再次执行 `execute` | Workflow、模型或调试调用方 | 是 |
+| 相同 Tool 但参数不同 | Workflow、模型或调试调用方 | 否 |
+| 显式 `force_refresh=True` | 明确要求重新读取的调用方 | 允许执行 |
+
+`app/tools/deduplication.py` 的 `build_tool_call_fingerprint` 先取得经过输入 Schema 校验的 Model，
+再执行：
+
+```text
+Tool 名 + 已校验参数
+→ Pydantic JSON 模式转换
+→ JSON key 排序和紧凑序列化
+→ UTF-8
+→ SHA-256
+→ 64 个小写十六进制字符
+```
+
+使用校验后的参数而不是原始字典有两个原因：第一，字典字段顺序不应改变调用含义；第二，Schema
+已经完成默认值、字段类型和文本规范化。Tool 名也进入指纹，因此相同 `ORDER-003` 参数调用
+`get_order_detail` 和 `get_related_tasks` 不会互相冲突。账本只保存 Hash，不保存原始参数。
+
+`ToolContext` 在创建后通过 `model_post_init` 建立私有 `RunToolCallLedger`。它类似 Java 中由一次
+Run 上下文持有的 `Set<String>`，不进入 Pydantic 序列化或 API Schema。同一次 Run 的所有 Tool
+调用必须复用同一个 `ToolContext`；账本随着上下文释放，不需要当前尚不存在的 Run 数据库表。
+
+公共执行顺序现在是：
+
+```text
+权限校验
+→ 输入 Schema 校验
+→ 生成 Tool 名 + 参数指纹
+→ RunToolCallLedger.try_reserve
+→ 重复且未 force_refresh：DUPLICATE_CALL，不发 HTTP
+→ 首次或强制刷新：整体 timeout → _execute_with_retry → 输出校验
+```
+
+权限和参数错误不会占用指纹，因为它们尚未形成合法 Tool 调用。账本占位发生在 HTTP 之前，
+因此并发的两个相同调用只有一个能进入具体 Tool。短临界区使用 `threading.Lock`，锁内只有 Set
+查询和插入，没有网络、sleep 或其他 I/O，不会把慢请求放在锁内。
+
+一次逻辑调用即使最终 timeout、返回 404 或输出校验失败，指纹仍会保留。这样可以阻止模型在
+没有新信息时循环调用；确实需要重新读取时，调用方显式传入：
+
+```python
+await tool.execute(tool_input, context, force_refresh=True)
+```
+
+`force_refresh` 是执行控制参数，不属于具体 Tool 的业务输入 Schema，也不参与指纹。它只允许
+本次调用继续执行，不清除已有记录，所以之后普通同参调用仍会被拦截。
+
+当前方案不是结果缓存：重复调用返回 `DUPLICATE_CALL`，不会返回第一次的 data。它也不是分布式
+幂等机制：独立创建的两个 `ToolContext` 即使 `run_id` 字符串相同，也各自拥有账本；进程重启、
+多 worker 或多实例之间不共享。M2 Workflow 必须建立“一次 Run 复用一个上下文”的生命周期，
+M7 再决定是否把调用记录持久化。
 
 ## 8. 启动、请求和关闭顺序
 
@@ -1330,7 +1395,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M1.6 已完成
+### 13.1 M1.1～M1.7 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1353,12 +1418,13 @@ async def lifespan(...):
 - FastAPI lifespan 中使用共享 Client 装配只读 Tool Registry；
 - 显式只读 RetryPolicy、封顶指数退避、最大重试次数和整体超时预算；
 - 重试错误白名单与 `retryable` 双门禁，以及重试结构化日志；
+- Tool 名与规范化参数 SHA-256 指纹；
+- `ToolContext` 私有 Run 级调用账本、并发占位、`DUPLICATE_CALL` 和 `force_refresh`；
 - pytest、Ruff、mypy；
 - Docker/Compose运行。
 
 ### 13.2 当前尚未实现
 
-- 单次Run内的重复Tool调用检测；
 - 数据库readiness；
 - Run/Step实体和持久化；
 - Workflow、动态Agent、模型调用；
@@ -1366,7 +1432,7 @@ async def lifespan(...):
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M1.6 结构和 T145 以后可能增加的内容
+### 13.3 当前 M1.7 结构和 T150 以后可能增加的内容
 
 后续可能逐步形成：
 
@@ -1376,6 +1442,7 @@ app/
 │   └── tools.py                 # 已实现的七个只读Tool输入输出Schema
 ├── tools/
 │   ├── base.py                  # 已实现的Tool协议
+│   ├── deduplication.py         # 已实现的指纹和Run内调用账本
 │   ├── models.py                # 已实现的上下文和结果Schema
 │   ├── retry.py                 # 已实现的只读有限重试策略
 │   ├── registry.py              # 已实现的Tool注册与查找
@@ -1384,9 +1451,9 @@ app/
     └── internal_tools.py        # 无Agent时调试Tool的内部接口
 ```
 
-其中 `schemas/tools.py`、`tools/retry.py` 和 `tools/readonly.py` 已存在；内部调试接口仍是预计
-结构，不代表功能已经实现。M1.7 将增加单次 Run 的重复 Tool 调用检测，实际结构以对应任务和
-测试为准。
+其中 `schemas/tools.py`、`tools/deduplication.py`、`tools/retry.py` 和 `tools/readonly.py` 已存在；
+内部调试接口仍是预计结构，不代表功能已经实现。M1.8 将提供仅开发环境使用的 Tool 调试入口，
+实际结构以对应任务和测试为准。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 
@@ -1396,5 +1463,7 @@ Tool如何把输入Schema错误统一成PARAM_VALIDATION_ERROR
 → 空集合、404和响应Schema错误为什么是三种不同事实
 → 为什么 retryable、错误码白名单、只读策略和总预算要同时满足
 → 如何证明失败后最多调用两次，而非无限重试
+→ 如何区分 Tool 内部 retry 与 Agent 重复逻辑调用
+→ 为什么 force_refresh 必须由调用方显式表达
 → 为什么Python只能通过Java API取得业务事实
 ```

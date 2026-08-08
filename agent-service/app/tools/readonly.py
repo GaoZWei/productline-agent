@@ -24,7 +24,7 @@ from app.tools.retry import RetryPolicy
 
 _READ_TOOL_TIMEOUT_SECONDS = 5.0
 _READ_TOOL_MAX_RETRIES = 1
-# 重试策略: 最多重试1次，每次等待避时间200ms，最大等待避时间1s
+# 重试策略最多额外执行 1 次。首次退避 100ms, 单次退避最多 1s。
 _READ_TOOL_RETRY_POLICY = RetryPolicy(
     max_retries=_READ_TOOL_MAX_RETRIES,
     initial_backoff_seconds=0.1,

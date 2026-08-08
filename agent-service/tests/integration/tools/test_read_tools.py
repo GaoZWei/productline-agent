@@ -264,6 +264,65 @@ async def test_each_read_tool_calls_the_exact_java_endpoint_and_validates_output
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", READ_TOOL_CASES, ids=lambda case: case.name)
+async def test_each_read_tool_blocks_same_call_within_one_run(case: ReadToolCase) -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return success_response(case.response_data)
+
+    client = BusinessHttpClient(
+        Settings(environment="test"),
+        transport=httpx.MockTransport(handler),
+    )
+    context = tool_context(case.permission)
+    try:
+        tool = create_read_tool_registry(client).get(case.name)
+        first = await tool.execute(case.tool_input, context)
+        duplicate = await tool.execute(case.tool_input, context)
+    finally:
+        await client.aclose()
+
+    assert first.success is True
+    assert duplicate.success is False
+    assert duplicate.error is not None
+    assert duplicate.error.code is ToolErrorCode.DUPLICATE_CALL
+    assert duplicate.error.retryable is False
+    assert calls == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", READ_TOOL_CASES, ids=lambda case: case.name)
+async def test_each_read_tool_allows_explicit_force_refresh(case: ReadToolCase) -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return success_response(case.response_data)
+
+    client = BusinessHttpClient(
+        Settings(environment="test"),
+        transport=httpx.MockTransport(handler),
+    )
+    context = tool_context(case.permission)
+    try:
+        tool = create_read_tool_registry(client).get(case.name)
+        first = await tool.execute(case.tool_input, context)
+        refreshed = await tool.execute(case.tool_input, context, force_refresh=True)
+    finally:
+        await client.aclose()
+
+    assert first.success is True
+    assert refreshed.success is True
+    assert calls == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", READ_TOOL_CASES, ids=lambda case: case.name)
 @pytest.mark.parametrize(
     ("invalid_value", "case_id"),
     [("", "empty"), ("../invalid", "malformed")],

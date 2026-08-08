@@ -1,8 +1,8 @@
 # Agent Service
 
-M1.6 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M1.7 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
-只读 Tool 已具备显式、有限的退避重试，尚未包含 Workflow、RAG 或模型调用。
+只读 Tool 已具备显式有限退避重试和 Run 内重复调用检测，尚未包含 Workflow、RAG 或模型调用。
 
 ## 本地开发
 
@@ -37,7 +37,8 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 的 `_execute`，最后校验输出 Schema。标准 `ToolException`、超时、非法输出和未知异常都会
 转换为互斥的 `ToolResult(success, data, error)`，未知异常的内部详情只写入结构化日志。
 
-`ToolContext` 携带 `BusinessIdentity`、权限集合、Trace ID 和 Run ID。`ToolRegistry` 按稳定
+`ToolContext` 携带 `BusinessIdentity`、权限集合、Trace ID、Run ID 和不序列化的内存调用账本。
+`ToolRegistry` 按稳定
 名称注册和获取 Tool，重复名称会被拒绝而不会静默覆盖。`max_retries` 表示首次调用之外允许的
 额外调用次数；只有显式提供 `RetryPolicy` 的 Tool 才会实际重试。当前没有 Run/Step 持久化
 或 Approval。
@@ -63,6 +64,21 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 `retryable=false`，因此也不会重试。每个 Tool 的 5 秒整体 timeout 同时覆盖首次请求、退避、
 重试请求和输出校验，避免重试把调用时间无限拉长。每次计划重试都会记录 Tool、Run、Trace、
 错误码、重试序号和退避毫秒数；当前没有随机抖动、熔断或跨实例重试预算。
+
+## Run 内重复调用检测
+
+`BaseTool.execute` 在权限和输入 Schema 校验后，将稳定 Tool 名与已校验参数规范化并计算
+SHA-256 指纹。同一个 Run 复用同一个 `ToolContext` 时，首次逻辑调用会在内存账本占位；相同
+Tool 和相同参数的后续调用在发出 HTTP 前返回不可重试的 `DUPLICATE_CALL`。不同 Tool、不同
+参数或不同 Run 不冲突，M1.6 在一次逻辑调用内部进行的 retry 也不会被误判为重复调用。
+
+调用方可通过 `execute(..., force_refresh=True)` 显式重新读取事实。刷新只绕过本次门禁，不会
+清除账本，因此后续普通同参调用仍会被拦截。账本只保存 64 个十六进制字符的 SHA-256 指纹，
+不保存原始 Tool 参数，并使用短锁保证并发相同请求只能有一个进入具体 Tool。
+
+当前账本随 `ToolContext` 生命周期存在，不持久化、不跨 Python 进程或服务实例，也不会仅凭
+相同 `run_id` 自动合并两个独立创建的上下文。后续 Workflow 必须为一次 Run 创建并复用同一个
+上下文；Run/Step 持久化和分布式去重不属于 M1.7。
 
 ## 测试与质量
 

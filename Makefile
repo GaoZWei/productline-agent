@@ -32,8 +32,8 @@ test-agent-errors: ## 验证 M1.3 标准 Tool 错误模型和跨服务错误映�
 test-agent-tool-protocol: ## 验证 M1.4 Tool 基础协议、执行门禁和注册表
 	cd agent-service && uv run --frozen pytest -q tests/test_tool_protocol.py
 
-test-tools: test-agent-tool-protocol ## 验证 M1.4 协议、M1.5 只读 Tool 和 M1.6 重试策略
-	cd agent-service && uv run --frozen pytest -q tests/test_retry_policy.py tests/integration/tools
+test-tools: test-agent-tool-protocol ## 验证 M1.4-M1.7 Tool 协议、只读调用、重试和重复检测
+	cd agent-service && uv run --frozen pytest -q tests/test_retry_policy.py tests/test_tool_call_deduplication.py tests/integration/tools
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查
 	cd agent-service && uv run --frozen ruff check .

@@ -1822,3 +1822,132 @@
     授权”、只读边界、封顶退避、整体预算和可观测性取舍，直接影响 Agent Tool 结果可靠性。
 - 下一建议任务：
   - `[T145] 定义单次 Run 的 Tool 调用签名`。
+
+---
+
+## 2026-08-08 — `[T145-T149] M1.7 重复调用检测`
+
+- 里程碑：M1 Python Tool 层
+- 任务类型：功能 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：生成 Tool 名与规范化参数指纹，在单次 Run 复用的 `ToolContext` 中保存调用记录，
+    拦截相同 Tool 和参数，提供显式 `force_refresh`，并覆盖顺序、并发和七个只读 Tool 测试。
+  - 明确不实现：不开发 T150+ Tool 调试 API，不实现结果缓存、TTL、数据库 Run/Step、跨进程/
+    实例去重、Workflow、LLM、RAG 或 Approval；不修改 Java API、固定数据和前端业务功能。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：M1.7 防止未来 Agent 在相同事实没有变化时循环调用 Java Tool；不
+    修改 `ORDER-003 → TASK-003 → ISSUE-001 → PENDING → BLOCKED` 黄金事实链路。
+  - 指纹契约：先完成权限和 Pydantic 输入校验，再将稳定 Tool 名与已校验参数转换为 key 排序、
+    紧凑 JSON，使用 UTF-8 SHA-256 得到 64 字符小写十六进制指纹。语义等价参数不受字典顺序
+    影响，Tool 名或参数变化会产生不同指纹。
+  - 数据最小化：Run 账本只保存 Hash，不保存原始 Tool 参数；Hash 用于稳定比较，不作为加密、
+    权限或不可逆安全证明，也不写入重复拦截日志。
+  - 生命周期：`ToolContext.model_post_init` 为本次 Run 创建私有 `RunToolCallLedger`，不参与
+    Pydantic 序列化。一次 Run 必须复用同一上下文；避免使用缺少清理时机的进程全局字典。
+  - 并发边界：`try_reserve` 使用仅包围 Set 查询/插入的短 `Lock`，并发相同调用只能有一个通过；
+    锁内没有 HTTP、sleep 或输出校验。
+  - 执行顺序：合法逻辑调用在 HTTP 前占位。首次执行即使最终 404、timeout 或响应错误也保留
+    指纹，避免模型循环；确需重新获取时必须显式 `force_refresh=True`。
+  - 重试边界：M1.6 `_execute_with_retry` 位于一次逻辑调用内部，账本只在进入重试循环前占位
+    一次，因此网络 retry 不会触发 `DUPLICATE_CALL`。
+  - 刷新契约：`force_refresh` 是 `BaseTool.execute` 的 keyword-only 控制参数，不属于业务输入
+    Schema且不进入 fingerprint；只绕过本次门禁，不删除原记录。
+  - 契约、状态或兼容性影响：`ToolResult` 现有 `DUPLICATE_CALL` 错误码开始实际使用，错误固定为
+    `retryable=false`；现有两参数 `execute(raw_input, context)` 调用保持兼容。Java HTTP/DTO、
+    Tool 名和业务 Schema 无变化。
+- 核心实现：
+  - `agent-service/app/tools/deduplication.py` — `build_tool_call_fingerprint` 负责规范 JSON 和
+    SHA-256；`RunToolCallLedger.try_reserve` 负责并发安全的首次/重复/强制刷新判定。
+  - `agent-service/app/tools/models.py` — `ToolContext.model_post_init/tool_call_ledger` 建立并暴露不
+    序列化的 Run 级内存账本；`run_id` 语义更正为一次 Agent Run，而不是一次 Tool 调用。
+  - `agent-service/app/tools/base.py` — `BaseTool.execute(..., force_refresh=False)` 在输入校验后、
+    timeout/retry/HTTP 前登记指纹；重复时记录 `duplicate_tool_call_blocked` 并返回标准失败结果。
+  - `agent-service/app/tools/__init__.py` — 导出指纹函数和账本类型，供测试及后续 Workflow 使用。
+  - `agent-service/tests/test_tool_call_deduplication.py` — 覆盖规范化、指纹变化、同参拦截、不同参数/
+    Run、强制刷新、并发占位和控制参数类型。
+  - `agent-service/tests/integration/tools/test_read_tools.py` — 对七个只读 Tool 参数化验证同参只发
+    一个 HTTP 请求，以及 `force_refresh` 明确放行第二个请求。
+  - 必要的最小关键片段：
+
+    ```text
+    validated_input
+    → SHA256(tool_name + canonical_arguments)
+    → context.tool_call_ledger.try_reserve
+    → False: ToolResult.error(DUPLICATE_CALL)
+    → True: timeout → retry loop → Java → output Schema
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：调用方在一次 Run 中复用 ToolContext；每次 Tool 调用先通过权限和输入门禁，
+    再原子登记指纹；首次或强制刷新进入现有 M1.6 调用链，普通重复请求在 Java HTTP 前结束。
+  - 核心类、函数、接口或配置项：`build_tool_call_fingerprint`、`RunToolCallLedger.try_reserve`、
+    `ToolContext.model_post_init/tool_call_ledger`、`BaseTool.execute(force_refresh)`、`DUPLICATE_CALL`、
+    Make 的 `test-tools`。
+  - 输入、输出、异常和边界：输入是已校验 Pydantic Model；账本输出是否获得执行占位。重复调用
+    返回无 data 的标准 ToolResult；非法 `force_refresh` 作为编程接口误用抛 ValueError；权限或
+    输入错误不占账本。
+  - 关键代码位置（本次记录时）：`deduplication.py` 第16、38、45行；`models.py` 第23、36、
+    42行；`base.py` 第110、142、149行；`test_tool_call_deduplication.py` 第69、104、114、175、197行；
+    `test_read_tools.py` 第267、298行；`Makefile` 第35行。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：非法输入和缺权限仍在指纹前返回，不发 HTTP；timeout/网络错误仍由
+    M1.6 内部有限 retry；逻辑重复固定返回不可重试 `DUPLICATE_CALL`，不泄露参数或 fingerprint。
+  - 幂等、并发或人工确认：当前功能是 Agent 读 Tool 防循环，不等同 Java 写接口幂等。短锁只
+    保证同一进程中共享同一 ledger 的并发占位；没有跨服务事务或 Approval 变化。
+- 开发中发现并修复：
+  - 测试先行阶段因 `build_tool_call_fingerprint` 尚不存在产生 1 个预期 ImportError，实现后专项
+    9/9。
+  - 首次 Ruff 报告 8 个既有中文教学注释的全角标点和行长问题；其中 `readonly.py` 注释写成
+    200ms，与实际 `initial_backoff_seconds=0.1` 不符。已更正为 100ms 并调整排版，不改变运行
+    配置；最终 Ruff/mypy 通过。
+- 未完成项与已知问题：
+  - 未完成项：T150～T153 Tool 调试 API 及 M2+；结果缓存、持久化和分布式去重未实现。
+  - 已知问题/阻塞：无阻塞。独立创建的两个 ToolContext 即使 `run_id` 相同也不会共享账本；
+    进程重启、多 worker 和多实例不会保留或协调记录；失败调用默认保留记录，恢复必须显式刷新。
+- 替代方案：
+  - 采用的替代方案及原因：无临时替代方案。进程内 Run 账本是 T146 明确要求的当前目标方案，
+    用上下文持有而非全局字典是为了让生命周期随 Run 结束并避免内存清理任务。
+  - 已覆盖/未覆盖的验收要求：完整覆盖 T145～T149；不覆盖计划外的分布式去重、缓存、持久化和
+    HTTP 暴露。
+  - 局限、风险和转正/移除条件：当前账本适用于单进程、一次 Run 复用一个上下文的 M1/M2 链路；
+    多 worker、断点恢复或跨实例执行时，需要由 Run 持久化设计替代或扩展，不能直接声称全局去重。
+- 后续影响：
+  - 对后续任务/里程碑：M1.8 调试 API 需要在一次调试 Run 中复用 ToolContext，并明确是否允许
+    暴露 `force_refresh`；M2 Workflow 必须创建一次 Run 级上下文并在全部 Tool 步骤中复用。
+  - 对接口/数据/测试/部署：Java API、数据库、固定数据、前端和部署配置无变化；Python 内部
+    `BaseTool.execute` 新增兼容的 keyword-only 参数。多进程部署前需重新评估账本共享方式。
+- 测试与验证：
+  - `[预期失败] agent-service 内 uv run --frozen pytest -q tests/test_tool_call_deduplication.py` —
+    收集阶段 1 个 ImportError，生产指纹函数尚不存在。
+  - `[通过] 同命令` — M1.7 专项 9/9。
+  - `[通过] make test-tools` — M1.4 协议 16/16；M1.5～M1.7 115/115。
+  - `[通过] agent-service 内 uv run --frozen pytest -q` — Python 全量 167/167。
+  - `[通过] make quality` — Ruff 通过；mypy strict 检查 28 个源/测试文件无问题。
+  - `[通过] agent-service 内 uv lock --check` — 解析 42 个直接及传递依赖，锁文件有效。
+  - `[通过] 真实 Java ORDER-003 只读验收` — 首次成功、同 Run 同参 `DUPLICATE_CALL`、
+    `force_refresh=True` 后再次成功。
+  - `[通过] make test` — foundation/Compose、三服务 smoke、Python M1 分项、Java 56/56、Web
+    7/7 和 Vue 生产构建全部通过。
+  - `[通过] docker compose up --detach --build agent-service + make smoke` — 使用最终运行代码重建
+    Agent 镜像后，Java、Agent 和 Web 三服务健康检查全部通过。
+  - `[通过] make validate + Markdown code fence 检查 + git diff --check` — 基础结构、Compose、
+    修改文档围栏和差异空白有效。
+  - `[未运行] make reset-demo` — 本次不修改固定数据，且该命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/tools/deduplication.py`、`models.py`、`base.py`、`__init__.py`
+  - `agent-service/tests/test_tool_call_deduplication.py`
+  - `agent-service/tests/integration/tools/test_read_tools.py`
+  - `agent-service/app/tools/retry.py`、`readonly.py`（仅更正既有注释格式和 100ms 事实）
+  - `Makefile`、`README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；上下文未复用会绕过检测，多进程不会共享，Hash 也不能替代敏感数据
+    治理。当前没有缓存旧结果或自动判断业务数据是否需要刷新。
+  - 后续兼容注意事项：后续 Workflow 不得为同一 Run 的每个 Tool 重建 ToolContext；如果增加
+    输入别名、浮点或敏感字段，应同步验证规范序列化与指纹碰撞语义。
+- Agent 面试价值评估：
+  - 有价值，已更新 `doc/needCare.md`。本次直接解决 Agent 循环调用、并发重复请求、调用成本和
+    可评测停止条件问题，并形成 retry/duplicate/cache/idempotency 四类语义的真实设计取舍。
+- 下一建议任务：
+  - `[T150] 实现仅开发环境启用的 Tool 调试 API`。

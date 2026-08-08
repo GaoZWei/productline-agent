@@ -511,3 +511,40 @@
 - 最终代码测试失败：0；完整环境回归仍受本地网络权限阻塞
 - 已知非阻塞问题：当前无 jitter、熔断或跨实例重试预算；Java 通用 500 保持
   `retryable=false`；尚无重复调用检测、Run/Step、Workflow、模型调用或 Agent E2E 恢复指标
+
+## M1.7 重复调用检测
+
+- 验证时间：2026-08-08
+- 测试先行基线：`uv run --frozen pytest -q tests/test_tool_call_deduplication.py` 在收集阶段产生
+  1 个预期 `ImportError`，目标 `build_tool_call_fingerprint` 尚不存在
+- M1.7 专项测试：9/9
+  - Tool 名和已校验参数生成 64 字符 SHA-256 指纹，不保存参数原文：通过
+  - JSON key 顺序不同但语义等价的参数指纹相同：通过
+  - Tool 名或参数不同会生成不同指纹：通过
+  - ToolContext 私有账本绑定 Run ID、初始为空且不参与序列化：通过
+  - 同一上下文内相同调用返回不可重试 `DUPLICATE_CALL`，具体 Tool 只执行一次：通过
+  - 同 Run 不同参数、不同 Run 相同参数：通过
+  - `force_refresh=True` 放行一次，随后普通重复调用仍拦截：通过
+  - 两个并发相同调用只有一个执行：通过
+  - `force_refresh` 拒绝非 bool 控制值：通过
+- `make test-tools`：M1.4 协议 16/16，M1.5～M1.7 只读 Tool、RetryPolicy 和重复检测 115/115
+  - 七个真实只读 Tool 同参第二次调用均在 HTTP 前拦截：7/7
+  - 七个真实只读 Tool 显式强制刷新均发出第二次请求并成功：7/7
+  - M1.6 内部 retry 回归保持通过，不被调用账本误判：通过
+- Python 全量：167/167
+- `make quality`：Ruff 全部通过；mypy strict 检查 28 个源/测试文件无问题
+- `uv lock --check`：通过，共解析 42 个直接及传递依赖
+- 真实 Java `ORDER-003` 只读验收：首次 `get_order_detail` 成功，同 Run 同参第二次返回
+  `DUPLICATE_CALL`，`force_refresh=True` 后再次成功
+- `make test`：通过；基础与 Compose、三服务 smoke、Python M1 分项、Java 56/56、Web 7/7 和
+  Vue 生产构建全部通过
+- `docker compose up --detach --build agent-service` 后 `make smoke`：通过；最终 Agent 镜像以及
+  Java、Web 三服务健康检查全部通过
+- `make validate`、Markdown code fence 检查和 `git diff --check`：通过
+- 开发中发现并修复：首次 Ruff 报告 8 个既有中文教学注释的全角标点和行长问题；其中
+  `readonly.py` 注释写“200ms”而实际 `initial_backoff_seconds=0.1`，已更正为 100ms。只修改
+  说明文字，不改变 M1.6 运行配置
+- 最终失败：0
+- 未运行：`make reset-demo` 未运行；本次不修改固定数据且该命令会删除本地持久卷
+- 已知非阻塞问题：调用账本只属于当前 `ToolContext`，不持久化、不跨进程/实例；相同
+  `run_id` 的独立上下文不会自动共享；当前不是结果缓存，也没有 TTL 或业务版本新鲜度策略

@@ -16,9 +16,12 @@ _RETRYABLE_ERROR_CODES = frozenset(
 _MAX_RETRIES_LIMIT = 10
 
 
-@dataclass(frozen=True, slots=True)  #  frozen=True 对象创建后不能再修改 slots=True 限制对象只能保存声明过的字段，减少误加属性
+@dataclass(frozen=True, slots=True)
 class RetryPolicy:
-    """限制重试错误、次数和指数退避但不决定 Tool 是否只读。"""
+    """限制重试错误、次数和指数退避但不决定 Tool 是否只读。
+
+    frozen 阻止运行时修改策略。slots 限制对象只能保存声明过的字段。
+    """
 
     max_retries: int
     initial_backoff_seconds: float = 0.1
@@ -27,7 +30,7 @@ class RetryPolicy:
 
     def __post_init__(self) -> None:
         """拒绝可能造成无界调用或无效等待的策略配置。"""
-        # 重试次数必须在 0～10 之间
+        # 重试次数必须在 0 到 10 之间。
         if (
             isinstance(self.max_retries, bool)
             or not isinstance(self.max_retries, int)

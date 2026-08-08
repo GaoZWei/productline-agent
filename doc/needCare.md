@@ -774,8 +774,8 @@ Java 业务错误 / 网络异常 / timeout / 非法响应
 - 当前已由 Tool 基类把标准异常转换为 `ToolResult`，M1.5 已实现具体只读业务 Tool，但不能
   声称“Agent 已能自主调用 Tool”。
 - M1.6 已实现只读有限重试、封顶指数退避和总耗时预算；仍没有熔断、随机抖动或写 Tool 重试。
-- `UNKNOWN_TOOL_ERROR` 已由 M1.4 执行边界触发；`DUPLICATE_CALL` 仍等待 M1.7 单次 Run 调用
-  指纹检测，不能把注册表重名混同为重复业务调用。
+- `UNKNOWN_TOOL_ERROR` 已由 M1.4 执行边界触发；`DUPLICATE_CALL` 已由 M1.7 单次 Run 调用
+  指纹检测实现，仍不能把注册表重名混同为重复业务调用。
 - 真实故障验收是 6 个确定性开发场景，不是生产错误率、恢复成功率或性能指标。
 - 错误尚未写入 Run/Step，也没有 SSE 错误事件或前端 Agent 错误展示。
 
@@ -825,7 +825,7 @@ M1.5 已在这套协议上实现七个只读业务 Tool；公共安全边界仍�
 - 未知异常对外固定映射 `UNKNOWN_TOOL_ERROR`，不泄露实现细节；原异常通过结构化日志保留，
   并附带 `tool_name/run_id/error_code`。安全返回和可诊断性需要同时满足。
 - 注册重名是装配错误，使用 `DuplicateToolRegistrationError`；`DUPLICATE_CALL` 是单次 Run 中
-  相同 Tool 和参数重复执行的运行时语义，留给 M1.7。二者不能为了复用错误码而混淆。
+  相同 Tool 和参数重复执行的运行时语义，已由 M1.7 实现。二者不能为了复用错误码而混淆。
 
 ### 可能的面试问题及回答要点
 
@@ -868,7 +868,7 @@ Schema 是 Tool 与 Workflow 的最终边界，可以拦截 Tool 自身转换错
 - M1.4 当时只有协议和测试用 Echo Tool；具体只读业务能力以随后 M1.5 的实现和测试为证据。
 - 没有接入 LLM、LangGraph 或动态 Tool Calling，不能声称模型已能选择和调用 Tool。
 - M1.4 当时 `max_retries` 只是元数据；M1.6 已增加只读有限重试、封顶指数退避和总耗时预算。
-- `run_id` 只在上下文和未知异常日志中关联调用，没有 Run/Step 表、持久化或 SSE 展示。
+- `run_id` 已用于日志和 M1.7 上下文内调用账本，但仍没有 Run/Step 表、持久化或 SSE 展示。
 - 风险等级已建模，但写 Tool、Approval、人工确认和 Agent 写回仍未实现。
 - Python 权限门禁不等于生产级 RBAC，Java 仍必须执行最终权限、对象和状态校验。
 
@@ -951,7 +951,7 @@ Python 不映射 Java 业务表，也不让模型直接生成这些事实。
 - 已实现七个 Tool 的独立调用与真实 Java 链路，但尚未接入 LangGraph、LLM Tool Calling 或
   前端 Agent 对话，不能声称模型已自主选择 Tool。
 - M1.6 已实现 RetryPolicy；只有明确可恢复的 timeout/网络错误会重试，不能声称所有失败都会恢复。
-- 未实现单次 Run 重复调用检测、并发 Tool 调度、缓存或上下文预算优化。
+- M1.7 已实现单次 Run 重复调用检测；仍没有通用并发调度、结果缓存或上下文预算优化。
 - 没有 Run/Step 持久化和统一 Agent 评测，当前证据是 Tool 契约测试与固定数据真实调用。
 - 权限名是 Python 前置门禁，不代表完整 RBAC；最终授权仍依赖 Java。
 - 本阶段只有读取，没有 Approval 或安全写回能力。
@@ -1043,3 +1043,93 @@ Python 尊重上游契约；只有明确的连接/timeout 暂态错误同时满�
   MockTransport 覆盖七个 Tool 的失败后成功、持续 timeout 和不可重试分支。
 - 没有 LangGraph、LLM Tool Calling、Run/Step 持久化或 Agent E2E 恢复率指标，不能把 Tool
   层测试描述为完整 Agent 容错能力。
+
+---
+
+## M1.7 Run 内 Tool 重复调用检测
+
+### 面试价值判断
+
+核心关注。LLM Tool Calling 常见问题不只是选错 Tool，还包括在信息没有变化时反复调用同一个
+Tool，造成延迟、Token/接口成本、上游压力和循环执行。M1.7 将“同一次逻辑调用中的技术 retry”
+与“Agent 再次发起相同业务调用”分开，并提供可测试的停止信号 `DUPLICATE_CALL`。
+
+### 与 Agent 开发的关系
+
+当前公共执行链增加了一道 Run 级门禁：
+
+```text
+权限和输入 Schema 校验
+→ Tool 名 + 已校验参数规范化
+→ SHA-256 fingerprint
+→ RunToolCallLedger 原子占位
+→ 首次：继续 timeout / retry / Java 调用
+→ 重复：HTTP 前返回 DUPLICATE_CALL
+→ force_refresh：显式绕过本次门禁并重新读取
+```
+
+指纹包含 Tool 名和参数，因此 `get_order_detail(ORDER-003)` 与
+`get_related_tasks(ORDER-003)` 不冲突；参数 JSON 的 key 顺序不同也会生成相同指纹。M1.6 retry
+发生在一次 `execute` 内部，账本只在进入 retry 循环前记录一次，不会把第二个 HTTP attempt
+错误地识别为 Agent 重复调用。
+
+### 需要掌握的原理和设计取舍
+
+- 先用 Pydantic 校验，再生成指纹。非法输入和缺权限请求不占账本；默认值、字段类型和参数顺序
+  经过规范化后，语义等价输入会稳定命中同一调用。
+- 账本只保存 SHA-256 十六进制指纹，不保存原始参数，减少身份、业务描述或未来敏感输入在内存
+  记录和日志中扩散。Hash 用于稳定比较，不应当作加密授权或不可逆安全证明。
+- `RunToolCallLedger.try_reserve` 使用只包围 Set 查询/插入的短锁。两个并发相同请求只能有一个
+  进入具体 Tool，锁内没有 I/O，不会在 Java 慢请求期间占锁。
+- 记录发生在实际调用前。首次调用即使返回 404、timeout 或 Schema 错误仍保留指纹，避免模型
+  在没有策略变化时循环重试；需要重新获取时必须显式 `force_refresh=True`。
+- `force_refresh` 是执行控制参数，不塞进每个 Tool 的业务输入 Schema，也不参与 fingerprint。
+  它只放行本次执行，不清除历史，因此之后普通同参调用仍会被拦截。
+- 这是防循环门禁，不是结果缓存。重复时返回标准错误，不返回第一次 data；是否复用旧结果应由
+  后续 Workflow 状态或缓存策略明确决定。
+- 当前账本归属于 `ToolContext`。一次 Run 必须复用同一上下文；这样无需全局字典和清理任务，
+  但不能跨进程、实例或独立重建的上下文去重。
+
+### 可能的面试问题及回答要点
+
+**Tool retry 和重复 Tool Call 有什么区别？**
+
+回答要点：retry 是一次逻辑调用内部为恢复网络暂态故障产生的多个 HTTP attempt，由确定性策略
+控制；重复 Tool Call 是模型或 Workflow 再次用相同参数调用同一 Tool。前者不应触发
+`DUPLICATE_CALL`，后者默认拦截。
+
+**为什么不用原始 JSON 字符串直接比较？**
+
+回答要点：JSON key 顺序、字段别名、默认值和调用方表示可能不同，字符串不同不代表语义不同。
+先通过输入 Schema 得到统一类型，再对排序后的规范 JSON 和 Tool 名计算 Hash，才能稳定比较。
+
+**为什么第一次调用失败后也不自动释放指纹？**
+
+回答要点：如果失败后立即释放，模型可能在 404、权限、Schema 漂移等不可恢复错误上无限循环。
+M1.6 已在一次调用内完成允许的暂态 retry；再执行必须由 Workflow 根据错误码决定，并显式使用
+`force_refresh`。
+
+**为什么不直接缓存第一次结果？**
+
+回答要点：M1.7 的目标是检测和停止无意义循环，而不是定义数据新鲜度。自动返回旧结果可能掩盖
+业务状态变化；缓存需要 TTL、失效、权限和版本语义，应该单独设计。
+
+**这种去重能否支持多 worker 部署？**
+
+回答要点：不能。当前账本是 Run 上下文内的进程内状态，适合 M1/M2 单进程确定性链路。多 worker
+或断点恢复需要共享 Run 存储、唯一约束或分布式协调，并设计生命周期清理。
+
+### 简历表述建议
+
+> 为 Agent Tool 层实现 Run 内重复调用检测：对稳定 Tool 名和 Pydantic 规范化参数生成 SHA-256
+> 指纹，以并发安全的内存账本在 HTTP 前原子占位，将模型重复调用统一收敛为
+> `DUPLICATE_CALL`；区分内部 retry 与逻辑重复，并提供显式 `force_refresh` 控制事实刷新。
+
+### 不能过度声称
+
+- 当前尚未接入 LLM 或 LangGraph，测试证明的是 Tool 执行边界，不是模型循环率已经下降。
+- 去重只在复用同一个 `ToolContext` 的单次 Run 中生效；同 `run_id` 的独立上下文不会自动共享。
+- 没有数据库持久化、TTL、跨进程/实例协调或服务重启恢复，不能称为分布式幂等系统。
+- 当前不是缓存，不复用第一次结果，也没有基于业务版本判断数据新鲜度。
+- `force_refresh` 只在 Python 方法协议中实现；M1.8 调试 API 和未来 Workflow 尚未暴露用户级
+  刷新入口或权限策略。

@@ -13,6 +13,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ValidationError
 
 from app.errors import ToolErrorCode, ToolException
+from app.tools.deduplication import build_tool_call_fingerprint
 from app.tools.models import ToolContext, ToolError, ToolResult
 from app.tools.retry import RetryPolicy
 
@@ -110,8 +111,12 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
         self,
         raw_input: InputT | Mapping[str, object],
         context: ToolContext,
+        *,
+        force_refresh: bool = False,
     ) -> ToolResult[OutputT]:
         """执行固定门禁并把所有预期失败收敛为 ToolResult。"""
+        if not isinstance(force_refresh, bool):  #  先检查 force_refresh 是否为布尔值   
+            raise ValueError("force_refresh must be a boolean")
         # 第一步: 权限检查
         if not self.required_permissions.issubset(context.permissions):
             return self._failure(
@@ -134,12 +139,37 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     trace_id=context.trace_id,
                 )
             )
-        # 第三步: 执行超时控制
+        # 第三步: 使用校验后的输入拦截同一 Run 中的重复逻辑调用。
+        fingerprint = build_tool_call_fingerprint(self.name, validated_input)
+        if not context.tool_call_ledger.try_reserve(
+            fingerprint,
+            force_refresh=force_refresh,
+        ):  
+            # 记录结构化日志警告
+            _LOGGER.warning(
+                "duplicate_tool_call_blocked",
+                extra={
+                    "tool_name": self.name,
+                    "run_id": context.run_id,
+                    "error_code": ToolErrorCode.DUPLICATE_CALL.value,
+                    "trace_id": context.trace_id,
+                },
+            )  
+            # 后续返回标准错误响应
+            return self._failure(
+                ToolError(
+                    code=ToolErrorCode.DUPLICATE_CALL,
+                    message="duplicate tool call blocked within the same run",
+                    retryable=False,
+                    trace_id=context.trace_id,
+                )
+            )
+        # 第四步: 执行超时控制
         try:
             async with asyncio.timeout(self.timeout):  # 这个异步代码块必须在指定时间内完成
-                # 第四步: 调用具体 _execute()
+                # 第五步: 调用具体 _execute()
                 raw_output = await self._execute_with_retry(validated_input, context)
-                try:  # 第五步: 输出 Schema 校验
+                try:  # 第六步: 输出 Schema 校验
                     validated_output = self.output_model.model_validate(raw_output)
                 except ValidationError:
                     return self._failure(
@@ -150,7 +180,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                             trace_id=context.trace_id,
                         )
                     )
-        # 第六步: 异常处理
+        # 第七步: 异常处理
         # 1. 标准 ToolException
         except ToolException as exception:
             return self._failure(
@@ -188,7 +218,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     trace_id=context.trace_id,
                 )
             )
-        # 第七步: 返回成功结果
+        # 第八步: 返回成功结果
         return ToolResult[OutputT](success=True, data=validated_output)
     
     # 真正执行重试的是 BaseTool._execute_with_retry()
@@ -284,7 +314,6 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
             raise ValueError("tool max_retries must be a non-negative integer")
         if retry_policy is not None and not isinstance(retry_policy, RetryPolicy):
             raise ValueError("retry_policy must be a RetryPolicy or None")
-        # max_retries：Tool 对外暴露的元数据，未来可以展示给 Workflow、调试 API 或评测系统。
-        # retry_policy：实际执行策略。
+        # max_retries 是 Tool 对外元数据。retry_policy 是实际执行策略。
         if retry_policy is not None and retry_policy.max_retries != max_retries:
             raise ValueError("retry_policy max_retries must match tool max_retries")

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from app.errors import ToolErrorCode, ToolException
 from app.schemas.business import BusinessIdentity
+from app.tools.deduplication import RunToolCallLedger
 
 ContextIdentifier = Annotated[
     str,
@@ -20,7 +21,7 @@ PermissionName = Annotated[
 
 
 class ToolContext(BaseModel):
-    """保存一次 Tool 调用所需的身份、权限和链路标识。"""
+    """保存同一次 Run 共享的身份、权限、链路标识和调用记录。"""
 
     # Pydantic 配置
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -29,7 +30,19 @@ class ToolContext(BaseModel):
     # 对应 Java 的不可变 Set<String>, 权限名称只能使用大写稳定标识。
     permissions: frozenset[PermissionName] = Field(default_factory=frozenset)
     trace_id: ContextIdentifier  # 关联一次分布式请求
-    run_id: ContextIdentifier  # 关联一次 Tool 调用
+    run_id: ContextIdentifier  # 关联一次 Agent Run
+    _tool_call_ledger: RunToolCallLedger = PrivateAttr()  # 调用账本是运行时内部状态，不是 API 数据
+
+    def model_post_init(self, __context: Any) -> None:
+        """为本次 Run 创建不参与序列化的进程内调用账本。"""
+
+        object.__setattr__(self, "_tool_call_ledger", RunToolCallLedger(run_id=self.run_id))
+
+    @property
+    def tool_call_ledger(self) -> RunToolCallLedger:
+        """返回同一 ToolContext 复用的 Run 级调用账本。"""
+
+        return self._tool_call_ledger
 
 
 # 不是 Python 异常, 而是可以放入 ToolResult 的结构化错误数据。
