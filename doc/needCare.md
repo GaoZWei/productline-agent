@@ -1131,5 +1131,89 @@ M1.6 已在一次调用内完成允许的暂态 retry；再执行必须由 Workf
 - 去重只在复用同一个 `ToolContext` 的单次 Run 中生效；同 `run_id` 的独立上下文不会自动共享。
 - 没有数据库持久化、TTL、跨进程/实例协调或服务重启恢复，不能称为分布式幂等系统。
 - 当前不是缓存，不复用第一次结果，也没有基于业务版本判断数据新鲜度。
-- `force_refresh` 只在 Python 方法协议中实现；M1.8 调试 API 和未来 Workflow 尚未暴露用户级
-  刷新入口或权限策略。
+- `force_refresh` 已由 M1.8 开发调试 API 暴露，但尚未由 Workflow 根据业务版本、写后验证或
+  数据新鲜度自动授权；调试入口不能等同最终用户权限策略。
+
+---
+
+## M1.8 开发专用 Tool 调试 API
+
+### 面试价值判断
+
+有价值。Agent 工程不能等到 LLM、Workflow 和前端全部完成后才验证 Tool。M1.8 建立独立的
+Tool 调试面，把 Tool Schema、权限、Trace、重试、重复调用和 Java 契约从模型决策中解耦，
+可以先证明“工具本身正确”，再定位未来问题究竟来自 Tool 还是 Agent 路由。
+
+### 与 Agent 开发的关系
+
+开发环境通过以下入口调用现有 Tool，而不是为调试另写一套 Java 直连逻辑：
+
+```text
+POST /internal/tools/{tool_name}/invoke
+→ ToolDebugInvokeRequest
+→ ToolRegistry
+→ ToolDebugRunContextStore
+→ BaseTool.execute
+→ 标准 ToolResult
+```
+
+这条路径完整保留权限、输入Schema、M1.7去重、M1.6有限重试、Java Client、输出Schema和Trace，
+所以调试结果能代表后续 Workflow 将使用的真实 Tool 行为。真实 `ORDER-003` 已验证首次查询成功、
+同 Run 同参返回 `DUPLICATE_CALL`，以及 `force_refresh=true` 后重新获取Java事实。
+
+### 需要掌握的原理和设计取舍
+
+- 路由只在 `Settings.environment == "development"` 时注册。test和production不仅访问返回404，
+  OpenAPI也不存在该路径，减少内部调试能力在生产环境的暴露面。
+- 请求显式提供业务参数、调试身份、Python权限、Run ID和刷新控制；Trace ID继续从HTTP Header
+  进入，避免Body和链路追踪产生两个事实来源。
+- Tool业务失败返回HTTP 200下的标准`ToolResult.error`，因为调用协议已正常完成，Workflow需要
+  稳定错误码分支；未知Tool、请求Schema错误和Run上下文冲突分别保留HTTP 404/422/409语义。
+- 同一调试Run跨HTTP请求复用`ToolContext`，否则每次请求新建上下文会绕过M1.7。新请求浅复制
+  当前Trace ID但共享私有账本，兼顾每次请求可追踪和Run内去重。
+- 同一Run禁止更换身份或权限，避免先以一个安全上下文建立账本，再用另一身份继续执行造成审计
+  混淆。Java仍会重新校验透传身份，Python权限只是快速门禁。
+- 调试Run存储上限为128并按最久未使用淘汰，防止开发进程被任意`run_id`无限占用；因此它是
+  有界调试状态，不是可靠Run持久化或分布式Session。
+- Swagger示例属于可执行契约：开发者能直接填`ORDER-003`调用七个Tool，也能观察标准成功和
+  失败信封，而不需要先接入LLM Tool Calling。
+
+### 可能的面试问题及回答要点
+
+**为什么需要Tool调试API，pytest直接调用不够吗？**
+
+回答要点：pytest适合确定性回归，但HTTP调试入口还能验证FastAPI请求Schema、Trace中间件、
+应用lifespan装配、共享Client、Registry和真实Java网络链路。它也是前后端或Agent编排接入前的
+手工契约探针；两者互补，不能用Swagger手工测试替代自动化测试。
+
+**为什么Tool失败仍返回HTTP 200？**
+
+回答要点：HTTP请求和Tool执行协议是两层。已找到Tool并完成执行时，资源404、权限不足、timeout
+等是`ToolResult.error`，上层按稳定错误码处理；路径中Tool不存在或请求Body无效才是HTTP层错误。
+如果把所有Tool失败都改成HTTP异常，会绕过统一结果模型并让Workflow同时解析两套错误语义。
+
+**为什么生产环境不只是返回403，而是完全不注册路由？**
+
+回答要点：条件注册让生产路由表和OpenAPI都没有内部入口，减少误调用和信息暴露。仅依靠处理
+函数里的环境判断仍会公开路径、参数Schema和Swagger文档，且容易在重构时漏掉门禁。
+
+**为什么调试API需要复用Run上下文？**
+
+回答要点：M1.7账本属于`ToolContext`。如果每个HTTP请求都创建新上下文，相同`run_id`也无法
+识别重复。当前保存最近128个上下文，并在请求间共享账本；Trace ID随当前HTTP请求更新，身份和
+权限则必须与首次调用一致。
+
+### 简历表述建议
+
+> 设计开发专用Agent Tool调试API，在不依赖LLM/Workflow的情况下通过Swagger调用七个业务Tool；
+> 复用生产Tool执行链并保留Schema、权限、Trace、有限重试和Run内去重，采用条件路由注册隔离
+> 生产环境，并以有界Run上下文支持跨请求重复调用与强制刷新验证。
+
+### 不能过度声称
+
+- 当前接口只在development环境启用，没有生产级管理端认证、RBAC、审计后台或网关隔离。
+- 调试调用方可以填写身份和Python权限，这是本地开发能力，不代表最终用户可以自行提权；Java
+  最终校验边界仍必须保留。
+- Run上下文只保留最近128个并存在单进程内，淘汰、重启、多worker或多实例后不会恢复。
+- Swagger和真实Java调用证明Tool链路可独立调试，不代表已完成LangGraph、LLM Tool Calling、
+  确定性诊断Workflow或Agent端到端评测。

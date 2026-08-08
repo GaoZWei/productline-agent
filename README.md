@@ -2,9 +2,10 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M1.7 重复调用检测**：Python 服务已通过七个独立只读 Tool 覆盖订单、任务、
+当前进度为 **M1.8 Tool 调试接口**：Python 服务已通过七个独立只读 Tool 覆盖订单、任务、
 生产进度、质检、复核和交付查询，具备严格事实 Schema、有限读重试，以及单次 Run 内相同
-Tool 与参数的重复调用拦截。当前尚未实现 Tool 调试 API、Workflow 或模型调用。
+Tool 与参数的重复调用拦截；开发环境可通过内部 FastAPI/Swagger 接口脱离 Agent 调试完整
+Tool 链路。当前尚未实现 Workflow 或模型调用。
 
 ## 环境要求
 
@@ -53,7 +54,7 @@ make test-agent-foundation # 验证 M1.1 Python 工程基础
 make test-agent-client # 验证 M1.2 Java HTTP Client
 make test-agent-errors # 验证 M1.3 标准错误模型
 make test-agent-tool-protocol # 验证 M1.4 Tool 基础协议
-make test-tools        # 验证 M1.4～M1.7 Tool 协议、只读调用、重试和重复检测
+make test-tools        # 验证 M1.4～M1.8 Tool 协议、调用策略和开发调试 API
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试

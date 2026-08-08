@@ -2,7 +2,7 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M1.7 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M1.8 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
@@ -860,8 +860,8 @@ get_delivery_status(order_id)     → GET /api/orders/{orderId}/delivery-status
 任务不存在。二者对后续诊断结论完全不同。
 
 应用启动时，FastAPI lifespan 先创建共享 `BusinessHttpClient`，随后用它创建七个 Tool 并保存到
-`app.state.tool_registry`；关闭时只需关闭共享 Client。当前没有 HTTP 调试接口，外部调用方还
-不能通过 REST 直接选择 Tool，但 pytest 和 Python 代码已经可以脱离 Agent 独立调用。
+`app.state.tool_registry`；关闭时只需关闭共享 Client。M1.8 在 development 环境注册内部 HTTP
+调试接口，外部开发者可以通过 REST/Swagger 选择 Tool；test和production环境不会注册该路由。
 
 七个 Tool 都是 LOW 风险只读操作，并声明 `max_retries=1`。M1.5 完成时该字段只是元数据；
 M1.6 已为这些 Tool 显式绑定 `RetryPolicy`。这里的 1 表示“首次调用失败后最多再调用一次”，
@@ -990,6 +990,56 @@ await tool.execute(tool_input, context, force_refresh=True)
 多 worker 或多实例之间不共享。M2 Workflow 必须建立“一次 Run 复用一个上下文”的生命周期，
 M7 再决定是否把调用记录持久化。
 
+### 7.11 M1.8 如何在没有 Agent 时调试 Tool
+
+`app/api/tool_debug.py` 将已经验证过的 Tool 层暴露为开发专用 FastAPI 路由：
+
+```text
+POST /internal/tools/{tool_name}/invoke
+```
+
+请求不是直接拼 Java URL，而是提供五类信息：
+
+```json
+{
+  "arguments": {"order_id": "ORDER-003"},
+  "identity": {"user_id": "debug-user-001", "role": "REVIEWER"},
+  "permissions": ["ORDER_READ"],
+  "run_id": "debug-run-order-003",
+  "force_refresh": false
+}
+```
+
+`arguments` 仍交给目标 Tool 自己的 `input_model` 校验；`identity` 会由 Java Client 转成用户和
+角色 Header；`permissions` 只负责 Python Tool 快速门禁，不能替代 Java 最终校验；`run_id`
+用于复用 M1.7 账本；`force_refresh` 显式表达是否重新读取。Trace ID 不放在 Body，而是继续由
+中间件从 `X-Trace-Id` Header 取得，保证 HTTP 响应、Python 日志和 Java 请求能够关联。
+
+路由的执行顺序是：
+
+```text
+FastAPI校验ToolDebugInvokeRequest
+→ ToolRegistry按路径tool_name查找Tool
+→ ToolDebugRunContextStore创建或复用ToolContext
+→ BaseTool.execute(arguments, context, force_refresh)
+→ 权限/输入/去重/重试/Java/输出完整链路
+→ 标准ToolResult
+```
+
+Tool 本身返回的参数、权限、Java、timeout 或响应错误使用 HTTP 200，因为 HTTP 调试请求已经
+正常到达并完成，失败信息在 `ToolResult.error` 中供 Workflow 式分支判断。未知 Tool 是路径资源
+不存在，返回 HTTP 404；HTTP Body 不符合调试 Schema 时由 FastAPI 返回422；同一 `run_id`
+尝试更换身份或权限会返回409，避免一个调试 Run 混用不同安全上下文。
+
+为了让两次 HTTP 请求仍能验证 M1.7，`ToolDebugRunContextStore` 在应用内复用最近128个 Run 的
+`ToolContext`。第二个请求会换成当前 Trace ID，但浅复制保留原上下文的私有调用账本。存储使用
+有界 LRU：超过128个时淘汰最久未使用的 Run，避免开发进程无限增长。它只是调试辅助状态，服务
+重启、多 worker、多实例或被淘汰后不会恢复，不能替代后续 Run/Step 持久化。
+
+路由在 `create_app` 构建阶段按 `Settings.environment == "development"` 条件注册。因此非开发
+环境不仅调用得到404，生成的 OpenAPI 中也没有该路径。这比在处理函数内部返回403更彻底，
+避免生产 Swagger 暴露内部调试入口。
+
 ## 8. 启动、请求和关闭顺序
 
 ### 8.1 标准本地启动
@@ -1028,6 +1078,7 @@ uv 读取 .python-version
 → 配置 JSON 日志
 → 创建惰性 Database/Engine
 → 创建共享 BusinessHttpClient/HTTP 连接池
+→ development 环境准备调试 Run 上下文存储和内部 Tool 路由
 → 服务开始接收请求
 ```
 
@@ -1395,7 +1446,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M1.7 已完成
+### 13.1 M1.1～M1.8 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1420,6 +1471,8 @@ async def lifespan(...):
 - 重试错误白名单与 `retryable` 双门禁，以及重试结构化日志；
 - Tool 名与规范化参数 SHA-256 指纹；
 - `ToolContext` 私有 Run 级调用账本、并发占位、`DUPLICATE_CALL` 和 `force_refresh`；
+- 仅development注册的Tool调试API、标准ToolResult和Swagger示例；
+- 跨调试HTTP请求复用的有界Run上下文，以及身份/权限一致性门禁；
 - pytest、Ruff、mypy；
 - Docker/Compose运行。
 
@@ -1432,9 +1485,9 @@ async def lifespan(...):
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M1.7 结构和 T150 以后可能增加的内容
+### 13.3 当前 M1.8 结构和 M2 以后可能增加的内容
 
-后续可能逐步形成：
+当前关键结构为：
 
 ```text
 app/
@@ -1448,12 +1501,11 @@ app/
 │   ├── registry.py              # 已实现的Tool注册与查找
 │   └── readonly.py              # 已实现的七个只读Tool和装配工厂
 └── api/
-    └── internal_tools.py        # 无Agent时调试Tool的内部接口
+    └── tool_debug.py            # 已实现的开发专用Tool调试接口与Run上下文存储
 ```
 
-其中 `schemas/tools.py`、`tools/deduplication.py`、`tools/retry.py` 和 `tools/readonly.py` 已存在；
-内部调试接口仍是预计结构，不代表功能已经实现。M1.8 将提供仅开发环境使用的 Tool 调试入口，
-实际结构以对应任务和测试为准。
+上述文件均已存在。M1 到此达到“所有只读 Tool 可脱离 Agent 调用”的停止线；Run/Step 数据表、
+确定性 Workflow 和动态模型调用仍属于 M2 以后能力，不能因为已有调试 API 就描述为已完成。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 
@@ -1465,5 +1517,7 @@ Tool如何把输入Schema错误统一成PARAM_VALIDATION_ERROR
 → 如何证明失败后最多调用两次，而非无限重试
 → 如何区分 Tool 内部 retry 与 Agent 重复逻辑调用
 → 为什么 force_refresh 必须由调用方显式表达
+→ 为什么 Tool业务失败返回ToolResult，而未知路由仍使用HTTP错误
+→ 为什么生产环境应在路由注册阶段隐藏调试接口
 → 为什么Python只能通过Java API取得业务事实
 ```

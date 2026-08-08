@@ -548,3 +548,40 @@
 - 未运行：`make reset-demo` 未运行；本次不修改固定数据且该命令会删除本地持久卷
 - 已知非阻塞问题：调用账本只属于当前 `ToolContext`，不持久化、不跨进程/实例；相同
   `run_id` 的独立上下文不会自动共享；当前不是结果缓存，也没有 TTL 或业务版本新鲜度策略
+
+## M1.8 Tool 调试接口
+
+- 验证时间：2026-08-08
+- 测试先行基线：新增调试接口测试后首次执行8项，其中development路由、OpenAPI示例、标准
+  成功/失败结果、跨请求去重、强制刷新和错误分支共6项按预期失败；test/production路由不存在
+  的2项通过，证明环境门禁基线已存在且目标路由尚未实现
+- M1.8专项：12/12
+  - test和production环境不注册路由且OpenAPI不暴露：2/2
+  - development OpenAPI包含路径、中文摘要、请求和标准结果示例：通过
+  - 请求参数、身份、权限、Run和Trace正确映射到ToolContext：通过
+  - Tool权限失败以HTTP 200返回标准ToolResult.error：通过
+  - 相同调试Run跨HTTP请求复用账本并返回DUPLICATE_CALL：通过
+  - force_refresh显式放行第二次调用：通过
+  - 未知Tool返回404，同Run身份变化返回409：通过
+  - 调试Run存储拒绝非法容量并按容量淘汰最久未使用上下文：4/4
+- `make test-tools`：M1.4协议16/16；M1.5～M1.8只读Tool、RetryPolicy、去重和调试API
+  127/127
+- Python全量：179/179
+- `make quality`：Ruff全部通过；mypy strict检查31个源/测试文件无问题
+- `uv lock --check`：通过，共解析42个直接及传递依赖
+- `docker compose up --detach --build agent-service`：通过；最终代码已进入Agent镜像
+- 三服务`make smoke`：通过
+- 真实调试API调用Java `ORDER-003`：首次成功并返回订单事实，同Run同参第二次返回
+  `DUPLICATE_CALL`且Trace更新，`force_refresh=true`后再次成功
+- `make test`：通过；基础/Compose、三服务smoke、Python M1全部分项、Java 56/56、Web 7/7和
+  Vue生产构建全部通过
+- 开发中发现并修复：首次质量检查报告19项，包含新路由中文标点/导入排序，以及工作区已有
+  M1.7讲解注释的全角标点和一行超长；保留中文说明含义，只调整标点、换行和导入格式，运行
+  行为无变化，最终质量检查通过
+- 最终契约复核发现Swagger成功示例将`ORDER-003`状态误写为`IN_PRODUCTION`；已更正为真实
+  `QUALITY_CHECKING`及`DOM`产品类型，并由OpenAPI测试锁定
+- 最终失败：0
+- 未运行：`make reset-demo`；本次不修改固定数据且该命令会删除本地持久卷
+- 已知非阻塞问题：调试Run上下文只保留最近128个且仅在当前进程有效；淘汰、进程重启、多
+  worker或多实例不会共享。development调用方可填写调试身份和Python权限，不能把它视为
+  生产认证或用户授权入口；Java最终权限校验边界不变

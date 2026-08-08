@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 _FINGERPRINT_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
-# 调用指纹生成函数（根据 Tool 名和已校验参数生成不暴露原文的 SHA-256 指纹）
+# 调用指纹生成函数: 根据 Tool 名和已校验参数生成不暴露原文的 SHA-256 指纹。
 def build_tool_call_fingerprint(tool_name: str, tool_input: BaseModel) -> str:
     """根据稳定 Tool 名和已校验参数生成不暴露原文的 SHA-256 指纹。"""
 
@@ -20,7 +20,8 @@ def build_tool_call_fingerprint(tool_name: str, tool_input: BaseModel) -> str:
         raise ValueError("tool_name must be a non-empty string")
     if not isinstance(tool_input, BaseModel):
         raise ValueError("tool_input must be a validated Pydantic model")
-    # 生成规范 JSON 字符串：类似{"arguments":{"order_id":"ORDER-003"},"tool_name":"get_order_detail"}
+    # 生成 key 排序且不含多余空格的规范 JSON 字符串。
+    # 示例: {"arguments":{"order_id":"ORDER-003"},"tool_name":"get_order_detail"}
     canonical_payload = json.dumps(
         {
             "arguments": tool_input.model_dump(mode="json", round_trip=True),
@@ -31,7 +32,7 @@ def build_tool_call_fingerprint(tool_name: str, tool_input: BaseModel) -> str:
         separators=(",", ":"),
         sort_keys=True,
     )
-    # 计算 SHA-256 指纹（小写）
+    # 计算小写 SHA-256 指纹。
     return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
@@ -42,9 +43,9 @@ class RunToolCallLedger:
     run_id: str
     _fingerprints: set[str] = field(default_factory=set, init=False, repr=False)
     _lock: Lock = field(default_factory=Lock, init=False, repr=False)
-    # 尝试占位调用指纹（不包含 I/O）
-    # 如果指纹已存在且 force_refresh 为 False，返回 False。
-    # 如果指纹不存在或 force_refresh 为 True，占位并返回 True。
+    # 尝试占位调用指纹, 不包含 I/O。
+    # 指纹已存在且 force_refresh 为 False 时返回 False。
+    # 指纹不存在或 force_refresh 为 True 时占位并返回 True。
     def try_reserve(self, fingerprint: str, *, force_refresh: bool = False) -> bool:
         """首次调用或显式刷新时占位。普通重复调用返回 False。"""
 

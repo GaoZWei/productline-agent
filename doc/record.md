@@ -1951,3 +1951,136 @@
     可评测停止条件问题，并形成 retry/duplicate/cache/idempotency 四类语义的真实设计取舍。
 - 下一建议任务：
   - `[T150] 实现仅开发环境启用的 Tool 调试 API`。
+
+---
+
+## 2026-08-08 — `[T150-T153] M1.8 Tool 调试接口`
+
+- 里程碑：M1 Python Tool层（达到M1停止线）
+- 任务类型：功能 / 接口 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：提供`POST /internal/tools/{tool_name}/invoke`，只在development环境注册；使用
+    Pydantic调试请求、应用级ToolRegistry和现有BaseTool执行链返回标准ToolResult；提供Swagger
+    请求/响应示例，并让相同调试Run跨HTTP请求复用M1.7账本。
+  - 明确不实现：不进入M2，不创建Session/Message/Run/Step表，不实现Workflow、LangGraph、
+    LLM Tool Calling、RAG、SSE、Approval、生产调试后台或新的Java接口；不修改固定业务数据。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：调试接口让开发者在Agent尚不存在时，直接使用七个只读Tool验证
+    `ORDER-003`等固定事实链路。它调用Tool而不是直拼Java URL，因此不会形成第二套业务契约。
+  - 环境门禁：`create_app`只在`Settings.environment == "development"`时包含Router；test和
+    production路由表/OpenAPI均没有该路径，访问得到404，而不是仅在处理函数内部返回403。
+  - 请求契约：`ToolDebugInvokeRequest`严格拒绝额外字段，包含目标Tool的`arguments`、
+    `BusinessIdentity`、Python快速门禁`permissions`、`run_id`和布尔`force_refresh`。Trace ID
+    继续由中间件从`X-Trace-Id`取得，不在Body建立第二来源。
+  - 执行契约：Router按稳定路径名从ToolRegistry取Tool，构造/复用ToolContext后调用
+    `BaseTool.execute`。权限、输入Schema、M1.7去重、M1.6重试、Java Client、输出Schema和错误
+    收敛全部复用现有实现，没有调试旁路。
+  - 双层错误语义：已找到Tool并完成执行时，即使业务资源、权限、timeout或响应失败，HTTP请求
+    仍返回200，具体失败放在标准`ToolResult.error`；未知Tool返回HTTP 404，请求Schema错误由
+    FastAPI返回422，同一Run更换身份/权限返回409。
+  - Run上下文：若每个HTTP请求都新建ToolContext，M1.7账本会被绕过。因此
+    `ToolDebugRunContextStore`按`run_id`复用上下文，使用当前请求Trace做浅复制并共享PrivateAttr
+    账本；身份和权限必须与首次调用一致。
+  - 内存边界：调试Store最多保存128个Run并按最久未使用顺序淘汰，防止development接口被任意
+    run_id无限占用。淘汰后再次使用旧Run会建立新账本，此能力不冒充持久化或分布式Session。
+  - Swagger契约：路径参数示例为`get_order_detail`，请求示例使用`ORDER-003`，HTTP 200同时提供
+    标准成功与Tool错误示例，开发者可从`/docs`直接执行。
+- 核心实现：
+  - `agent-service/app/api/tool_debug.py`：`ToolDebugInvokeRequest`定义HTTP输入；
+    `ToolDebugRunContextStore.resolve`实现有界Run上下文复用；`invoke_tool`完成Registry查找、Trace
+    注入、上下文冲突门禁和BaseTool调用；路由元数据提供Swagger示例。
+  - `agent-service/app/main.py`：仅development创建调试Store并注册Router；lifespan仍创建共享
+    BusinessHttpClient和七个只读Tool Registry。
+  - `agent-service/tests/integration/test_tool_debug_api.py`：覆盖环境隐藏、OpenAPI、成功和标准失败、
+    跨请求重复检测、force_refresh、未知Tool、上下文冲突、非法容量与LRU淘汰。
+  - `Makefile`：`make test-tools`纳入M1.8专项，形成M1完整独立验收入口。
+  - 必要的最小流程：
+
+    ```text
+    POST /internal/tools/{tool_name}/invoke
+    → FastAPI校验ToolDebugInvokeRequest
+    → ToolRegistry.get(tool_name)
+    → ToolDebugRunContextStore.resolve(run_id, identity, permissions, trace_id)
+    → BaseTool.execute(arguments, context, force_refresh)
+    → ToolResult.data / ToolResult.error
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：开发者通过Swagger或HTTP提交调试信封；FastAPI先验证外层请求，Router选择
+    Tool并恢复Run上下文；Tool自身再验证`arguments`并调用Java，响应由既有ToolResult协议返回。
+  - 核心类、函数、接口或配置项：`ToolDebugInvokeRequest`、`ToolDebugRunContextStore.resolve`、
+    `invoke_tool`、`create_app`的development条件注册、`test-tools`。
+  - 输入、输出、异常和边界：Body输入是调试控制信息加Tool原始参数，输出是动态data但固定
+    `success/data/error`外形。HTTP层错误与Tool层错误分离；生产环境没有路由；Store只保存有界
+    ToolContext且不保存额外业务结果。
+  - 关键代码位置在全部修改后重新核对并以最终回复链接为准。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：全部继续由BaseTool/BusinessHttpClient映射到标准Tool错误；接口
+    不捕获并改写ToolResult。未知或非法路径在进入Tool前失败。
+  - 身份与权限：development调用方可提供调试身份/权限，但同Run不可切换；Python快速门禁不能
+    替代Java最终权限校验。生产环境不注册Router，降低误暴露风险。
+  - 幂等、并发或人工确认：本次只有七个只读Tool；Store短锁只保护LRU查询/更新，实际HTTP不
+    在锁内。没有写Tool、Approval或生产幂等语义变化。
+- 开发中发现并修复：
+  - 测试先行首次执行8项：非开发环境隐藏2项通过，目标development路由相关6项按预期失败；
+    实现后专项扩展为12/12通过。
+  - 首次Ruff报告19项：新路由中文说明标点和import排序，以及工作区已有M1.7中文讲解注释的
+    全角标点与一行超长。保留全部中文含义，只调整标点、换行和导入格式；无运行行为变化，
+    最终Ruff/mypy通过。
+  - 最终复核发现Swagger成功示例把`ORDER-003`写成`IN_PRODUCTION`，与固定事实
+    `QUALITY_CHECKING`不一致；已改成真实`orderId/productType/status`响应并增加OpenAPI断言，
+    不涉及运行数据修改。
+- 未完成项与已知问题：
+  - 未完成项：M2+，包括Agent Session/Message/Run/Step持久化、确定性Workflow、动态Agent、
+    RAG、SSE和Approval。
+  - 已知问题/阻塞：无阻塞。调试Store仅当前进程有效且上限128；淘汰、重启、多worker或多实例
+    不共享。同一Run身份/权限变化返回409，没有独立的Run结束/删除接口。
+- 替代方案：
+  - 采用的替代方案及原因：无临时替代方案。development条件路由、标准ToolResult和Swagger
+    示例是T150～T153目标实现；有界进程内调试Store是为了在没有M2 Run表时保留M1.7跨请求语义。
+  - 已覆盖/未覆盖的验收要求：完整覆盖T150～T153及M1“所有只读Tool可脱离Agent调用”的停止
+    线；不覆盖生产管理API、持久化Run、分布式共享或用户级授权。
+  - 局限、风险和转正/移除条件：Store只服务development手工调试。M2建立正式Run生命周期后，
+    Workflow应使用持久化Run/Step而不是依赖该Store；调试Store可继续保留为有界开发工具，但
+    不能升级为生产状态源。
+- 后续影响：
+  - 对后续任务/里程碑：M1到此验收完成并停止。M2可以先通过调试API确认每个Tool事实，再把
+    同一Registry和BaseTool接入确定性Workflow；正式Run上下文仍需独立设计。
+  - 对接口/数据/测试/部署：新增Python内部开发HTTP接口和OpenAPI Schema；Java、数据库、固定
+    数据和前端无变化。Compose的Agent环境本就是development，因此本地`/docs`可见；生产部署
+    必须明确设置`ENVIRONMENT=production`。Make的Tool回归增加M1.8专项。
+- 测试与验证：
+  - `[预期失败] agent-service内uv run --frozen pytest -q tests/integration/test_tool_debug_api.py` —
+    首次8项中路由目标相关6项失败，证明测试先于实现。
+  - `[通过] 同命令` — 最终M1.8专项12/12。
+  - `[通过] make test-tools` — M1.4协议16/16；M1.5～M1.8集合127/127。
+  - `[通过] agent-service内uv run --frozen pytest -q` — Python全量179/179。
+  - `[通过] make quality` — Ruff通过；mypy strict检查31个源/测试文件无问题。
+  - `[通过] agent-service内uv lock --check` — 解析42个直接及传递依赖。
+  - `[通过] docker compose up --detach --build agent-service + make smoke` — 最终Agent镜像和三服务
+    健康检查通过。
+  - `[通过] 真实调试API调用Java ORDER-003` — 首次成功、同Run同参DUPLICATE_CALL、当前Trace
+    正确、force_refresh后再次成功。
+  - `[通过] make test` — foundation/Compose、三服务smoke、Python M1分项、Java 56/56、Web
+    7/7及Vue生产构建全部通过。
+  - `[命令位置错误后通过]` 最终组合检查首次在仓库根目录直接执行`uv lock --check`，因该目录
+    没有`pyproject.toml`返回非零；改到`agent-service`目录后通过。锁文件和运行代码无需修改。
+  - `[未运行] make reset-demo` — 本次不修改固定数据，且该命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/api/__init__.py`、`app/api/tool_debug.py`、`app/main.py`
+  - `agent-service/tests/integration/test_tool_debug_api.py`
+  - `agent-service/app/tools/deduplication.py`、`models.py`（仅保留并整理已有中文讲解注释）
+  - `Makefile`、`README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；Compose development会暴露调试接口到本机8000端口，因此不能把
+    当前Compose配置原样当生产部署；Store淘汰会重置该调试Run的重复检测历史。
+  - 后续兼容注意事项：新增Tool时自动可被Registry路径调用，但仍需Swagger/契约测试覆盖其
+    Schema；修改调试请求、HTTP/Tool错误分层或Store容量语义时需同步OpenAPI和测试。
+- Agent面试价值评估：
+  - 有价值，已更新`doc/needCare.md`。本次体现Tool可独立验证、开发/生产控制面隔离、标准结果
+    协议、Trace、Run上下文复用和有界状态取舍，能够真实解释如何把Tool问题与模型路由问题分层。
+- 下一建议任务：
+  - M1停止线已满足。若用户确认进入M2，下一最小任务为`[T201]`创建Agent Session基础模型，
+    并与T202～T205的数据表/迁移边界一起规划。

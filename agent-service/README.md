@@ -1,8 +1,9 @@
 # Agent Service
 
-M1.7 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M1.8 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
-只读 Tool 已具备显式有限退避重试和 Run 内重复调用检测，尚未包含 Workflow、RAG 或模型调用。
+只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API，尚未包含
+Workflow、RAG 或模型调用。
 
 ## 本地开发
 
@@ -79,6 +80,24 @@ Tool 和相同参数的后续调用在发出 HTTP 前返回不可重试的 `DUPL
 当前账本随 `ToolContext` 生命周期存在，不持久化、不跨 Python 进程或服务实例，也不会仅凭
 相同 `run_id` 自动合并两个独立创建的上下文。后续 Workflow 必须为一次 Run 创建并复用同一个
 上下文；Run/Step 持久化和分布式去重不属于 M1.7。
+
+## Tool 调试 API
+
+`ENVIRONMENT=development` 时注册：
+
+```text
+POST /internal/tools/{tool_name}/invoke
+```
+
+Swagger UI 位于 <http://localhost:8000/docs>。请求携带目标 Tool 的 `arguments`、调试
+`identity`、Python 快速门禁所需 `permissions`、`run_id` 和可选 `force_refresh`；Trace ID 从
+`X-Trace-Id` Header 读取。接口不会绕过现有权限、输入、重复检测、重试、Java Client 或输出
+Schema，Tool 失败仍以 HTTP 200 返回标准 `ToolResult(success=false, error=...)`。未知 Tool
+返回 HTTP 404，请求 Schema 错误返回 HTTP 422，同一 Run 更换身份或权限返回 HTTP 409。
+
+最近128个调试 Run 会在当前进程复用 `ToolContext`，因此跨 HTTP 请求也能验证 M1.7 的
+`DUPLICATE_CALL` 和 `force_refresh`。超过上限时按最久未使用顺序淘汰；服务重启、多进程或
+多实例不会共享。`test` 和 `production` 环境不注册该路由，OpenAPI 中也不会暴露。
 
 ## 测试与质量
 

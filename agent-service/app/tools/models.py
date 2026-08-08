@@ -31,7 +31,7 @@ class ToolContext(BaseModel):
     permissions: frozenset[PermissionName] = Field(default_factory=frozenset)
     trace_id: ContextIdentifier  # 关联一次分布式请求
     run_id: ContextIdentifier  # 关联一次 Agent Run
-    _tool_call_ledger: RunToolCallLedger = PrivateAttr()  # 调用账本是运行时内部状态，不是 API 数据
+    _tool_call_ledger: RunToolCallLedger = PrivateAttr()  # 运行时内部状态, 不是 API 数据
 
     def model_post_init(self, __context: Any) -> None:
         """为本次 Run 创建不参与序列化的进程内调用账本。"""

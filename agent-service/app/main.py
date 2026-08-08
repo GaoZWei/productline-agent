@@ -10,6 +10,8 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from app.api.tool_debug import ToolDebugRunContextStore
+from app.api.tool_debug import router as tool_debug_router
 from app.clients.business import BusinessHttpClient
 from app.database import Database
 from app.observability import TraceIdMiddleware, configure_logging
@@ -66,6 +68,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = resolved_settings
+    # 根据环境决定是否注册路由
+    if resolved_settings.environment == "development":
+        application.state.tool_debug_context_store = ToolDebugRunContextStore()
+        application.include_router(tool_debug_router)
     # 注册中间件为每个请求添加跟踪 ID。
     application.add_middleware(TraceIdMiddleware)
     # 定义 HTTP接口

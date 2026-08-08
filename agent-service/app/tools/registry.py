@@ -25,7 +25,7 @@ class ToolNotRegisteredError(LookupError):
 # 具体类型由 Tool 自己的 input_model 和 output_model 保证。
 class ToolRegistry:
     """提供确定性的 Tool 注册、查找和名称枚举能力。"""
-
+    # init其实就是初始化state数据结构
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool[Any, Any]] = {}
 
