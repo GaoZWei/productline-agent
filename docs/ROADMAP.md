@@ -22,7 +22,8 @@
   - [x] M2.1 Agent 基础数据表（T201～T206）
   - [x] M2.2 最小 Run 生命周期（T207～T213）
   - [x] M2.3 最小 Step 记录（T214～T220）
-  - [ ] M2.4 Workflow 状态模型（T221～T226）
+  - [x] M2.4 Workflow 状态模型（T221～T226）
+  - [ ] M2.5 固定 Workflow 节点（T227～T235）
 - [ ] M3 页面上下文与路由
 - [ ] M4 RAG
 - [ ] M5 动态 Agent

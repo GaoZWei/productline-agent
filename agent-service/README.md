@@ -1,10 +1,10 @@
 # Agent Service
 
-M2.3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M2.4 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
-包含 Session/Message/Run/Step 模型、Alembic迁移、Repository及最小Run/Step生命周期，尚未
-包含Workflow、RAG或模型调用。
+包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
+Workflow状态/诊断Schema，尚未包含Workflow节点、RAG或模型调用。
 
 ## 本地开发
 
@@ -143,6 +143,21 @@ API Key、Password和Secret写法，并截断到1000字符。该规则是最小�
 识别，未来Workflow仍必须先选择允许保存的字段。当前Step服务已可独立调用，但Tool和Workflow
 还不会自动创建这些记录。
 
+## Workflow状态与诊断Schema
+
+`OrderDiagnosisState`使用`TypedDict`声明固定诊断节点共享的Run、订单、任务、进度、质检、复核、
+交付、诊断和错误通道。它主要服务mypy和后续LangGraph节点的静态类型检查，不会在运行时自动
+校验字典内容；外部事实仍必须先经过现有Tool Pydantic Schema。
+
+`DiagnosisResult`使用严格、不可变且禁止额外字段的Pydantic模型，包含订单ID、阻塞阶段、结构化
+`RootCause`、`Evidence`、`Suggestion`和0～1置信度。`Evidence`当前只接受七个已注册只读Tool、
+可定位字段路径和标量值，禁止把模型判断或整段业务响应冒充事实证据；`StepError`只保留稳定
+错误码、安全文案、retryable和可选Trace ID，不接收原始响应或异常堆栈。
+
+`blocking_stage`当前只校验为稳定大写代码；`PRODUCTION_BLOCKED/QUALITY_REVIEW/REVIEW/DELIVERY/NONE`
+正式枚举属于M2.6。`NONE`不得同时携带根因，其他阶段至少需要一个根因。M2.4只定义状态和结果
+契约，没有执行Tool、生成诊断或接入Run/Step生命周期。
+
 ## 测试与质量
 
 ```bash
@@ -162,6 +177,7 @@ make test-tools
 make test-agent-persistence
 make test-run-lifecycle
 make test-step-lifecycle
+make test-workflow-schemas
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP

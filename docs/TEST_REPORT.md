@@ -680,3 +680,30 @@
 - 已知非阻塞问题：Step尚未由Tool/Workflow自动创建；序号由调用方提供；摘要凭据遮盖不是完整
   PII/DLP；没有Run终态聚合检查、崩溃后RUNNING Step回收、Trace/retry_count持久化或前端展示
 - 下一建议任务：T221～T226实现M2.4 Workflow State和结构化诊断Schema
+
+## M2.4 Workflow 状态模型
+
+- 验证时间：2026-08-09
+- 测试先行基线：增加M2.4测试后首次执行时，在收集阶段产生1个预期
+  `ModuleNotFoundError: No module named 'app.schemas.workflow'`
+- `make test-workflow-schemas`：18/18
+  - ORDER-003结构化根因、Tool字段证据、建议和置信度：通过
+  - 非法订单ID、阻塞阶段、空阻塞根因/证据/建议和越界置信度：拒绝
+  - 模型来源、未知Tool、不可定位字段路径和复合证据值：拒绝
+  - `NONE`阶段根因互斥、嵌套Schema严格字段与StepError安全字段：通过
+  - `OrderDiagnosisState`十个必需状态通道及业务Schema类型：通过
+  - Evidence允许的Tool名称与实际注册的七个只读Tool集合保持一致：通过
+- Python全量：198通过、14跳过；跳过项是需要专用PostgreSQL环境变量的同组数据库集成用例，
+  已由`make test`中的隔离PostgreSQL专项16/16真实执行
+- `make quality`：Ruff全部通过；mypy strict检查41个源/测试文件无问题
+- `make test`：通过；基础/Compose、三服务smoke、Python M1分项、M2.1～M2.4专项、Java 56/56、
+  Web 7/7及Vue生产构建全部通过
+- 开发中发现并修复：首次Ruff检查发现新Schema有4个全角标点，同时发现已提交M2.3讲解注释有
+  7个同类问题；均保留中文含义并只机械替换标点。改为验证包级公开导出后又发现1个测试导入
+  排序问题，按Ruff顺序修正。新增Tool名称集合一致性测试首次发现PEP 695 `type`别名不能由
+  `get_args`直接枚举，改为运行时可检查的`Literal`赋值别名后通过
+- 最终失败：0
+- 未运行：`make reset-demo`；本次不修改Java固定业务数据，且该命令会删除本地持久卷
+- 已知非阻塞问题：本阶段只有TypedDict/Pydantic契约，没有Workflow节点执行；`blocking_stage`
+  正式枚举属于M2.6；没有自动Run/Step记录、HTTP诊断API或前端展示
+- 下一建议任务：T227～T235实现M2.5固定Workflow节点

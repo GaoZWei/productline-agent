@@ -684,6 +684,9 @@ LLM
 
 ## M2.4 Workflow 状态模型
 
+本阶段定义固定订单诊断节点共享的TypedDict状态通道，并以严格Pydantic Schema表达根因、Tool字段
+证据、建议、步骤错误和最终诊断结果，为后续Workflow节点与确定性规则提供稳定数据契约。
+
 ```python
 class OrderDiagnosisState(TypedDict):
     run_id: str

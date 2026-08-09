@@ -2526,3 +2526,114 @@
   - 无新增Agent面试实现证据，本次属于文档治理，因此未修改`doc/needCare.md`。
 - 下一建议任务：
   - `[T221-T226] M2.4 Workflow状态模型；开发开始时先在对应标题下补充简短阶段目标说明。`
+
+---
+
+## 2026-08-09 19:38 — `[T221-T226] M2.4 Workflow 状态模型`
+
+- 里程碑：M2 确定性订单诊断
+- 任务类型：Workflow契约 / Pydantic Schema / 幻觉控制基础 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：定义固定诊断节点共享的`OrderDiagnosisState`，以及`DiagnosisResult`、`RootCause`、
+    `Evidence`、`Suggestion`和`StepError`严格Schema；为ORDER-003建立结构化黄金结果测试，并验证
+    状态通道、证据来源、字段路径、标量事实、错误安全字段和置信度范围。
+  - 明确不实现：不进入M2.5/M2.6，不实现LangGraph图、Workflow节点、Tool调用、阻塞判断规则、
+    HTTP诊断API、Run/Step自动接线、前端诊断卡片、RAG或模型调用；不修改Java接口、固定业务数据、
+    Agent数据库或Alembic迁移。
+- 需求与关键决策：
+  - `OrderDiagnosisState`严格遵循计划中的十个必需通道，使用`TypedDict`服务mypy和未来LangGraph
+    节点静态检查；它不是运行时验证器，进入状态的Java事实仍必须先经过现有Tool Pydantic Schema。
+  - 诊断模型共享`extra=forbid/frozen/strict/str_strip_whitespace`，拒绝未知字段和隐式类型转换，
+    并减少结果对象被下游节点意外重写。
+  - `Evidence`当前固定`source_type=TOOL`，Tool名只能来自七个已注册只读Tool，字段路径必须可定位，
+    `value`只能是标量。测试直接比较`ReadToolName`与`READ_TOOL_NAMES`，避免两份契约静默漂移。
+  - `RootCause`和`Suggestion`均使用大写稳定机器代码加可读说明。`DiagnosisResult`要求至少一条证据
+    和建议、置信度位于0～1；`NONE`阶段禁止根因，其他阶段至少一个根因。
+  - `blocking_stage`本次只校验为大写稳定代码，没有提前定义阶段枚举；正式枚举和五订单诊断规则
+    属于M2.6。`confidence`也只有范围约束，没有虚构计算或校准能力。
+  - `StepError`复用`ToolErrorCode`，只传递步骤名、安全文案、retryable和可选Trace ID，禁止额外
+    塞入原始响应、异常堆栈或凭据。
+- 核心实现：
+  - `agent-service/app/schemas/workflow.py` — `WorkflowSchema`公共严格配置；`RootCause/Evidence/
+    Suggestion/StepError/DiagnosisResult`运行时契约；`OrderDiagnosisState`静态状态通道。
+  - `agent-service/app/schemas/__init__.py` — 提供上述Schema和`ReadToolName`包级稳定导出。
+  - `agent-service/tests/test_workflow_schemas.py` — 18个测试结果，覆盖黄金结果、顶层/嵌套非法输入、
+    证据溯源、无阻塞互斥、StepError安全字段、状态类型和Tool名称集合一致性。
+  - `Makefile` — 新增`make test-workflow-schemas`并纳入根级`make test`。
+  - 核心数据流：
+
+    ```text
+    Java API事实
+    → 七个只读Tool强类型输出
+    → OrderDiagnosisState业务通道
+    → M2.5节点/M2.6规则（尚未实现）
+    → DiagnosisResult(root_causes/evidence/suggestions/confidence)
+    ```
+
+- 代码解释与定位：
+  - `TypedDict`类似只用于静态约束的共享Map接口，Pydantic模型类似带运行时Bean Validation的不可变
+    Java DTO；两者分别承担节点状态开发体验和可信边界校验，不能互相替代。
+  - `Evidence`不是完整Tool响应快照，而是`tool_name + field_path + scalar value + description`；这为
+    后续前端溯源和自动评测提供最小可审查单位，同时降低复制敏感或大体积业务载荷的风险。
+  - 关键代码位置将在最终回复中按修改完成后的绝对路径和行号提供。
+- 异常、安全与边界：
+  - 非法订单ID、稳定代码、字段路径、Tool名、复合证据值、空阻塞根因/证据/建议、越界置信度、
+    未知字段和错误类型会产生Pydantic `ValidationError`。
+  - Schema只验证证据的来源名称与形状，尚未查询本次Tool结果来证明`field_path/value`真实匹配；
+    该运行时证据绑定应由M2.5/M2.6节点或后续评测实现。
+- 开发中发现并修复：
+  - 测试先行首次执行因`app.schemas.workflow`尚不存在产生1个预期收集`ModuleNotFoundError`，完成
+    模块与包级导出后消除。
+  - 首次Ruff发现新Schema有4个全角标点，并发现已提交M2.3讲解注释有7个同类问题；保留中文含义，
+    仅机械替换标点。验证包级导出后又修复1个测试导入排序问题。
+  - Tool名称集合一致性测试首次失败：PEP 695 `type ReadToolName = Literal[...]`生成`TypeAliasType`，
+    `get_args`不能直接枚举成员；改为运行时可检查的`ReadToolName = Literal[...]`后通过。静态类型和
+    Pydantic约束保持不变，同时获得防契约漂移测试。
+- 未完成项与已知问题：
+  - 未完成项：M2.5固定Workflow节点、M2.6阻塞阶段枚举和确定性规则，以及自动证据值绑定、
+    Run/Step接线、API、前端、RAG和模型调用。
+  - 已知问题/阻塞：无阻塞。TypedDict不做运行时校验；字段路径当前只校验语法，不验证实际Tool
+    响应；置信度尚无计算/校准；调试Run与持久化Run仍未关联。
+- 替代方案：
+  - 采用的替代方案及原因：无临时业务替代方案。按计划使用标准库TypedDict与现有Pydantic v2，
+    没有为尚未执行的Workflow提前引入LangGraph依赖或伪造节点实现。
+  - 已覆盖/未覆盖的验收要求：覆盖T221～T226状态与Schema及自动测试；不覆盖节点执行和业务规则，
+    均未包装为已完成。
+  - 局限、风险和转正/移除条件：`ReadToolName`与注册集合是两份声明，但已有一致性测试阻止漂移；
+    若后续建立共享Tool元数据源，可再统一生成，当前无需引入运行时层反向依赖。
+- 后续影响：
+  - 对后续任务/里程碑：M2.5节点必须读写既定状态通道并复用Tool输出对象；M2.6应把
+    `blocking_stage`收紧为正式枚举并生成字段级Evidence，不能只返回自由文本数组。
+  - 对接口/数据/测试/部署：新增Python内部Schema公共导出和测试命令；无Java API、Tool输入输出、
+    HTTP、数据库、固定数据或前端契约变化。Agent镜像已包含新模块。
+- 测试与验证：
+  - `[预期失败] agent-service内uv run --frozen pytest -q tests/test_workflow_schemas.py` — 收集阶段
+    1个`ModuleNotFoundError`，目标模块尚不存在。
+  - `[通过] make test-workflow-schemas` — 最终18/18。
+  - `[通过] agent-service内uv run --frozen pytest -q` — 198通过、14个数据库用例按环境门禁跳过；
+    同组持久化用例已由完整`make test`中的隔离PostgreSQL专项16/16执行。
+  - `[通过] make quality` — Ruff通过；mypy strict检查41个源/测试文件无问题。
+  - `[通过] make test` — foundation/Compose、三服务smoke、Python M1分项、M2.1～M2.4专项、
+    Java 56/56、Web 7/7和Vue生产构建全部通过。
+  - `[通过] docker compose up --detach --build agent-service + make smoke` — 最终Agent镜像和三服务
+    健康检查通过。
+  - `[通过] make validate + Markdown code fence检查 + git diff --check` — 基础结构、Compose、
+    修改文档围栏和差异空白通过。
+  - `[未运行] make reset-demo` — 本次不修改Java固定业务数据，且命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/schemas/workflow.py`、`app/schemas/__init__.py`
+  - `agent-service/tests/test_workflow_schemas.py`
+  - `agent-service/app/services/step_lifecycle.py`（只机械修复已提交讲解注释标点）
+  - `Makefile`
+  - `README.md`、`agent-service/README.md`、`doc/detailed-plan.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；未完成能力见上文。
+  - 后续兼容注意事项：新增只读Tool必须同步`ReadToolName`并通过集合一致性测试；M2.6收紧
+    `blocking_stage`时要同步Schema、黄金结果和所有规则测试；不要把TypedDict当运行时验证器。
+- Agent面试价值评估：
+  - 有价值，已更新`doc/needCare.md`。本次真实建立“Tool字段事实→结构化证据→诊断结果”契约，
+    能说明Agent幻觉控制、TypedDict/Pydantic分工、错误最小化和可自动评测性的设计取舍。
+- 下一建议任务：
+  - `[T227-T235] M2.5 固定Workflow节点`。

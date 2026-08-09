@@ -99,7 +99,7 @@ class StepLifecycleService:
         input_summary: str | None = None,
     ) -> AgentStep:
         """在 RUNNING Run下创建并自动关联一个已开始的 Step。"""
-        # 第一步：校验参数
+        # 第一步: 校验参数
         normalized_step_id = self._require_identifier(step_id, "step_id", 128)
         normalized_run_id = self._require_identifier(run_id, "run_id", 128)
         normalized_step_name = self._require_identifier(step_name, "step_name", 128)
@@ -119,14 +119,14 @@ class StepLifecycleService:
                 message="must be an AgentStepType",
             )
         normalized_input_summary = self._normalize_summary(input_summary, "input_summary")
-        # 第二步：锁定并校验父Run
+        # 第二步: 锁定并校验父Run
         run = await self._run_repository.get_for_update(normalized_run_id)
         if run is None or run.status is not AgentRunStatus.RUNNING:
             raise StepRunUnavailableError(
                 run_id=normalized_run_id,
                 current_status=run.status if run is not None else None,
             )
-        # 第三步：创建RUNNING Step
+        # 第三步: 创建RUNNING Step
         return await self._step_repository.create(
             AgentStep(
                 step_id=normalized_step_id,
@@ -186,9 +186,9 @@ class StepLifecycleService:
         """计算耗时并以 compare-and-set原子抢占唯一终态。"""
 
         normalized_step_id = self._require_identifier(step_id, "step_id", 128)
-        # 第一步：读取数据库最新状态
+        # 第一步: 读取数据库最新状态
         current = await self._step_repository.get_fresh(normalized_step_id)
-        # 第二步：校验状态是否为RUNNING
+        # 第二步: 校验状态是否为RUNNING
         if current is None:
             raise StepNotFoundError(normalized_step_id)
         if current.status is not AgentStepStatus.RUNNING:
@@ -202,7 +202,7 @@ class StepLifecycleService:
                 field_name="started_at",
                 message="must exist before finishing a step",
             )
-        # 第三步：计算耗时
+        # 第三步: 计算耗时
         finished_at = self._timestamp()
         if finished_at < current.started_at:
             raise StepLifecycleValidationError(
@@ -259,7 +259,7 @@ class StepLifecycleService:
                 message=f"must contain at most {max_length} characters",
             )
         return normalized
-    # 摘要：摘要处理
+    # 摘要: 摘要处理
     @staticmethod
     def _normalize_summary(value: str | None, field_name: str) -> str | None:
         """压缩空白、遮盖常见凭据并截断摘要, 但不保存原始载荷。"""
