@@ -2,7 +2,7 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M2.2 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M2.3 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
@@ -10,7 +10,7 @@
 Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
 最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测。M2.1 已增加 Session、Message、Run、
-Step 持久化基础，M2.2 已实现最小Run状态流转，尚未实现Step自动记录、Workflow或大模型调用。
+Step持久化基础，M2.2～M2.3已实现最小Run/Step状态流转，尚未接入Workflow或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -71,7 +71,8 @@ agent-service/
 │   ├── repositories/
 │   │   └── agent_runtime.py         # Run、Step异步增删查和原子状态更新
 │   ├── services/
-│   │   └── run_lifecycle.py         # 最小Run生命周期与内部异常
+│   │   ├── run_lifecycle.py         # 最小Run生命周期与内部异常
+│   │   └── step_lifecycle.py        # Step记录、摘要保护和耗时
 │   ├── clients/
 │   │   └── business.py             # 调用 Java 的异步 HTTP Client
 │   └── schemas/
@@ -569,7 +570,8 @@ async with database.session() as session:
 
 数据库删除 Session 时级联 Message、Run、Step；删除 Run 时级联 Step。删除一条请求 Message
 则把 Run 的 `request_message_id` 置空而不是删除 Run，用于保留已经发生的执行证据。当前只实现
-数据结构和Repository。M2.2已实现合法Run状态流转，M2.3才会在执行期间自动记录Step。
+数据结构和Repository。M2.2已实现合法Run状态流转，M2.3已提供可独立调用的Step记录服务；
+Tool和Workflow自动接线仍未实现。
 
 ### 5.5 M2.2 的最小 Run 生命周期
 
@@ -610,6 +612,44 @@ RETURNING *;
 Repository都不调用`commit`，调用方仍需用`session.begin()`控制一次业务操作的整体事务。
 `WAITING_APPROVAL`和`CANCELLED`只存在于数据枚举，对应操作分别属于后续Approval或取消设计，
 M2.2没有提前实现。
+
+### 5.6 M2.3 的最小 Step 记录
+
+[`agent-service/app/services/step_lifecycle.py`](../agent-service/app/services/step_lifecycle.py)类似
+Java中的Step执行记录`@Service`。调用方开始一个步骤时传入稳定`step_id`、父`run_id`、序号、
+类型、名称和可选输入摘要，Service创建已经处于`RUNNING`的`AgentStep`：
+
+```text
+start_step
+→ 锁定并校验父Run必须是RUNNING
+→ INSERT Step(status=RUNNING, started_at=UTC时间)
+├── mark_succeeded → SUCCEEDED + output_summary + duration_ms
+└── mark_failed    → FAILED + error_code + output_summary + duration_ms
+```
+
+父Run查询使用`SELECT ... FOR UPDATE`。它类似JPA的悲观写锁：如果Run正被另一个事务标记为终态，
+开始Step的一方会等待并读取最终状态；如果Step先锁住Run并完成插入，Run终态更新会等待该事务
+提交。这样避免在已经结束的Run下又并发开始新Step。该锁只保护“开始关联”的短事务，不应跨
+Java HTTP或模型调用长期持有。
+
+成功和失败都使用`UPDATE ... WHERE status = RUNNING RETURNING ...`抢占唯一终态。完成前先从
+`started_at`与带时区`finished_at`计算毫秒耗时；时间倒退、缺少开始时间、重复完成和并发终态
+都会被拒绝。`get_fresh`会刷新SQLAlchemy会话身份缓存，确保并发失败方看见数据库最新状态，
+而不是继续使用先前加载的`RUNNING`对象。
+
+输入输出不是原始请求/响应，而是由Workflow以后主动选择的摘要字符串。当前最小策略会：
+
+- 合并换行和连续空白；
+- 将常见`Authorization: Bearer`、`api_key`、`access_token`、`password`和`secret`值替换为
+  `[REDACTED]`；
+- 超过1000字符时截断并追加`...`；
+- 空白摘要按`None`保存。
+
+这只是纵深防御，不能识别所有个人信息、业务敏感字段或任意格式凭据。未来Workflow仍应先构造
+字段白名单摘要，不能把完整Prompt、Java响应、Token或用户原文直接传给Step服务。
+
+Service和Repository仍只`flush`而不`commit`，事务由调用方控制。当前序号由调用方提供，数据库
+唯一约束只负责拒绝同一Run的重复序号；自动分配、重试次数、Trace ID和Tool自动记录不属于M2.3。
 
 ## 6. Trace ID 与结构化日志
 
@@ -1386,6 +1426,7 @@ make test-agent-errors      # 运行 M1.3 的 18 个标准错误测试
 make test-tools             # 运行 Tool 协议、只读 Tool 和重试策略测试
 make test-agent-persistence # 在隔离 PostgreSQL 上测试模型、迁移和 Repository
 make test-run-lifecycle     # 单独测试Run成功、失败、非法流转和并发终态
+make test-step-lifecycle    # 单独测试Step记录、摘要保护、耗时和并发终态
 make quality                # Ruff + mypy strict
 make agent-migrate          # 容器内执行 Alembic upgrade head
 make smoke                  # 验证 Java、Python、Web 健康检查
@@ -1545,7 +1586,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M2.2 已完成
+### 13.1 M1.1～M2.3 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1558,6 +1599,9 @@ async def lifespan(...):
 - PENDING→RUNNING→SUCCEEDED/FAILED最小Run生命周期；
 - 最终结果JSON快照、错误码/错误步骤和带时区起止时间；
 - 基于期望旧状态的原子条件更新和并发终态竞争保护；
+- CONTEXT/TOOL/RULE/LLM Step开始、成功和失败记录；
+- 父Run行锁门禁、Step自动Run关联和原子终态竞争保护；
+- 输入输出摘要空白压缩、常见凭据遮盖、1000字符截断和毫秒耗时；
 - JSON日志和安全Trace ID；
 - 共享异步Java HTTP Client和连接池；
 - 身份、Token、Trace ID和幂等键透传；
@@ -1583,13 +1627,13 @@ async def lifespan(...):
 ### 13.2 当前尚未实现
 
 - 数据库readiness；
-- Step开始/成功/失败记录；
+- Tool/Workflow自动创建Run和Step；
 - Workflow、动态Agent、模型调用；
 - RAG、SSE和Approval。
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M2.2 结构和后续可能增加的内容
+### 13.3 当前 M2.3 结构和后续可能增加的内容
 
 当前关键结构为：
 
@@ -1600,7 +1644,8 @@ app/
 ├── repositories/
 │   └── agent_runtime.py         # 已实现的Run/Step增删查和原子状态更新
 ├── services/
-│   └── run_lifecycle.py         # 已实现的最小Run生命周期
+│   ├── run_lifecycle.py         # 已实现的最小Run生命周期
+│   └── step_lifecycle.py        # 已实现的Step记录、摘要保护和耗时
 ├── schemas/
 │   └── tools.py                 # 已实现的七个只读Tool输入输出Schema
 ├── tools/
@@ -1614,8 +1659,8 @@ app/
     └── tool_debug.py            # 已实现的开发专用Tool调试接口与Run上下文存储
 ```
 
-上述文件均已存在。M2.2只完成可独立调用的Run生命周期；Tool执行尚未自动创建Run/Step，
-确定性Workflow和动态模型调用也未完成，不能把“状态机可用”描述成“已有Agent运行闭环”。
+上述文件均已存在。M2.3只完成可独立调用的Run/Step生命周期；Tool执行尚未自动创建Run/Step，
+确定性Workflow和动态模型调用也未完成，不能把“步骤可记录”描述成“已有Agent运行闭环”。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 

@@ -2,10 +2,10 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M2.2 最小 Run 生命周期**：Python 服务已在 Session、Message、Run、Step 四张
-Agent 自有表之上实现 `PENDING → RUNNING → SUCCEEDED/FAILED`，能够保存最终结果、错误码和
-失败步骤，并以数据库条件更新防止并发终态互相覆盖。七个只读 Tool 及开发调试接口保持可用；
-当前尚未自动记录 Step，也尚未实现 Workflow 或模型调用。
+当前进度为 **M2.3 最小 Step 记录**：Python 服务已实现 Run 和 Step 的最小生命周期，能够按
+`CONTEXT/TOOL/RULE/LLM`记录步骤开始、成功、失败、受控摘要和耗时，并以父Run行锁和数据库
+条件更新保护关联及并发终态。七个只读 Tool 及开发调试接口保持可用；当前尚未把生命周期服务
+自动接入 Tool 或 Workflow，也尚未实现确定性诊断和模型调用。
 
 ## 环境要求
 
@@ -55,8 +55,9 @@ make test-agent-client # 验证 M1.2 Java HTTP Client
 make test-agent-errors # 验证 M1.3 标准错误模型
 make test-agent-tool-protocol # 验证 M1.4 Tool 基础协议
 make test-tools        # 验证 M1.4～M1.8 Tool 协议、调用策略和开发调试 API
-make test-agent-persistence # 在隔离 PostgreSQL 上验证 M2.1～M2.2 持久化
+make test-agent-persistence # 在隔离 PostgreSQL 上验证 M2.1～M2.3 持久化
 make test-run-lifecycle # 单独验证 M2.2 Run 生命周期与并发状态流转
+make test-step-lifecycle # 单独验证 M2.3 Step 记录、摘要和耗时
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试

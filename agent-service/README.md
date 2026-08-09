@@ -1,10 +1,10 @@
 # Agent Service
 
-M2.2 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M2.3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
-包含 Session/Message/Run/Step 模型、Alembic 迁移、Run/Step Repository和最小Run生命周期，
-尚未包含Workflow、RAG或模型调用。
+包含 Session/Message/Run/Step 模型、Alembic迁移、Repository及最小Run/Step生命周期，尚未
+包含Workflow、RAG或模型调用。
 
 ## 本地开发
 
@@ -133,6 +133,16 @@ mark_failed      → RUNNING → FAILED，并保存error_code和error_step
 Repository和Service仍不隐式commit，事务由调用方统一提交。当前Tool和Workflow尚未自动调用
 该服务，`WAITING_APPROVAL`和`CANCELLED`操作也未提前实现。
 
+`StepLifecycleService`仅允许在`RUNNING` Run下开始Step，并在创建时自动写入`run_id`、序号、
+类型、名称、输入摘要和`started_at`。父Run使用`SELECT ... FOR UPDATE`校验，避免Run正在进入终态
+时又并发插入新Step。Step从`RUNNING`只能原子进入`SUCCEEDED`或`FAILED`：成功清空错误码，失败
+保存机器错误码，两者都保存输出摘要、`finished_at`和毫秒耗时。
+
+摘要是调用方提供的受控说明，不接收原始业务对象；Service会压缩空白、遮盖常见Bearer Token、
+API Key、Password和Secret写法，并截断到1000字符。该规则是最小防护，不等同于完整PII/DLP
+识别，未来Workflow仍必须先选择允许保存的字段。当前Step服务已可独立调用，但Tool和Workflow
+还不会自动创建这些记录。
+
 ## 测试与质量
 
 ```bash
@@ -151,6 +161,7 @@ make test-agent-tool-protocol
 make test-tools
 make test-agent-persistence
 make test-run-lifecycle
+make test-step-lifecycle
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP

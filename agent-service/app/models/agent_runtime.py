@@ -209,18 +209,21 @@ class AgentStep(Base):
         # 保证同一个Run内步骤顺序唯一
         UniqueConstraint("run_id", "sequence_number", name="uq_agent_steps_run_sequence"),
     )
-
+    # 唯一标识
     step_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    # 属于哪一次Run
     run_id: Mapped[str] = mapped_column(
         ForeignKey("agent_runs.run_id", ondelete="CASCADE"), nullable=False
     )
+    # 在Run里的执行顺序
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 表示步骤类型
+    # 表示步骤类型  CONTEXT/TOOL/RULE/LLM
     step_type: Mapped[AgentStepType] = mapped_column(
         _enum_column(AgentStepType, "ck_agent_steps_type", 16), nullable=False
     )
     # 表示具体动作
     step_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # 当前状态  PENDING/STARTED/FINISHED/FAILED
     status: Mapped[AgentStepStatus] = mapped_column(
         _enum_column(AgentStepStatus, "ck_agent_steps_status", 16),
         default=AgentStepStatus.PENDING,
@@ -231,7 +234,7 @@ class AgentStep(Base):
     input_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # 时间 步骤未完成时可以是NULL, 完成后必须是非负数
+    # 执行耗时 步骤未完成时可以是NULL, 完成后必须是非负数
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -2343,3 +2343,132 @@
     保护、结果/错误互斥、标准JSON快照及事务边界，能够回答Agent可观测性和并发一致性取舍。
 - 下一建议任务：
   - `[T214-T220] M2.3 最小Step记录`。
+
+---
+
+## 2026-08-09 18:00 — `[T214-T220] M2.3 最小 Step 记录`
+
+- 里程碑：M2 确定性订单诊断
+- 任务类型：功能 / 可观测性 / 并发安全 / 数据最小化 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：为CONTEXT、TOOL、RULE、LLM Step提供开始、成功和失败记录；自动关联RUNNING父Run；
+    保存受控输入输出摘要、错误码、起止时间和毫秒耗时；用真实PostgreSQL验证父Run门禁、非法
+    流转、摘要保护和并发终态竞争。
+  - 明确不实现：不进入M2.4，不定义Workflow State或诊断Schema；不接入Tool调试API、LangGraph、
+    确定性Workflow、LLM、RAG、SSE或前端；不自动分配Step序号，不增加Trace ID、retry_count、
+    恢复/回收或Run终态聚合检查；不修改Java接口、固定数据或数据库Schema。
+- 需求与关键决策：
+  - Step最小状态图为`start_step → RUNNING → SUCCEEDED/FAILED`。T214记录的是已经开始的动作，
+    因此Service直接插入RUNNING；M2.1保留的PENDING状态留给未来排队/调度能力，本次不虚构调度器。
+  - `start_step`要求父Run存在且为RUNNING，使用`SELECT ... FOR UPDATE`刷新并锁定父Run。该短事务
+    与Run终态UPDATE串行化，避免检查后Run结束、随后又插入新Step的竞争窗口。
+  - Step终态使用`UPDATE ... WHERE step_id=? AND status=RUNNING RETURNING ...`。成功清空错误码，
+    失败保存机器错误码，两者同时写入输出摘要、结束时间和毫秒耗时；并发成功/失败只有一个胜出。
+  - 完成前读取`started_at`计算耗时。CAS失败后使用`populate_existing`强制刷新ORM identity map，
+    防止返回会话中缓存的旧RUNNING状态。
+  - 摘要只接受调用方构造的字符串，不自动序列化业务对象；合并空白、遮盖常见Bearer Token、
+    API Key、access token、password和secret值，超过1000字符截断。该策略是纵深防御，不等同
+    完整PII/DLP，未来Workflow仍必须基于字段白名单构造摘要。
+  - Repository和Service继续只flush不commit；上层拥有事务。父Run行锁只用于Step记录短事务，
+    后续不能跨Java HTTP、模型调用或人工等待长期持有。
+- 核心实现：
+  - `agent-service/app/services/step_lifecycle.py` — `StepLifecycleService.start_step`：校验ID、正序号、
+    Step类型和名称，规范化输入摘要，锁定RUNNING父Run并创建关联Step。
+  - 同文件 — `mark_succeeded/mark_failed/_finish`：区分成功和失败字段，计算耗时，以CAS抢占唯一
+    终态，并在冲突后读取数据库最新状态。
+  - 同文件 — `_normalize_summary`和`STEP_SUMMARY_MAX_LENGTH`：压缩空白、常见凭据遮盖、1000字符
+    截断；不记录或输出原始凭据。
+  - 同文件 — `StepNotFoundError`、`InvalidStepTransitionError`、`StepRunUnavailableError`、
+    `StepLifecycleValidationError`：区分Step缺失、状态冲突、父Run不可用和参数错误，暂不绑定HTTP。
+  - `agent-service/app/repositories/agent_runtime.py` — `AgentRunRepository.get_for_update`：锁定并刷新
+    父Run；`AgentStepRepository.get_fresh/transition_status`：刷新ORM缓存并原子更新Step终态。
+  - `agent-service/tests/test_agent_persistence.py` — 六个M2.3真实数据库用例，覆盖成功、失败、父Run
+    门禁、非法数据/流转、缺失Step、摘要保护、并发终态和父Run锁阻塞。
+  - `Makefile` — 新增`make test-step-lifecycle`，并把联合目标说明扩展为M2.1～M2.3。
+  - 必要的最小流程：
+
+    ```text
+    上层短事务
+    → 锁定RUNNING Run
+    → INSERT RUNNING Step + input_summary + started_at
+    → commit并释放父Run锁
+    → 实际执行CONTEXT/TOOL/RULE/LLM动作(未来Workflow)
+    → 新短事务以CAS写入SUCCEEDED/FAILED、output_summary和duration_ms
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：当前集成测试创建并启动父Run，再直接调用StepLifecycleService；未来Workflow
+    应在动作前后分别使用短事务调用start/finish，不能把网络或模型等待包进父Run锁事务。
+  - 核心类、函数、接口或配置项：`StepLifecycleService`三个公开方法、四类内部异常、摘要规则、
+    父Run锁查询、Step CAS更新、6个集成测试和`test-step-lifecycle`Make目标。
+  - 输入、输出、异常和边界：输入稳定Step/Run ID、正序号、`AgentStepType`、非空名称和可选摘要；
+    输出更新后的`AgentStep`。父Run不存在/非RUNNING、Step不存在/已终态、无时区或倒退时间、空
+    错误码和非法标识被明确拒绝；重复序号仍由数据库唯一约束在flush时拒绝。
+  - 关键代码位置在全部修改和文档追加后重新核对，并以最终回复中的绝对路径行号为准。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：本次不新增HTTP、权限或Java错误映射；未来Workflow应将Tool错误码
+    传给失败Step，但不能保存完整异常堆栈或原始响应。
+  - 幂等、并发或人工确认：重复终态被拒绝，成功/失败竞争由数据库CAS保护；父Run行锁保护开始
+    关联。这不是消息幂等、分布式锁或exactly-once，也没有Approval变化。
+- 开发中发现并修复：
+  - 测试先行首次执行因`InvalidStepTransitionError`等尚未从`app.services`导出产生1个预期收集
+    `ImportError`，完成Service和导出后消除。
+  - 任务开始的质量基线发现已提交M2.2讲解注释存在6个Ruff全角标点问题；保留用户增加的中文
+    解释含义，仅机械调整标点、空白和方法间距，未改变Run生命周期行为。
+  - M2.3首次质量检查在15个数据库用例通过后报告2个可修复的`__all__`和测试导入排序问题；按
+    isort顺序调整，最终Ruff和mypy strict通过。
+  - 最终组合验证第一次误在`agent-service/`目录执行`make quality`，该子目录没有此根级目标而
+    立即退出；返回仓库根目录重跑后通过。这是命令工作目录错误，不是代码或环境故障。
+- 未完成项与已知问题：
+  - 未完成项：M2.4 Workflow State/诊断Schema，以及Tool/Workflow自动Run/Step记录、Step序号自动
+    分配、Trace/retry_count、Run终态聚合检查、崩溃回收、SSE和前端步骤展示。
+  - 已知问题/阻塞：无阻塞。摘要正则不能覆盖所有凭据、个人信息和业务敏感字段；调试Run内存
+    上下文与持久化Run仍未关联；本地Java/Python数据库角色仍未隔离。
+- 替代方案：
+  - 采用的替代方案及原因：无临时业务替代方案。真实PostgreSQL用于验证行锁、CAS和ORM缓存刷新，
+    没有用内存Store或SQLite替代。现有字段足够覆盖T214～T220，因此没有制造空Alembic revision。
+  - 已覆盖/未覆盖的验收要求：覆盖Step开始/成功/失败、摘要、耗时、Run关联和自动化测试；未覆盖
+    Workflow接线、全量DLP、序号分配和恢复能力，均未包装为已完成。
+  - 局限、风险和转正/移除条件：普通Python全量在没有专用数据库变量时安全跳过13个集成用例；
+    CI和开发验收必须执行`make test-agent-persistence`或完整`make test`。摘要正则只能作为长期
+    纵深防御，不能替代后续字段白名单和合规策略。
+- 后续影响：
+  - 对后续任务/里程碑：M2.4可定义结构化Workflow State，M2.5接入节点时应在动作前后使用短事务
+    调用Step服务，并决定并发安全的序号分配；Run成功前应检查所有Step终态或由固定Workflow严格
+    保证完成顺序。
+  - 对接口/数据/测试/部署：无数据库Schema/Alembic、Java API、Tool Schema、固定数据或前端契约
+    变化；Agent镜像新增Step服务。未来公开查询/SSE前需设计响应Schema、权限和摘要展示规则。
+- 测试与验证：
+  - `[预期失败] make test-agent-persistence` — 首次收集阶段1个`ImportError`，目标Step服务尚不存在。
+  - `[通过] make test-step-lifecycle` — M2.3隔离PostgreSQL专项6/6，包含父Run行锁阻塞实证。
+  - `[通过] make test-agent-persistence` — M2.1～M2.3联合回归16/16。
+  - `[通过] agent-service内uv run --frozen pytest -q` — 180通过、14个数据库用例按环境门禁跳过；
+    同组用例已由专项真实执行。
+  - `[通过] make quality` — Ruff通过；mypy strict检查39个源/测试文件无问题。
+  - `[命令位置错误后通过] agent-service内make quality → 根目录make quality` — 第一次因子目录
+    不存在根级Make目标而退出，切回仓库根目录后通过。
+  - `[通过] docker compose up --detach --build agent-service + make smoke` — 最终Agent镜像和三服务
+    健康检查通过。
+  - `[通过] make test` — foundation/Compose、三服务smoke、Python M1分项、M2.1～M2.3专项、
+    Java 56/56、Web 7/7和Vue生产构建全部通过。
+  - `[通过] make validate + Markdown code fence检查 + sh -n + git diff --check` — 基础目录与Compose
+    配置、修改文档围栏、测试脚本语法和差异空白均通过。
+  - `[未运行] make reset-demo` — 本次不修改Java固定业务数据，且命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/services/step_lifecycle.py`、`app/services/__init__.py`
+  - `agent-service/app/repositories/agent_runtime.py`
+  - `agent-service/app/services/run_lifecycle.py`（只机械修复已提交讲解注释格式）
+  - `agent-service/tests/test_agent_persistence.py`
+  - `Makefile`
+  - `README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；摘要规则和自动接线等非阻塞边界见“未完成项与已知问题”。
+  - 后续兼容注意事项：摘要上限或脱敏规则变化需同步测试和展示契约；新增Step类型/状态需要新增
+    Alembic revision；不能跨网络调用持有父Run锁，也不能把历史Step摘要当最新Java业务事实。
+- Agent面试价值评估：
+  - 有价值，已更新`doc/needCare.md`。本次建立Agent步骤级执行证据，真实实现父Run一致性、Step
+    并发终态、ORM缓存刷新、耗时和摘要最小化，能够说明可观测性与数据安全的工程取舍。
+- 下一建议任务：
+  - `[T221-T226] M2.4 Workflow状态模型`。

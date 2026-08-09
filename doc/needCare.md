@@ -1258,8 +1258,8 @@ AgentSession
   服务控制，后续可以让 Run 状态与 Step 记录原子提交或整体回滚。
 - Session 删除会级联 Message、Run、Step，Run 删除会级联 Step；删除请求 Message 只将 Run
   外键置空，保留已经发生的执行记录。这是“清理从属数据”和“保留运行证据”之间的取舍。
-- Step 只预留输入/输出摘要，不默认保存完整 Prompt、Token、身份凭据或业务响应，避免可观测性
-  变成敏感数据复制渠道。摘要如何脱敏和截断仍需 M2.3 实现。
+- Step 只保存输入/输出摘要，不默认保存完整 Prompt、Token、身份凭据或业务响应，避免可观测性
+  变成敏感数据复制渠道。M2.3已实现最小凭据遮盖和截断，但完整字段白名单仍需Workflow负责。
 - 数据库专项使用随机端口、临时数据目录的隔离 PostgreSQL，真实验证 upgrade、schema drift、
   downgrade 和约束，避免测试误连本机或开发数据库。
 
@@ -1283,7 +1283,7 @@ Tool 获取。最终结果可以保存当次诊断快照，但必须明确它是
 **如何保证 Step 顺序在并发下可靠？**
 
 回答要点：每个 Run 的 `sequence_number` 有数据库唯一约束，Repository flush 时即可发现冲突。
-M2.3 还需要设计序号分配或并发控制；当前只证明数据库会拒绝重复序号，不能声称已完成并发分配。
+M2.3仍由调用方提供序号，只证明数据库会拒绝重复序号，不能声称已完成并发自动分配。
 
 ### 简历表述建议
 
@@ -1293,8 +1293,8 @@ M2.3 还需要设计序号分配或并发控制；当前只证明数据库会拒
 
 ### 不能过度声称
 
-- M2.2 已补充最小 Run 状态机；M2.3 自动 Step 记录仍未实现，不能声称 Workflow 已完整可观测
-  或可恢复。
+- M2.2～M2.3已补充最小Run/Step生命周期；它们尚未接入Workflow，不能声称Workflow已完整
+  可观测或可恢复。
 - Tool 调试 API、M1.7 内存账本与数据库 Run 仍未连接；服务重启后不能恢复 Tool 去重上下文。
 - 尚无 LangGraph、诊断 Workflow、SSE、评测面板、Trace-to-Step 自动关联或数据保留/归档策略。
 - 开发环境 Java 与 Python 仍共用数据库角色，代码边界已保持，但不是生产级数据库权限隔离。
@@ -1378,7 +1378,95 @@ create_run
 ### 不能过度声称
 
 - 生命周期尚未接入Tool调试API、确定性Workflow或HTTP入口，当前由服务集成测试直接调用。
-- M2.3 Step自动记录尚未实现，不能声称已经展示完整执行步骤、耗时或失败链路。
+- M2.3已实现可独立调用的Step记录服务，但尚未接入Workflow或前端，不能声称已经展示完整执行
+  步骤或失败链路。
 - `WAITING_APPROVAL`和`CANCELLED`只是M2.1预留枚举，M2.2没有实现暂停、恢复、取消或审批语义。
 - 没有Run级重试关联、超时回收、心跳、崩溃恢复、跨实例调度、SSE或生产保留/归档策略。
 - compare-and-set保证单次终态不互相覆盖，不代表整个Agent Workflow已经具备exactly-once语义。
+
+---
+
+## M2.3 Step执行证据、摘要最小化与父Run一致性
+
+### 面试价值判断
+
+核心关注。Run只能说明一次Agent请求最终成功或失败，无法回答“调用了哪些Tool、哪一步耗时、
+错误发生在哪里”。M2.3把CONTEXT、TOOL、RULE、LLM动作记录为可排序Step，并为开始、成功、失败、
+摘要和耗时建立一致状态契约，使后续Workflow可观测性有真实的持久化执行证据。
+
+### 与 Agent 开发的关系
+
+当前最小链路是：
+
+```text
+RUNNING Run
+→ start_step(type/name/sequence/input_summary)
+→ RUNNING Step + started_at
+├── mark_succeeded → SUCCEEDED + output_summary + duration_ms
+└── mark_failed    → FAILED + error_code + output_summary + duration_ms
+```
+
+Step记录的是“Agent如何处理事实”，不是业务事实本身。例如可以保存
+`order_id=ORDER-003, issues=1`，但不能把完整Java订单响应复制进摘要，更不能因为历史Step显示
+`ISSUE-001=OPEN`就断言当前仍然OPEN；最新状态仍需重新调用Java Tool。
+
+### 需要掌握的原理和设计取舍
+
+- 新Step只允许关联`RUNNING` Run。Service先对父Run执行`SELECT ... FOR UPDATE`并刷新ORM缓存，
+  使“Run结束”和“开始新Step”在数据库行锁上串行化，避免终态Run继续新增执行步骤。
+- `start_step`直接插入`RUNNING`而非先持久化一个瞬时PENDING，因为T214语义就是记录已经开始的
+  动作；模型仍保留PENDING给未来排队/调度场景，但当前没有调度器。
+- Step终态与Run一样使用带期望旧状态的原子UPDATE。并发成功/失败只有一个能从RUNNING抢占终态，
+  失败方通过强制刷新读取真实最新状态，避免SQLAlchemy身份缓存返回旧对象。
+- 耗时由带时区的`finished_at - started_at`计算并保存毫秒值，时钟可注入以保证测试确定性。
+  这是可持久化、可跨进程解释的墙上时钟耗时，不是适合纳秒性能基准的单进程单调时钟。
+- 摘要上限1000字符，先合并空白，再遮盖常见Bearer Token、API Key、access token、password和
+  secret写法，最后截断。它降低误存凭据和无限载荷风险，但不是完整DLP或PII识别。
+- 摘要API只接收调用方构造的字符串，不接收任意业务对象自动序列化。未来Workflow必须采用字段
+  白名单生成摘要，不能把完整Prompt、Java响应、用户原文或密钥传入后依赖正则“补救”。
+- Repository和Service不commit，保留上层事务所有权。父Run锁只适合包围短暂的Step记录写入，
+  不能在等待Java HTTP、模型或人工输入期间长期持有。
+- Step序号当前由调用方提供，数据库唯一约束是冲突防线而不是自动分配器；并发序号分配仍需在
+  Workflow接入时设计。
+
+### 可能的面试问题及回答要点
+
+**为什么有结构化日志还要持久化Step？**
+
+回答要点：日志面向排障和搜索，字段、留存及顺序不一定构成稳定业务契约；Step属于Run的结构化
+执行证据，可供前端进度、失败定位、SSE和评测查询。两者互补，Step也必须坚持摘要最小化。
+
+**为什么开始Step时要锁父Run？**
+
+回答要点：只先查询`run.status`会存在检查后使用竞争：查询时RUNNING，插入前Run已结束。行锁使
+开始Step和Run终态更新串行化；锁应在短事务内释放，实际Tool网络调用不能放在该锁事务中。
+
+**摘要做了正则脱敏，是否可以直接传完整Tool响应？**
+
+回答要点：不可以。正则只能覆盖已知格式，无法可靠识别个人信息、业务敏感字段和嵌套凭据。
+正确做法是调用方白名单选择少量排障字段，遮盖/截断只是纵深防御。
+
+**为什么并发结束Step后还要强制刷新？**
+
+回答要点：SQLAlchemy Session有identity map，先加载的RUNNING对象可能仍在内存。CAS更新失败后若
+普通get命中缓存，可能错误报告当前仍RUNNING；`populate_existing`强制用数据库行覆盖缓存，才能
+返回真实胜出终态。
+
+**duration_ms为什么不直接用perf_counter？**
+
+回答要点：`perf_counter`适合同一进程内部测量，但不能持久化后跨进程恢复。当前用带时区起止时间
+计算可审计耗时；精细性能指标未来可在日志/指标系统并行使用单调时钟。
+
+### 简历表述建议
+
+> 实现Agent Step执行记录与并发安全生命周期，按CONTEXT/TOOL/RULE/LLM保存受控摘要、错误码和
+> 毫秒耗时；通过父Run行锁、终态条件更新和ORM缓存刷新保证并发一致性，并以字段最小化、常见
+> 凭据遮盖和长度上限降低可观测数据泄露风险。
+
+### 不能过度声称
+
+- 当前Service由集成测试直接调用，尚未接入Tool、确定性Workflow、LangGraph、SSE或前端展示。
+- 摘要遮盖不是完整DLP、PII检测或合规审计，不能声称任意敏感数据都不会落库。
+- Step序号没有自动分配、重排或重试语义；`retry_count`、Trace ID和Tool调用指纹也尚未持久化。
+- 当前没有保证Run进入终态前所有Step都已终态，也没有崩溃后RUNNING Step回收或恢复机制。
+- 父Run行锁和Step CAS只解决局部数据库竞争，不代表完整Workflow具备exactly-once或分布式锁。

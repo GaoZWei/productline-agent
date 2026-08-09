@@ -12,6 +12,7 @@ from app.repositories import AgentRunRepository
 class RunLifecycleError(Exception):
     """Run 生命周期内部错误基类, 暂不绑定 HTTP 或 Tool 错误协议。"""
 
+
 # run_id不存在错误
 class RunNotFoundError(RunLifecycleError):
     """目标 Run 不存在。"""
@@ -66,6 +67,7 @@ class RunLifecycleService:
     ) -> None:
         self._repository = repository  # 负责数据库访问
         self._now = now  # 负责取得当前时间
+
     # 创建Run
     async def create_run(
         self,
@@ -75,7 +77,7 @@ class RunLifecycleService:
         request_message_id: str | None = None,
     ) -> AgentRun:
         """创建初始 PENDING Run, 父 Session 和可选 Message 必须已经存在。"""
-        # 第一步：校验ID是否有效
+        # 第一步: 校验ID是否有效
         normalized_run_id = self._require_identifier(run_id, "run_id", 128)
         normalized_session_id = self._require_identifier(session_id, "session_id", 128)
         normalized_message_id = (
@@ -83,7 +85,7 @@ class RunLifecycleService:
             if request_message_id is not None
             else None
         )
-        # 第二步：构造ORM对象 
+        # 第二步: 构造ORM对象
         return await self._repository.create(
             AgentRun(
                 run_id=normalized_run_id,
@@ -92,10 +94,11 @@ class RunLifecycleService:
                 status=AgentRunStatus.PENDING,  # 初始状态为PENDING
             )
         )
+
     # 标记为RUNNING
     async def mark_running(self, run_id: str) -> AgentRun:
         """仅允许 PENDING Run 开始执行并记录 started_at。"""
-        # 只有当前状态是PENDING，才能进入RUNNING
+        # 只有当前状态是PENDING, 才能进入RUNNING
         return await self._transition(
             run_id,
             expected_status=AgentRunStatus.PENDING,
@@ -108,6 +111,7 @@ class RunLifecycleService:
                 "error_step": None,
             },
         )
+
     # 标记为SUCCEEDED
     async def mark_succeeded(self, run_id: str, *, final_result: dict[str, Any]) -> AgentRun:
         """仅允许 RUNNING Run 成功结束并保存本次执行结果快照。"""
@@ -123,6 +127,7 @@ class RunLifecycleService:
                 "error_step": None,
             },
         )
+
     # 标记为FAILED
     async def mark_failed(
         self,
@@ -146,7 +151,8 @@ class RunLifecycleService:
                 "error_step": normalized_error_step,
             },
         )
-    # 公共状态转换逻辑（三个状态操作）
+
+    # 公共状态转换逻辑(三个状态操作)
     async def _transition(
         self,
         run_id: str,
@@ -203,13 +209,13 @@ class RunLifecycleService:
                 message=f"must contain at most {max_length} characters",
             )
         return normalized
-    
+
     # 校验JSON结果是否有效
     @staticmethod
     def _json_snapshot(value: dict[str, Any]) -> dict[str, Any]:
         """验证并复制标准 JSON 结果, 避免延迟到 commit 才发现不可序列化数据。"""
 
-        try:  # 验证JSON数据是不是标准JSON。创建结果副本，避免修改原始数据。
+        try:  # 验证JSON数据是不是标准JSON。创建结果副本, 避免修改原始数据。
             serialized = json.dumps(value, ensure_ascii=False, allow_nan=False)
             return cast(dict[str, Any], json.loads(serialized))
         except (TypeError, ValueError) as exception:

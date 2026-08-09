@@ -649,3 +649,34 @@
 - 已知非阻塞问题：生命周期尚未接入Tool、调试API或Workflow；Step不会自动记录；
   `WAITING_APPROVAL`和`CANCELLED`只有数据枚举，没有状态操作；结果快照尚无大小/保留策略
 - 下一建议任务：T214～T220实现M2.3最小Step记录、摘要、错误和耗时
+
+## M2.3 最小 Step 记录
+
+- 验证时间：2026-08-09
+- 测试先行基线：增加M2.3集成测试后首次执行`make test-agent-persistence`，在收集阶段产生1个
+  预期`ImportError`，目标`InvalidStepTransitionError`等Step生命周期导出尚不存在
+- `make test-step-lifecycle`：6/6
+  - RUNNING父Run自动关联Step，成功保存受控输入输出摘要、起止时间和1250毫秒耗时：通过
+  - 失败Step保存机器错误码、输出摘要和750毫秒耗时：通过
+  - PENDING/不存在父Run、非法序号、空名称、空错误码、重复终态和未知Step均被拒绝：通过
+  - 常见Bearer Token/API Key值替换为`[REDACTED]`，摘要截断为1000字符：通过
+  - 两个事务并发争抢Step成功/失败终态时恰好一个生效，最终字段与状态一致：通过
+  - 开始Step持有父Run行锁时，并发Run终态UPDATE触发100毫秒lock timeout；Step事务提交后Run可
+    正常结束：通过
+- `make test-agent-persistence`：16/16，M2.1模型/迁移、M2.2 Run和M2.3 Step生命周期联合通过
+- Python全量：180通过、14跳过；跳过项是需要专用PostgreSQL环境变量的同组数据库集成用例，
+  已由隔离数据库专项真实执行
+- `make quality`：Ruff全部通过；mypy strict检查39个源/测试文件无问题
+- `docker compose up --detach --build agent-service`和`make smoke`：通过；最终代码已进入Agent镜像，
+  Agent、Business、Web三服务健康检查通过
+- `make test`：通过；基础/Compose、三服务smoke、Python M1分项、M2.1～M2.3隔离数据库专项、
+  Java 56/56、Web 7/7及Vue生产构建全部通过
+- `make validate`、Markdown code fence检查、`sh -n scripts/test-agent-persistence.sh`和
+  `git diff --check`：通过
+- 开发中发现并修复：任务开始时`make quality`发现已提交M2.2讲解注释有6个全角标点问题；保留
+  说明含义并机械调整。M2.3首次质量检查另发现2个导出/导入排序问题，排序后通过
+- 最终失败：0
+- 未运行：`make reset-demo`；本次不修改Java固定数据，且该命令会删除本地持久卷
+- 已知非阻塞问题：Step尚未由Tool/Workflow自动创建；序号由调用方提供；摘要凭据遮盖不是完整
+  PII/DLP；没有Run终态聚合检查、崩溃后RUNNING Step回收、Trace/retry_count持久化或前端展示
+- 下一建议任务：T221～T226实现M2.4 Workflow State和结构化诊断Schema

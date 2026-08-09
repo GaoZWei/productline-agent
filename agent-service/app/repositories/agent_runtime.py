@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AgentRun, AgentRunStatus, AgentStep
+from app.models import AgentRun, AgentRunStatus, AgentStep, AgentStepStatus
 
 
 class AgentRunRepository:
@@ -26,6 +26,17 @@ class AgentRunRepository:
         """按稳定 run_id 查询, 未找到时返回 None。"""
 
         return await self._session.get(AgentRun, run_id)
+
+    async def get_for_update(self, run_id: str) -> AgentRun | None:
+        """锁定并刷新目标 Run, 供关联 Step 前校验当前执行状态。"""
+
+        statement = (
+            select(AgentRun)
+            .where(AgentRun.run_id == run_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def list_by_session(self, session_id: str) -> list[AgentRun]:
         """按创建时间和 run_id 返回会话内稳定排序的 Run。"""
@@ -100,6 +111,16 @@ class AgentStepRepository:
 
         return await self._session.get(AgentStep, step_id)
 
+    async def get_fresh(self, step_id: str) -> AgentStep | None:
+        """绕过会话中的旧状态缓存, 返回数据库当前 Step。"""
+
+        statement = (
+            select(AgentStep)
+            .where(AgentStep.step_id == step_id)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def list_by_run(self, run_id: str) -> list[AgentStep]:
         """按 sequence_number 返回 Run 内确定顺序的 Step。"""
 
@@ -109,6 +130,38 @@ class AgentStepRepository:
             .order_by(AgentStep.sequence_number, AgentStep.step_id)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def transition_status(
+        self,
+        step_id: str,
+        *,
+        expected_status: AgentStepStatus,
+        target_status: AgentStepStatus,
+        changes: Mapping[str, Any],
+    ) -> AgentStep | None:
+        """仅在当前状态符合预期时原子更新 Step终态。"""
+
+        allowed_changes = {
+            "finished_at",
+            "output_summary",
+            "error_code",
+            "duration_ms",
+        }
+        unexpected_changes = set(changes) - allowed_changes
+        if unexpected_changes:
+            unexpected_names = ", ".join(sorted(unexpected_changes))
+            raise ValueError(f"unsupported step transition fields: {unexpected_names}")
+        values: dict[str, Any] = {"status": target_status, **changes}
+        statement = (
+            update(AgentStep)
+            .where(
+                AgentStep.step_id == step_id,
+                AgentStep.status == expected_status,
+            )
+            .values(values)
+            .returning(AgentStep)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def delete(self, step_id: str) -> bool:
         """删除存在的 Step; 不存在时保持幂等并返回 False。"""

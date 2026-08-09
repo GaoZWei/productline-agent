@@ -9,9 +9,9 @@ from uuid import uuid4
 import asyncpg  # type: ignore[import-untyped]
 import pytest
 import pytest_asyncio
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.database import Base, Database
 from app.models import (
@@ -27,9 +27,14 @@ from app.models import (
 from app.repositories import AgentRunRepository, AgentStepRepository
 from app.services import (
     InvalidRunTransitionError,
+    InvalidStepTransitionError,
     RunLifecycleService,
     RunLifecycleValidationError,
     RunNotFoundError,
+    StepLifecycleService,
+    StepLifecycleValidationError,
+    StepNotFoundError,
+    StepRunUnavailableError,
 )
 from app.settings import Settings
 
@@ -492,4 +497,363 @@ async def test_run_lifecycle_allows_only_one_concurrent_terminal_transition(
                 assert stored.error_code == "TOOL_TIMEOUT"
                 assert stored.error_step == "get_order_detail"
     finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_step_lifecycle_persists_success_summaries_and_duration(
+    migrated_database_url: str,
+) -> None:
+    started_at = datetime(2026, 8, 9, 4, 0, tzinfo=UTC)
+    finished_at = datetime(2026, 8, 9, 4, 0, 1, 250000, tzinfo=UTC)
+    clock_values = iter([started_at, finished_at])
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            async with session.begin():
+                session.add(AgentSession(session_id="session-step-success", user_id="user-001"))
+                run_service = RunLifecycleService(AgentRunRepository(session))
+                await run_service.create_run(
+                    run_id="run-step-success",
+                    session_id="session-step-success",
+                )
+                await run_service.mark_running("run-step-success")
+                step_service = StepLifecycleService(
+                    AgentStepRepository(session),
+                    AgentRunRepository(session),
+                    now=lambda: next(clock_values),
+                )
+
+                started = await step_service.start_step(
+                    step_id="step-success",
+                    run_id="run-step-success",
+                    sequence_number=1,
+                    step_type=AgentStepType.TOOL,
+                    step_name="get_quality_issues",
+                    input_summary=(
+                        " order_id=ORDER-003\nAuthorization: Bearer top-secret-token "
+                    ),
+                )
+                assert started.status is AgentStepStatus.RUNNING
+                assert started.run_id == "run-step-success"
+                assert started.started_at == started_at
+                assert started.input_summary == (
+                    "order_id=ORDER-003 Authorization: Bearer [REDACTED]"
+                )
+
+                succeeded = await step_service.mark_succeeded(
+                    "step-success",
+                    output_summary="api_key=private-key " + "x" * 1200,
+                )
+                assert succeeded.status is AgentStepStatus.SUCCEEDED
+                assert succeeded.finished_at == finished_at
+                assert succeeded.duration_ms == 1250
+                assert succeeded.error_code is None
+                assert succeeded.output_summary is not None
+                assert "private-key" not in succeeded.output_summary
+                assert "[REDACTED]" in succeeded.output_summary
+                assert len(succeeded.output_summary) == 1000
+                assert succeeded.output_summary.endswith("...")
+
+        async with database.session() as verification_session:
+            stored = await AgentStepRepository(verification_session).get("step-success")
+            assert stored is not None
+            assert stored.status is AgentStepStatus.SUCCEEDED
+            assert stored.run_id == "run-step-success"
+            assert stored.duration_ms == 1250
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_step_lifecycle_persists_failure_details(migrated_database_url: str) -> None:
+    started_at = datetime(2026, 8, 9, 5, 0, tzinfo=UTC)
+    finished_at = datetime(2026, 8, 9, 5, 0, 0, 750000, tzinfo=UTC)
+    clock_values = iter([started_at, finished_at])
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            async with session.begin():
+                session.add(AgentSession(session_id="session-step-failed", user_id="user-001"))
+                run_service = RunLifecycleService(AgentRunRepository(session))
+                await run_service.create_run(
+                    run_id="run-step-failed",
+                    session_id="session-step-failed",
+                )
+                await run_service.mark_running("run-step-failed")
+                step_service = StepLifecycleService(
+                    AgentStepRepository(session),
+                    AgentRunRepository(session),
+                    now=lambda: next(clock_values),
+                )
+                await step_service.start_step(
+                    step_id="step-failed",
+                    run_id="run-step-failed",
+                    sequence_number=1,
+                    step_type=AgentStepType.TOOL,
+                    step_name="get_order_detail",
+                    input_summary="order_id=ORDER-003",
+                )
+                failed = await step_service.mark_failed(
+                    "step-failed",
+                    error_code="TOOL_TIMEOUT",
+                    output_summary="Java业务服务请求超时",
+                )
+
+                assert failed.status is AgentStepStatus.FAILED
+                assert failed.finished_at == finished_at
+                assert failed.duration_ms == 750
+                assert failed.error_code == "TOOL_TIMEOUT"
+                assert failed.output_summary == "Java业务服务请求超时"
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_step_lifecycle_rejects_unavailable_run_invalid_data_and_transitions(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            async with session.begin():
+                session.add(AgentSession(session_id="session-step-invalid", user_id="user-001"))
+                run_repository = AgentRunRepository(session)
+                run_service = RunLifecycleService(run_repository)
+                await run_service.create_run(
+                    run_id="run-step-invalid",
+                    session_id="session-step-invalid",
+                )
+                step_service = StepLifecycleService(
+                    AgentStepRepository(session),
+                    run_repository,
+                    now=lambda: datetime(2026, 8, 9, 6, 0, tzinfo=UTC),
+                )
+
+                with pytest.raises(StepRunUnavailableError) as pending_run:
+                    await step_service.start_step(
+                        step_id="step-pending-run",
+                        run_id="run-step-invalid",
+                        sequence_number=1,
+                        step_type=AgentStepType.CONTEXT,
+                        step_name="load_context",
+                    )
+                assert pending_run.value.current_status is AgentRunStatus.PENDING
+                with pytest.raises(StepRunUnavailableError) as missing_run:
+                    await step_service.start_step(
+                        step_id="step-missing-run",
+                        run_id="run-missing",
+                        sequence_number=1,
+                        step_type=AgentStepType.CONTEXT,
+                        step_name="load_context",
+                    )
+                assert missing_run.value.current_status is None
+
+                await run_service.mark_running("run-step-invalid")
+                with pytest.raises(StepLifecycleValidationError) as invalid_sequence:
+                    await step_service.start_step(
+                        step_id="step-invalid-sequence",
+                        run_id="run-step-invalid",
+                        sequence_number=0,
+                        step_type=AgentStepType.CONTEXT,
+                        step_name="load_context",
+                    )
+                assert invalid_sequence.value.field_name == "sequence_number"
+                with pytest.raises(StepLifecycleValidationError) as invalid_name:
+                    await step_service.start_step(
+                        step_id="step-invalid-name",
+                        run_id="run-step-invalid",
+                        sequence_number=1,
+                        step_type=AgentStepType.CONTEXT,
+                        step_name=" ",
+                    )
+                assert invalid_name.value.field_name == "step_name"
+
+                await step_service.start_step(
+                    step_id="step-invalid",
+                    run_id="run-step-invalid",
+                    sequence_number=1,
+                    step_type=AgentStepType.CONTEXT,
+                    step_name="load_context",
+                )
+                with pytest.raises(StepLifecycleValidationError) as invalid_error:
+                    await step_service.mark_failed("step-invalid", error_code=" ")
+                assert invalid_error.value.field_name == "error_code"
+                await step_service.mark_succeeded("step-invalid", output_summary="上下文已加载")
+                with pytest.raises(InvalidStepTransitionError) as terminal_retry:
+                    await step_service.mark_failed(
+                        "step-invalid",
+                        error_code="CONTEXT_FAILED",
+                    )
+                assert terminal_retry.value.current_status is AgentStepStatus.SUCCEEDED
+                assert terminal_retry.value.target_status is AgentStepStatus.FAILED
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_step_lifecycle_reports_missing_step(migrated_database_url: str) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            service = StepLifecycleService(
+                AgentStepRepository(session),
+                AgentRunRepository(session),
+            )
+            with pytest.raises(StepNotFoundError) as missing:
+                await service.mark_succeeded("step-missing")
+            assert missing.value.step_id == "step-missing"
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_step_lifecycle_allows_only_one_concurrent_terminal_transition(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as setup_session:
+            async with setup_session.begin():
+                setup_session.add(AgentSession(session_id="session-step-race", user_id="user-001"))
+                run_repository = AgentRunRepository(setup_session)
+                run_service = RunLifecycleService(run_repository)
+                await run_service.create_run(
+                    run_id="run-step-race",
+                    session_id="session-step-race",
+                )
+                await run_service.mark_running("run-step-race")
+                step_service = StepLifecycleService(
+                    AgentStepRepository(setup_session),
+                    run_repository,
+                    now=lambda: datetime(2026, 8, 9, 7, 0, tzinfo=UTC),
+                )
+                await step_service.start_step(
+                    step_id="step-race",
+                    run_id="run-step-race",
+                    sequence_number=1,
+                    step_type=AgentStepType.RULE,
+                    step_name="diagnose_blocker",
+                )
+
+        async def mark_succeeded() -> str:
+            async with database.session() as session:
+                async with session.begin():
+                    service = StepLifecycleService(
+                        AgentStepRepository(session),
+                        AgentRunRepository(session),
+                        now=lambda: datetime(2026, 8, 9, 7, 0, 1, tzinfo=UTC),
+                    )
+                    try:
+                        await service.mark_succeeded("step-race", output_summary="规则命中")
+                    except InvalidStepTransitionError:
+                        return "rejected"
+                    return "succeeded"
+
+        async def mark_failed() -> str:
+            async with database.session() as session:
+                async with session.begin():
+                    service = StepLifecycleService(
+                        AgentStepRepository(session),
+                        AgentRunRepository(session),
+                        now=lambda: datetime(2026, 8, 9, 7, 0, 1, tzinfo=UTC),
+                    )
+                    try:
+                        await service.mark_failed(
+                            "step-race",
+                            error_code="RULE_FAILED",
+                        )
+                    except InvalidStepTransitionError:
+                        return "rejected"
+                    return "failed"
+
+        outcomes = await asyncio.gather(mark_succeeded(), mark_failed())
+        assert sorted(outcomes) in (["rejected", "succeeded"], ["failed", "rejected"])
+
+        async with database.session() as verification_session:
+            stored = await AgentStepRepository(verification_session).get("step-race")
+            assert stored is not None
+            assert stored.duration_ms == 1000
+            if stored.status is AgentStepStatus.SUCCEEDED:
+                assert stored.output_summary == "规则命中"
+                assert stored.error_code is None
+            else:
+                assert stored.status is AgentStepStatus.FAILED
+                assert stored.error_code == "RULE_FAILED"
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_step_lifecycle_serializes_step_start_with_parent_run_terminal_update(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    lock_held = asyncio.Event()
+    release_lock = asyncio.Event()
+    try:
+        async with database.session() as setup_session:
+            async with setup_session.begin():
+                setup_session.add(
+                    AgentSession(session_id="session-step-parent-lock", user_id="user-001")
+                )
+                run_service = RunLifecycleService(AgentRunRepository(setup_session))
+                await run_service.create_run(
+                    run_id="run-step-parent-lock",
+                    session_id="session-step-parent-lock",
+                )
+                await run_service.mark_running("run-step-parent-lock")
+
+        async def start_step_and_hold_parent_lock() -> None:
+            async with database.session() as session:
+                async with session.begin():
+                    service = StepLifecycleService(
+                        AgentStepRepository(session),
+                        AgentRunRepository(session),
+                    )
+                    await service.start_step(
+                        step_id="step-parent-lock",
+                        run_id="run-step-parent-lock",
+                        sequence_number=1,
+                        step_type=AgentStepType.CONTEXT,
+                        step_name="load_context",
+                    )
+                    lock_held.set()
+                    await release_lock.wait()
+
+        start_task = asyncio.create_task(start_step_and_hold_parent_lock())
+        await lock_held.wait()
+        try:
+            with pytest.raises(DBAPIError):
+                async with database.session() as blocked_session:
+                    async with blocked_session.begin():
+                        await blocked_session.execute(text("SET LOCAL lock_timeout = '100ms'"))
+                        run_service = RunLifecycleService(AgentRunRepository(blocked_session))
+                        await run_service.mark_succeeded(
+                            "run-step-parent-lock",
+                            final_result={"result": "premature"},
+                        )
+        finally:
+            release_lock.set()
+            await start_task
+
+        async with database.session() as finish_session:
+            async with finish_session.begin():
+                run_service = RunLifecycleService(AgentRunRepository(finish_session))
+                finished = await run_service.mark_succeeded(
+                    "run-step-parent-lock",
+                    final_result={"result": "after-step-start-commit"},
+                )
+                assert finished.status is AgentRunStatus.SUCCEEDED
+                stored_step = await AgentStepRepository(finish_session).get("step-parent-lock")
+                assert stored_step is not None
+                assert stored_step.run_id == "run-step-parent-lock"
+    finally:
+        release_lock.set()
         await database.dispose()

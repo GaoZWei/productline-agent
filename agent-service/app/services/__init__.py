@@ -7,11 +7,25 @@ from app.services.run_lifecycle import (
     RunLifecycleValidationError,
     RunNotFoundError,
 )
+from app.services.step_lifecycle import (
+    InvalidStepTransitionError,
+    StepLifecycleError,
+    StepLifecycleService,
+    StepLifecycleValidationError,
+    StepNotFoundError,
+    StepRunUnavailableError,
+)
 
 __all__ = [
     "InvalidRunTransitionError",
+    "InvalidStepTransitionError",
     "RunLifecycleError",
     "RunLifecycleService",
     "RunLifecycleValidationError",
     "RunNotFoundError",
+    "StepLifecycleError",
+    "StepLifecycleService",
+    "StepLifecycleValidationError",
+    "StepNotFoundError",
+    "StepRunUnavailableError",
 ]
