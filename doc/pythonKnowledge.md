@@ -2,14 +2,15 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M1.8 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M2.1 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
 当前 `agent-service` 是一个独立的 Python 后端服务，主要承担未来的 Tool 封装、Workflow、
 Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
 最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
-只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测，尚未实现 Workflow 或大模型调用。
+只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测。M2.1 已增加 Session、Message、Run、
+Step 持久化基础，尚未实现 Workflow 或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -65,6 +66,10 @@ agent-service/
 │   ├── settings.py                 # 环境变量与配置校验
 │   ├── database.py                 # 异步 Engine、Session 和 ORM 元数据根
 │   ├── observability.py            # JSON 日志和 Trace ID 中间件
+│   ├── models/
+│   │   └── agent_runtime.py         # Session、Message、Run、Step ORM 模型
+│   ├── repositories/
+│   │   └── agent_runtime.py         # Run、Step 异步增删查
 │   ├── clients/
 │   │   └── business.py             # 调用 Java 的异步 HTTP Client
 │   └── schemas/
@@ -74,14 +79,15 @@ agent-service/
 │   ├── env.py                      # 加载配置、Base.metadata 和异步连接
 │   ├── script.py.mako              # 生成迁移文件时使用的模板
 │   └── versions/
-│       └── .gitkeep                # 保留当前为空的迁移目录
+│       └── 0001_agent_runtime_base.py # 创建四张 Agent 自有表
 │
 └── tests/                          # 测试代码，类似 src/test/java 或 *.spec.ts
     ├── test_health.py
     ├── test_database.py
     ├── test_observability.py
     ├── test_alembic.py
-    └── test_business_client.py
+    ├── test_business_client.py
+    └── test_agent_persistence.py   # 隔离 PostgreSQL 迁移与 Repository 测试
 ```
 
 本地运行后还会看到以下生成目录：
@@ -139,6 +145,7 @@ dependencies = [
   "alembic>=1.16,<2.0",
   "asyncpg>=0.30,<1.0",
   "fastapi>=0.116,<1.0",
+  "httpx>=0.28,<1.0",
   "pydantic>=2.11,<3.0",
   "pydantic-settings>=2.10,<3.0",
   "sqlalchemy[asyncio]>=2.0.41,<3.0",
@@ -153,7 +160,6 @@ dependencies = [
 ```toml
 [dependency-groups]
 dev = [
-  "httpx>=0.28,<1.0",
   "mypy>=1.16,<2.0",
   "pytest>=8.4,<10.0",
   "pytest-asyncio>=1.0,<2.0",
@@ -442,7 +448,7 @@ EntityManagerFactory 和 JPA 基础配置，也类似 Node 的 PrismaClient/Type
 class Base(DeclarativeBase):
 ```
 
-它是未来所有 Agent 自有 SQLAlchemy Model 的共同元数据根。例如未来可以定义：
+它是所有 Agent 自有 SQLAlchemy Model 的共同元数据根。M2.1 已定义：
 
 ```python
 class AgentRun(Base):
@@ -457,7 +463,8 @@ class AgentRun(Base):
 public class AgentRun { ... }
 ```
 
-当前没有任何 Model 继承 `Base`，因此还没有 Run、Step、Approval 或 RAG 业务表。
+当前 `AgentSession`、`AgentMessage`、`AgentRun` 和 `AgentStep` 继承 `Base`。Approval 和 RAG
+表仍未实现。
 
 不得定义 `ProductionOrder(Base)` 去映射 Java 业务表。业务事实必须通过 Java API Tool 获取。
 
@@ -499,7 +506,7 @@ self.session_factory = async_sessionmaker(
 
 它类似 Java 的 EntityManagerFactory，不代表某一次数据库操作。
 
-未来使用方式：
+当前 Repository 的使用方式：
 
 ```python
 async with database.session() as session:
@@ -517,8 +524,50 @@ async with database.session() as session:
 - Alembic 使用独立版本表；
 - 业务事实只允许通过 Java API 获取；
 
-保持代码边界，但这不是生产级权限隔离。开始持久化 Run/Step 或进入生产前，应为 Agent
-配置独立数据库、Schema 或最小权限角色。
+保持代码边界，但这不是生产级权限隔离。M2.1 已开始持久化 Run/Step，开发环境仍沿用共享
+角色属于已知限制；进入生产前必须为 Agent 配置独立数据库、Schema 或最小权限角色。
+
+### 5.4 M2.1 的 Model 与 Repository
+
+[`agent-service/app/models/agent_runtime.py`](../agent-service/app/models/agent_runtime.py) 类似一组
+JPA `@Entity` 或 TypeORM Entity，定义四层关系：
+
+```text
+AgentSession
+├── AgentMessage（用户或助手消息）
+└── AgentRun（一次用户请求的执行）
+    └── AgentStep（一次可定位的执行步骤）
+```
+
+- `AgentSession` 保存 `session_id`、用户归属和时间，不保存 Java 订单事实；
+- `AgentMessage` 用 `(session_id, sequence_number)` 唯一约束保证对话顺序；
+- `AgentRun` 关联可选的请求消息，预留状态、最终结果、错误码、错误步骤和起止时间；
+- `AgentStep` 用 `(run_id, sequence_number)` 唯一约束保证执行顺序，保存类型、状态、受控摘要和
+  耗时。
+
+Run 状态是 `PENDING/RUNNING/SUCCEEDED/FAILED/WAITING_APPROVAL/CANCELLED`，Step 类型是
+`CONTEXT/TOOL/RULE/LLM`。代码使用 Python `StrEnum` 表达类型，并在数据库使用 VARCHAR 加
+Check Constraint，而不是 PostgreSQL 私有 enum。这样 Python 仍有明确类型，后续增加状态时也
+能通过普通 Alembic 约束迁移演进。
+
+[`agent-service/app/repositories/agent_runtime.py`](../agent-service/app/repositories/agent_runtime.py)
+类似 Spring Data Repository 或 TypeORM Repository，只封装 Run/Step 的增、删、查：
+
+```python
+async with database.session() as session:
+    async with session.begin():
+        repository = AgentRunRepository(session)
+        await repository.create(run)
+```
+
+`create` 和 `delete` 会执行 `flush`，让重复序号、外键等错误在当前事务内尽早出现；它们不调用
+`commit`。原因是后续生命周期服务需要把一次 Run 和若干 Step 放进同一个事务，由上层决定整体
+提交或回滚。它类似 Java 中 Repository 参与外层 `@Transactional`，不应让每个 DAO 方法自己
+提交。
+
+数据库删除 Session 时级联 Message、Run、Step；删除 Run 时级联 Step。删除一条请求 Message
+则把 Run 的 `request_message_id` 置空而不是删除 Run，用于保留已经发生的执行证据。当前只实现
+数据结构和 Repository，M2.2 才会实现合法状态流转，M2.3 才会在执行期间自动记录 Step。
 
 ## 6. Trace ID 与结构化日志
 
@@ -804,8 +853,9 @@ ToolException              → 保留标准 code/retryable/Trace/HTTP 状态
 `risk_level`、`required_permissions`、`timeout` 和 `max_retries` 都是 Tool 元数据。M1.4 当时
 只有权限和整体超时生效；M1.6 增加了可选 `RetryPolicy`，并要求策略次数与 Tool 元数据一致。
 仅设置 `max_retries` 不会自动重放，具体 Tool 必须显式绑定策略。这一门禁让未来写 Tool 默认
-保持不重试。`ToolContext.run_id` 当前用于调用关联、日志字段和 M1.7 进程内账本归属；账本由
-上下文私有持有，不代表已经实现 Run/Step 数据表、持久化或跨实例共享。
+保持不重试。`ToolContext.run_id` 当前用于调用关联、日志字段和 M1.7 进程内账本归属。M2.1
+虽已建立 Run/Step 数据表，但这份账本仍由上下文私有持有，Tool 调试链尚未写表，也不能跨实例
+共享。
 
 `ToolRegistry.register` 遇到相同名称会抛 `DuplicateToolRegistrationError`，这是启动/装配错误；
 它不是一次 Run 中相同参数被重复调用，因此不能使用 `DUPLICATE_CALL`。后者由 M1.7 的调用
@@ -925,8 +975,9 @@ timeout 同时满足白名单与 `retryable=true`，才会重试一次。
 `TOOL_TIMEOUT`，防止指数退避把一次 Tool 调用无限拖长。
 
 每次安排重试会输出 `tool_retry_scheduled` 结构化日志，记录 `tool_name`、`run_id`、`trace_id`、
-`error_code`、`retry_number` 和 `retry_delay_ms`。它能回答“哪个 Tool 因为什么重试了第几次”，
-但当前还没有 Run/Step 持久化、随机抖动、熔断或跨实例重试预算。
+`error_code`、`retry_number` 和 `retry_delay_ms`。它能回答“哪个 Tool 因为什么重试了第几次”。
+M2.1 已有 Run/Step 持久化结构，但当前重试事件尚未写入 Step；也没有随机抖动、熔断或跨实例
+重试预算。
 
 ### 7.10 M1.7 如何识别重复 Tool 调用
 
@@ -1034,7 +1085,8 @@ Tool 本身返回的参数、权限、Java、timeout 或响应错误使用 HTTP 
 为了让两次 HTTP 请求仍能验证 M1.7，`ToolDebugRunContextStore` 在应用内复用最近128个 Run 的
 `ToolContext`。第二个请求会换成当前 Trace ID，但浅复制保留原上下文的私有调用账本。存储使用
 有界 LRU：超过128个时淘汰最久未使用的 Run，避免开发进程无限增长。它只是调试辅助状态，服务
-重启、多 worker、多实例或被淘汰后不会恢复，不能替代后续 Run/Step 持久化。
+重启、多 worker、多实例或被淘汰后不会恢复。M2.1 已有正式 Run/Step 表，但调试 API 尚未接入，
+因此这个内存 Store 仍不能替代持久化生命周期。
 
 路由在 `create_app` 构建阶段按 `Settings.environment == "development"` 条件注册。因此非开发
 环境不仅调用得到404，生成的 OpenAPI 中也没有该路径。这比在处理函数内部返回403更彻底，
@@ -1149,6 +1201,7 @@ agent-service/
     ├── env.py
     ├── script.py.mako
     └── versions/
+        └── 0001_agent_runtime_base.py
 ```
 
 - `alembic.ini`：指定迁移目录和 Python import 路径；
@@ -1159,11 +1212,12 @@ agent-service/
 ### 9.2 `target_metadata`
 
 ```python
-target_metadata = Base.metadata
+target_metadata = AgentSession.metadata
 ```
 
-未来 Alembic 可以比较 SQLAlchemy Model 与数据库结构，并生成迁移差异。当前 `Base` 下还
-没有 Agent Model，因此没有 Run/Step 等业务 revision。
+导入 `AgentSession` 会加载 `app.models` 包中的四个映射类；它们共享同一份 `Base.metadata`。
+因此 Alembic `check` 或 autogenerate 能比较当前 Agent 模型与数据库结构。这里不能只导入空的
+`Base` 而忘记模型，否则 metadata 中没有表，迁移差异会失真。
 
 ### 9.3 独立版本表
 
@@ -1174,8 +1228,9 @@ version_table = "agent_alembic_version"
 Java Flyway 使用 `flyway_schema_history`，Python Alembic 使用 `agent_alembic_version`，两套
 迁移记录不会混用。
 
-当前数据库只创建了空的 `agent_alembic_version`，`migrations/versions/` 没有业务迁移文件。
-`.gitkeep` 仅用于让 Git 保留空目录，没有运行时逻辑。
+当前首个 revision 是 `0001_agent_runtime_base`，创建 `agent_sessions`、`agent_messages`、
+`agent_runs` 和 `agent_steps`。`agent_alembic_version` 保存该 revision ID，不保存 Java Flyway
+版本。
 
 ### 9.4 当前迁移命令
 
@@ -1188,7 +1243,7 @@ make agent-migrate
 该命令在 Docker Compose 网络内运行 Alembic，能直接使用 `postgres:5432` 和容器环境变量，
 避免宿主机 PostgreSQL 占用 5432、容器主机名无法解析或本地凭据漂移。
 
-未来创建迁移时，流程通常为：
+后续创建迁移时，流程通常为：
 
 ```text
 新增 Agent SQLAlchemy Model
@@ -1287,6 +1342,7 @@ make test-agent-foundation  # 运行工程基础和结构化日志回归
 make test-agent-client      # 运行 M1.2 的 10 个 Client 测试
 make test-agent-errors      # 运行 M1.3 的 18 个标准错误测试
 make test-tools             # 运行 Tool 协议、只读 Tool 和重试策略测试
+make test-agent-persistence # 在隔离 PostgreSQL 上测试模型、迁移和 Repository
 make quality                # Ruff + mypy strict
 make agent-migrate          # 容器内执行 Alembic upgrade head
 make smoke                  # 验证 Java、Python、Web 健康检查
@@ -1446,14 +1502,16 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M1.8 已完成
+### 13.1 M1.1～M2.1 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
 - `/health` liveness；
 - Pydantic Settings；
 - 异步SQLAlchemy Engine/Session基础；
-- Alembic骨架和独立版本表；
+- Alembic骨架、独立版本表和首个 Agent 运行元数据 revision；
+- Session、Message、Run、Step SQLAlchemy模型；
+- Run/Step异步Repository、数据库约束和隔离PostgreSQL验收；
 - JSON日志和安全Trace ID；
 - 共享异步Java HTTP Client和连接池；
 - 身份、Token、Trace ID和幂等键透传；
@@ -1479,18 +1537,22 @@ async def lifespan(...):
 ### 13.2 当前尚未实现
 
 - 数据库readiness；
-- Run/Step实体和持久化；
+- Run状态流转服务和Step开始/成功/失败记录；
 - Workflow、动态Agent、模型调用；
 - RAG、SSE和Approval。
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M1.8 结构和 M2 以后可能增加的内容
+### 13.3 当前 M2.1 结构和后续可能增加的内容
 
 当前关键结构为：
 
 ```text
 app/
+├── models/
+│   └── agent_runtime.py         # 已实现的四个Agent运行元数据模型
+├── repositories/
+│   └── agent_runtime.py         # 已实现的Run/Step异步增删查
 ├── schemas/
 │   └── tools.py                 # 已实现的七个只读Tool输入输出Schema
 ├── tools/
@@ -1504,8 +1566,8 @@ app/
     └── tool_debug.py            # 已实现的开发专用Tool调试接口与Run上下文存储
 ```
 
-上述文件均已存在。M1 到此达到“所有只读 Tool 可脱离 Agent 调用”的停止线；Run/Step 数据表、
-确定性 Workflow 和动态模型调用仍属于 M2 以后能力，不能因为已有调试 API 就描述为已完成。
+上述文件均已存在。M2.1 只完成持久化结构和Repository；Tool执行尚未自动创建Run/Step，
+确定性Workflow和动态模型调用也未完成，不能把“有表”描述成“已有Agent运行闭环”。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 

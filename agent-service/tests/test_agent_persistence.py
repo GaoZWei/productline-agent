@@ -1,0 +1,289 @@
+import os
+import subprocess
+from collections.abc import AsyncIterator
+from pathlib import Path
+from uuid import uuid4
+
+import asyncpg  # type: ignore[import-untyped]
+import pytest
+import pytest_asyncio
+from sqlalchemy import inspect
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
+
+from app.database import Base, Database
+from app.models import (
+    AgentMessage,
+    AgentMessageRole,
+    AgentRun,
+    AgentRunStatus,
+    AgentSession,
+    AgentStep,
+    AgentStepStatus,
+    AgentStepType,
+)
+from app.repositories import AgentRunRepository, AgentStepRepository
+from app.settings import Settings
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TEST_DATABASE_URL_ENV = "AGENT_PERSISTENCE_TEST_DATABASE_URL"
+
+
+def _configured_url() -> str:
+    database_url = os.getenv(TEST_DATABASE_URL_ENV)
+    if database_url is None:
+        pytest.skip(f"需要通过 {TEST_DATABASE_URL_ENV} 提供隔离 PostgreSQL")
+    return Settings(database_url=database_url).async_database_url
+
+
+def _database_urls(configured_database_url: str, database_name: str) -> tuple[str, str]:
+    configured_url = make_url(configured_database_url)
+    async_url = configured_url.set(database=database_name)
+    alembic_url = async_url.set(drivername="postgresql")
+    return async_url.render_as_string(hide_password=False), alembic_url.render_as_string(
+        hide_password=False
+    )
+
+
+def _database_name(database_url: str) -> str:
+    database_name = make_url(database_url).database
+    assert database_name is not None
+    return database_name
+
+
+def _run_alembic(database_url: str, *arguments: str) -> None:
+    environment = os.environ.copy()
+    environment["DATABASE_URL"] = database_url
+    subprocess.run(
+        ["uv", "run", "--frozen", "alembic", *arguments],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+async def _admin_connection(configured_database_url: str) -> asyncpg.Connection:
+    configured_url = make_url(configured_database_url)
+    admin_url = configured_url.set(drivername="postgresql", database="postgres")
+    return await asyncpg.connect(admin_url.render_as_string(hide_password=False))
+
+
+@pytest_asyncio.fixture
+async def migrated_database_url() -> AsyncIterator[str]:
+    configured_database_url = _configured_url()
+    database_name = f"agent_m21_{uuid4().hex}"
+    async_url, alembic_url = _database_urls(configured_database_url, database_name)
+    admin = await _admin_connection(configured_database_url)
+    await admin.execute(f'CREATE DATABASE "{database_name}"')
+    await admin.close()
+
+    try:
+        _run_alembic(alembic_url, "upgrade", "head")
+        yield async_url
+    finally:
+        admin = await _admin_connection(configured_database_url)
+        await admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            database_name,
+        )
+        await admin.execute(f'DROP DATABASE "{database_name}"')
+        await admin.close()
+
+
+@pytest.mark.unit
+def test_agent_metadata_contains_only_agent_runtime_tables() -> None:
+    assert set(Base.metadata.tables) == {
+        "agent_messages",
+        "agent_runs",
+        "agent_sessions",
+        "agent_steps",
+    }
+
+    assert set(Base.metadata.tables["agent_sessions"].columns.keys()) == {
+        "session_id",
+        "user_id",
+        "created_at",
+        "updated_at",
+    }
+    assert set(Base.metadata.tables["agent_messages"].columns.keys()) == {
+        "message_id",
+        "session_id",
+        "sequence_number",
+        "role",
+        "content",
+        "created_at",
+    }
+    assert set(Base.metadata.tables["agent_runs"].columns.keys()) == {
+        "run_id",
+        "session_id",
+        "request_message_id",
+        "status",
+        "final_result",
+        "error_code",
+        "error_step",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "finished_at",
+    }
+    assert set(Base.metadata.tables["agent_steps"].columns.keys()) == {
+        "step_id",
+        "run_id",
+        "sequence_number",
+        "step_type",
+        "step_name",
+        "status",
+        "input_summary",
+        "output_summary",
+        "error_code",
+        "duration_ms",
+        "created_at",
+        "started_at",
+        "finished_at",
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_alembic_creates_agent_tables_and_repository_crud(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.engine.connect() as connection:
+            table_names = await connection.run_sync(
+                lambda sync_connection: set(inspect(sync_connection).get_table_names())
+            )
+        assert {
+            "agent_alembic_version",
+            "agent_messages",
+            "agent_runs",
+            "agent_sessions",
+            "agent_steps",
+        } <= table_names
+        _, alembic_url = _database_urls(
+            migrated_database_url, _database_name(migrated_database_url)
+        )
+        _run_alembic(alembic_url, "check")
+
+        async with database.session() as session:
+            async with session.begin():
+                agent_session = AgentSession(session_id="session-001", user_id="user-001")
+                user_message = AgentMessage(
+                    message_id="message-001",
+                    session=agent_session,
+                    sequence_number=1,
+                    role=AgentMessageRole.USER,
+                    content="这个订单为什么还没有交付?",
+                )
+                run = AgentRun(
+                    run_id="run-001",
+                    session=agent_session,
+                    request_message=user_message,
+                )
+                session.add(agent_session)
+                run_repository = AgentRunRepository(session)
+                step_repository = AgentStepRepository(session)
+                await run_repository.create(run)
+                await step_repository.create(
+                    AgentStep(
+                        step_id="step-001",
+                        run=run,
+                        sequence_number=1,
+                        step_type=AgentStepType.CONTEXT,
+                        step_name="load_page_context",
+                    )
+                )
+
+            stored_run = await run_repository.get("run-001")
+            stored_step = await step_repository.get("step-001")
+            assert stored_run is not None
+            assert stored_run.status is AgentRunStatus.PENDING
+            assert stored_run.request_message_id == "message-001"
+            assert stored_step is not None
+            assert stored_step.status is AgentStepStatus.PENDING
+            assert stored_step.run_id == "run-001"
+            stored_runs = await run_repository.list_by_session("session-001")
+            assert [item.run_id for item in stored_runs] == ["run-001"]
+            assert [item.step_id for item in await step_repository.list_by_run("run-001")] == [
+                "step-001"
+            ]
+
+            assert await step_repository.delete("step-001") is True
+            assert await step_repository.delete("missing-step") is False
+            await step_repository.create(
+                AgentStep(
+                    step_id="step-002",
+                    run=stored_run,
+                    sequence_number=2,
+                    step_type=AgentStepType.TOOL,
+                    step_name="get_order_detail",
+                )
+            )
+            assert await run_repository.delete("run-001") is True
+            assert await run_repository.delete("missing-run") is False
+            await session.commit()
+
+            assert await step_repository.get("step-001") is None
+            assert await step_repository.get("step-002") is None
+            assert await run_repository.get("run-001") is None
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_alembic_downgrade_removes_only_agent_runtime_tables(
+    migrated_database_url: str,
+) -> None:
+    database_name = _database_name(migrated_database_url)
+    _, alembic_url = _database_urls(migrated_database_url, database_name)
+    _run_alembic(alembic_url, "downgrade", "base")
+
+    database = Database(migrated_database_url)
+    try:
+        async with database.engine.connect() as connection:
+            table_names = await connection.run_sync(
+                lambda sync_connection: set(inspect(sync_connection).get_table_names())
+            )
+        assert table_names == {"agent_alembic_version"}
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_step_sequence_is_unique_inside_one_run(migrated_database_url: str) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            agent_session = AgentSession(session_id="session-duplicate", user_id="user-001")
+            run = AgentRun(run_id="run-duplicate", session=agent_session)
+            session.add(agent_session)
+            session.add_all(
+                [
+                    AgentStep(
+                        step_id="step-a",
+                        run=run,
+                        sequence_number=1,
+                        step_type=AgentStepType.TOOL,
+                        step_name="get_order_detail",
+                    ),
+                    AgentStep(
+                        step_id="step-b",
+                        run=run,
+                        sequence_number=1,
+                        step_type=AgentStepType.RULE,
+                        step_name="diagnose_blocker",
+                    ),
+                ]
+            )
+
+            with pytest.raises(IntegrityError):
+                await session.commit()
+            await session.rollback()
+    finally:
+        await database.dispose()

@@ -8,11 +8,12 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.database import Base
+from app.models import AgentSession
 from app.settings import get_settings
 
 config = context.config
-target_metadata = Base.metadata
+# 导入一个映射类会加载模型包, 并让 Alembic 看见四张 Agent 自有表。
+target_metadata = AgentSession.metadata
 
 
 def run_migrations_offline() -> None:

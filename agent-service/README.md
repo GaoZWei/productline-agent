@@ -1,9 +1,10 @@
 # Agent Service
 
-M1.8 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M2.1 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
-只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API，尚未包含
-Workflow、RAG 或模型调用。
+只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
+包含 Session/Message/Run/Step 模型、Alembic 迁移和 Run/Step Repository，尚未包含 Workflow、
+RAG 或模型调用。
 
 ## 本地开发
 
@@ -41,8 +42,8 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 `ToolContext` 携带 `BusinessIdentity`、权限集合、Trace ID、Run ID 和不序列化的内存调用账本。
 `ToolRegistry` 按稳定
 名称注册和获取 Tool，重复名称会被拒绝而不会静默覆盖。`max_retries` 表示首次调用之外允许的
-额外调用次数；只有显式提供 `RetryPolicy` 的 Tool 才会实际重试。当前没有 Run/Step 持久化
-或 Approval。
+额外调用次数；只有显式提供 `RetryPolicy` 的 Tool 才会实际重试。M2.1 已建立 Run/Step
+持久化基础，但当前 Tool 调试链尚未写入这些表，也没有 Approval。
 
 ## 只读业务 Tool
 
@@ -79,7 +80,7 @@ Tool 和相同参数的后续调用在发出 HTTP 前返回不可重试的 `DUPL
 
 当前账本随 `ToolContext` 生命周期存在，不持久化、不跨 Python 进程或服务实例，也不会仅凭
 相同 `run_id` 自动合并两个独立创建的上下文。后续 Workflow 必须为一次 Run 创建并复用同一个
-上下文；Run/Step 持久化和分布式去重不属于 M1.7。
+上下文。M2.1 的 Run/Step 表尚未接管这份内存账本，因此当前仍不具备分布式去重。
 
 ## Tool 调试 API
 
@@ -99,6 +100,26 @@ Schema，Tool 失败仍以 HTTP 200 返回标准 `ToolResult(success=false, erro
 `DUPLICATE_CALL` 和 `force_refresh`。超过上限时按最久未使用顺序淘汰；服务重启、多进程或
 多实例不会共享。`test` 和 `production` 环境不注册该路由，OpenAPI 中也不会暴露。
 
+## Agent 运行数据持久化
+
+M2.1 只保存 Agent 自有运行元数据，不复制 Java 订单、任务、质检、复核或交付事实：
+
+```text
+agent_sessions  一段连续对话及其用户归属
+    ├── agent_messages  用户/助手消息和会话内稳定序号
+    └── agent_runs      一次请求、状态、最终结果与错误定位
+            └── agent_steps  CONTEXT/TOOL/RULE/LLM 步骤、摘要和耗时
+```
+
+`AgentRunRepository` 和 `AgentStepRepository` 提供异步增、删、查。Repository 会 `flush` 以便
+尽早发现外键、唯一序号等数据库约束，但不会隐式 `commit`；事务边界由后续 Run 生命周期服务
+统一控制。删除 Session 会级联其 Message、Run 和 Step，删除 Run 会级联 Step；删除请求消息
+只把 Run 的 `request_message_id` 置空，保留已发生的运行记录。
+
+Run 状态和 Step 类型已按 M2 计划固化为字符串 Check Constraint。Step 输入/输出只预留受控
+摘要字段，不能写入完整 Token、密钥或未经脱敏的业务载荷。当前尚未实现 M2.2 状态流转服务，
+也尚未由 Tool 或 Workflow 自动创建这些记录。
+
 ## 测试与质量
 
 ```bash
@@ -115,14 +136,17 @@ make test-agent-client
 make test-agent-errors
 make test-agent-tool-protocol
 make test-tools
+make test-agent-persistence
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP
-边界。M1.1 尚无数据库表迁移，因此 Alembic 只建立迁移能力，不创建 Agent 业务表。
+边界及 PostgreSQL 持久化。`make test-agent-persistence` 使用随机宿主端口和临时数据目录启动
+隔离 PostgreSQL，完成后自动删除，避免误用本机或开发数据库。
 
 ## 数据边界
 
-`app.database.Base` 只用于后续 Agent Run、Step、Approval 和 RAG 元数据。Python 服务
+`app.database.Base` 当前只映射 Agent Session、Message、Run、Step，并可继续承载 Approval 和
+RAG 元数据。Python 服务
 不得为 Java 的订单、生产、质检、复核或交付表建立 ORM 映射，也不得绕过 Java API
 读取或修改业务事实。
 

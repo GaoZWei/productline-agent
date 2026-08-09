@@ -2084,3 +2084,140 @@
 - 下一建议任务：
   - M1停止线已满足。若用户确认进入M2，下一最小任务为`[T201]`创建Agent Session基础模型，
     并与T202～T205的数据表/迁移边界一起规划。
+
+---
+
+## 2026-08-08 — `[T201-T206] M2.1 Agent 基础数据表`
+
+- 里程碑：M2 确定性订单诊断
+- 任务类型：功能 / 数据模型 / 迁移 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：创建`agent_sessions`、`agent_messages`、`agent_runs`、`agent_steps`四张Agent自有
+    SQLAlchemy模型；建立首个Alembic revision；实现Run/Step异步Repository增删查；提供隔离
+    PostgreSQL专项验收并将开发数据库迁移到head。
+  - 明确不实现：不进入M2.2/M2.3，不实现Run合法状态流转、Step开始/成功/失败服务、Workflow、
+    LangGraph、LLM、RAG、SSE、Approval或前端Agent布局；不修改Java接口和固定业务数据。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：四张表只记录Agent会话和执行过程。`ORDER-003`订单、任务、质检、
+    复核和交付事实仍必须通过Java只读Tool取得，Python不为Java业务表建立ORM映射。
+  - 数据层级：Session拥有按序Message和Run；Run可关联触发它的用户Message并拥有按序Step。
+    `(session_id, sequence_number)`与`(run_id, sequence_number)`唯一约束防止同一作用域出现两个
+    相同序号。
+  - 状态契约：Run状态固定为`PENDING/RUNNING/SUCCEEDED/FAILED/WAITING_APPROVAL/CANCELLED`；
+    Step类型为`CONTEXT/TOOL/RULE/LLM`，Step状态为`PENDING/RUNNING/SUCCEEDED/FAILED`。当前只
+    稳定存储契约，不提前实现M2.2/M2.3服务行为。
+  - 枚举选择：使用Python`StrEnum`和数据库VARCHAR Check Constraint，不使用PostgreSQL私有
+    enum，保留类型和数据库约束，同时降低后续增加状态时修改原生enum类型的迁移复杂度。
+  - 事务边界：Repository执行`flush`以在当前事务内尽早暴露外键、唯一约束等错误，但不隐式
+    `commit`。后续生命周期服务可把Run与多个Step放在同一事务内整体提交或回滚。
+  - 删除语义：Session删除级联Message、Run、Step；Run删除级联Step；Message删除对Run使用
+    `SET NULL`，避免删除请求文本时连带抹除已经发生的运行证据。
+  - 数据最小化：Step只预留受控`input_summary/output_summary`，不默认存完整Prompt、Token、
+    密钥或原始业务响应；具体脱敏和截断策略留给T217实现。
+- 核心实现：
+  - `agent-service/app/models/agent_runtime.py` — `AgentSession`、`AgentMessage`、`AgentRun`、
+    `AgentStep`及四组枚举：定义字段、关系、默认值、索引、外键、唯一约束和检查约束。
+  - `agent-service/app/repositories/agent_runtime.py` — `AgentRunRepository`、
+    `AgentStepRepository`：提供`create/get/list_by_*/delete`，稳定排序并让上层拥有事务。
+  - `agent-service/migrations/versions/0001_agent_runtime_base.py` — `upgrade/downgrade`：按外键依赖
+    正序创建、逆序移除四表；不接触Java Flyway表。
+  - `agent-service/migrations/env.py` — 通过导入`AgentSession`加载模型包，使Alembic
+    `target_metadata`包含四张表，而不是只看到空`Base`。
+  - `agent-service/tests/test_agent_persistence.py` — metadata白名单、真实migration、Schema drift、
+    CRUD、级联、重复序号异常和downgrade集成测试。
+  - `scripts/test-agent-persistence.sh`、`Makefile` — 使用随机宿主端口、tmpfs和退出清理的独立
+    PostgreSQL容器执行`make test-agent-persistence`，并纳入完整`make test`。
+  - 必要的最小流程：
+
+    ```text
+    上层生命周期服务（M2.2以后）
+    → Database.session / AsyncSession事务
+    → AgentRunRepository.create + AgentStepRepository.create
+    → flush触发数据库约束
+    → 上层统一commit或rollback
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：未来HTTP/Workflow先创建或取得Session和用户Message，再创建PENDING Run；
+    每个上下文、Tool、规则或LLM动作作为有序Step归属Run；当前M2.1只提供底层持久化能力，没有
+    自动执行这条链路。
+  - 输入、输出、异常和边界：Repository输入是已构造ORM对象或稳定ID，输出是持久化对象、列表、
+    可空查询结果或删除布尔值。空查询返回`None`/空列表；重复序号、非法外键和检查约束由
+    SQLAlchemy/数据库异常暴露给上层，当前不包装为Tool错误。
+  - 核心类、函数、接口或配置项：四个Model、四组`StrEnum`、两个Repository、migration
+    `upgrade/downgrade`、`migrated_database_url`fixture和`test-agent-persistence`Make目标。
+  - 关键代码位置在全部修改后重新核对并以最终回复链接为准。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：本次不是HTTP或Tool层，不新增权限/超时错误映射。数据库约束作为
+    持久化异常向事务调用方传播；测试验证重复Step序号必然失败并可rollback。
+  - 幂等、并发或人工确认：`delete`对不存在ID返回False；序号唯一约束提供并发冲突的最终防线，
+    但自动序号分配尚未实现。没有写Tool或Approval语义变化。
+  - 敏感信息：模型未设置Token/密钥字段；Step只保存摘要。`final_result`是为T211预留的JSON，
+    后续写入前仍需定义脱敏、大小和版本契约。
+- 开发中发现并修复：
+  - 测试先行首次执行因`app.models`不存在产生1个预期收集错误，实现后消除。
+  - 首轮数据库集成测试误连本机`127.0.0.1:5432`而不是Docker发布端口，返回“role agent does
+    not exist”。根因是本机PostgreSQL和Docker同时监听5432；改为专项脚本启动随机宿主端口、
+    tmpfs临时数据库并在退出时自动删除，避免误用或污染本机/开发数据库。
+  - 首次Repository CRUD在查询触发SQLAlchemy`autobegin`后再次调用`session.begin()`，产生
+    `InvalidRequestError`；测试改为在当前事务继续删除并由调用方显式commit，运行代码无需绕过
+    SQLAlchemy事务语义。
+  - 首次mypy报告asyncpg缺少`py.typed`；在测试导入处使用精确`import-untyped`说明，未关闭全局
+    strict检查。
+  - 完整Ruff发现既有`tool_debug.py`导入块空行及中文全角标点格式漂移；只做机械格式修正，不
+    改变M1.8行为。
+  - 同步Python学习手册时发现`httpx`仍被写成dev依赖，而当前`pyproject.toml`已将其作为运行时
+    Java Client依赖；已按真实配置更正，不修改锁文件或依赖版本。
+- 未完成项与已知问题：
+  - 未完成项：M2.2 Run生命周期、M2.3 Step记录，以及后续Workflow、RAG、动态Agent、SSE和
+    Approval。
+  - 已知问题/阻塞：无阻塞。持久化Run尚未与`ToolContext.run_id`和调试API绑定；Run/Step字段
+    目前不会自动流转。没有Step摘要脱敏/截断、数据保留/归档或生产数据库角色隔离。
+- 替代方案：
+  - 采用的替代方案及原因：无临时业务替代方案。随机端口tmpfs PostgreSQL是正式测试隔离策略，
+    用于真实验证PostgreSQL/Alembic而不依赖或污染开发库。
+  - 已覆盖/未覆盖的验收要求：完整覆盖T201～T206的模型、migration和Run/Step增删查；不覆盖
+    T207以后状态机、自动记录、业务诊断或跨实例恢复。
+  - 局限、风险和转正/移除条件：数据库集成用例在普通Python全量测试中若未提供专用环境变量会
+    安全跳过，完整验证必须运行`make test-agent-persistence`；该目标需要Docker可用。它不是
+    SQLite替代测试，不需要在后续“转正”，但CI必须执行根级专项或完整`make test`。
+- 后续影响：
+  - 对后续任务/里程碑：M2.2可直接基于`AgentRunStatus`和Run Repository实现合法状态流转；
+    M2.3可基于Step字段记录摘要、错误和耗时。后续不能为每次Step独立commit，也不能把
+    `final_result`当作最新Java业务事实。
+  - 对接口/数据/测试/部署：Java API、Tool Schema、固定数据和前端无变化；Python数据库新增四表
+    及`agent_alembic_version=0001_agent_runtime_base`。新环境启动Agent功能前需要执行
+    `make agent-migrate`；当前应用启动不会自动迁移。
+- 测试与验证：
+  - `[预期失败] agent-service内uv run --frozen pytest -q tests/test_agent_persistence.py
+    tests/test_alembic.py` — 收集阶段1个`ModuleNotFoundError`。
+  - `[通过] make test-agent-persistence` — 隔离PostgreSQL专项5/5。
+  - `[通过] agent-service内uv run --frozen pytest -q` — 180通过、3个数据库集成用例按安全门禁
+    跳过；同3项已由专项真实执行。
+  - `[通过] make quality` — Ruff通过；mypy strict检查36个源/测试文件无问题。
+  - `[通过] docker compose build agent-service + make agent-migrate` — 开发库revision和四表存在。
+  - `[通过] docker compose up --detach --build agent-service + make smoke` — 最终镜像及三服务健康。
+  - `[通过] make test` — foundation/Compose、三服务smoke、Python M1分项、M2.1专项、Java
+    56/56、Web 7/7和Vue生产构建全部通过。
+  - `[未运行] make reset-demo` — 本次不修改固定业务数据，且命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/models/__init__.py`、`models/agent_runtime.py`
+  - `agent-service/app/repositories/__init__.py`、`repositories/agent_runtime.py`
+  - `agent-service/migrations/env.py`、`migrations/versions/0001_agent_runtime_base.py`
+  - `agent-service/app/database.py`、`app/api/tool_debug.py`（后者仅机械格式）
+  - `agent-service/tests/test_agent_persistence.py`、`tests/test_alembic.py`
+  - `scripts/test-agent-persistence.sh`、`Makefile`
+  - `README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；开发库Java/Python仍共用角色；应用启动不会自动执行migration；
+    `final_result`和摘要字段尚无大小/保留策略。
+  - 后续兼容注意事项：修改状态枚举、字段或约束必须新增Alembic revision并运行`alembic check`；
+    M2.2必须显式限制状态转换，不能因为数据库允许任意合法枚举值就允许状态倒退。
+- Agent面试价值评估：
+  - 有价值，已更新`doc/needCare.md`。本次建立Agent Run/Step可观测性事实模型，体现Agent元数据
+    与Java业务事实的边界、事务归属、顺序约束、摘要数据最小化和真实migration验证，能形成
+    可举证的Agent工程设计取舍。
+- 下一建议任务：
+  - `[T207-T213] M2.2 最小Run生命周期`。

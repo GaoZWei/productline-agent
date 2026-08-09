@@ -13,6 +13,7 @@ from app.observability import get_trace_id
 from app.schemas.business import BusinessIdentity
 from app.tools import ToolContext, ToolNotRegisteredError, ToolRegistry, ToolResult
 from app.tools.models import ContextIdentifier, PermissionName
+
 # Store最多保存128个Run上下文
 _MAX_DEBUG_RUN_CONTEXTS = 128
 # 路径参数定义
@@ -178,15 +179,15 @@ async def invoke_tool(
     request: Request,
 ) -> ToolResult[Any]:
     """解析调试上下文并通过注册表执行目标 Tool。"""
-    # 第一步：取得应用级对象
+    # 第一步: 取得应用级对象
     registry: ToolRegistry = request.app.state.tool_registry
     context_store: ToolDebugRunContextStore = request.app.state.tool_debug_context_store
     try: 
-        # 第二步：查找ToolRegistry中的Tool
+        # 第二步: 查找ToolRegistry中的Tool
         tool = registry.get(tool_name)
     except ToolNotRegisteredError as exception:
         raise HTTPException(status_code=404, detail="tool is not registered") from exception
-    # 第三步：恢复Run上下文
+    # 第三步: 恢复Run上下文
     try:
         context = context_store.resolve(invoke_request, trace_id=get_trace_id())
     except DebugRunContextConflictError as exception:
@@ -194,7 +195,7 @@ async def invoke_tool(
             status_code=409,
             detail="run context does not match its first invocation",
         ) from exception
-    # 第四步：调用现有BaseTool
+    # 第四步: 调用现有BaseTool
     return await tool.execute(
         invoke_request.arguments,
         context,

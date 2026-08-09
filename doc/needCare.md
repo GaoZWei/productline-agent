@@ -952,7 +952,8 @@ Python 不映射 Java 业务表，也不让模型直接生成这些事实。
   前端 Agent 对话，不能声称模型已自主选择 Tool。
 - M1.6 已实现 RetryPolicy；只有明确可恢复的 timeout/网络错误会重试，不能声称所有失败都会恢复。
 - M1.7 已实现单次 Run 重复调用检测；仍没有通用并发调度、结果缓存或上下文预算优化。
-- 没有 Run/Step 持久化和统一 Agent 评测，当前证据是 Tool 契约测试与固定数据真实调用。
+- M2.1 已建立 Run/Step 表，但 Tool 调用尚未自动写入；也没有统一 Agent 评测。当前证据是 Tool
+  契约测试与固定数据真实调用。
 - 权限名是 Python 前置门禁，不代表完整 RBAC；最终授权仍依赖 Java。
 - 本阶段只有读取，没有 Approval 或安全写回能力。
 
@@ -1041,8 +1042,8 @@ Python 尊重上游契约；只有明确的连接/timeout 暂态错误同时满�
 - 没有随机抖动，多实例并发故障下仍可能出现同步重试；增加 jitter 需要后续负载和指标验证。
 - 本次受限执行环境无法访问宿主机 Java 服务，真实 Java 重试成功链路未重新验收；确定性
   MockTransport 覆盖七个 Tool 的失败后成功、持续 timeout 和不可重试分支。
-- 没有 LangGraph、LLM Tool Calling、Run/Step 持久化或 Agent E2E 恢复率指标，不能把 Tool
-  层测试描述为完整 Agent 容错能力。
+- 没有 LangGraph、LLM Tool Calling、自动 Step 记录或 Agent E2E 恢复率指标，不能把 Tool 层
+  测试描述为完整 Agent 容错能力。
 
 ---
 
@@ -1129,7 +1130,8 @@ M1.6 已在一次调用内完成允许的暂态 retry；再执行必须由 Workf
 
 - 当前尚未接入 LLM 或 LangGraph，测试证明的是 Tool 执行边界，不是模型循环率已经下降。
 - 去重只在复用同一个 `ToolContext` 的单次 Run 中生效；同 `run_id` 的独立上下文不会自动共享。
-- 没有数据库持久化、TTL、跨进程/实例协调或服务重启恢复，不能称为分布式幂等系统。
+- Tool 调用账本没有数据库持久化、TTL、跨进程/实例协调或服务重启恢复，不能因为 M2.1 已有
+  Run/Step 表就称为分布式幂等系统。
 - 当前不是缓存，不复用第一次结果，也没有基于业务版本判断数据新鲜度。
 - `force_refresh` 已由 M1.8 开发调试 API 暴露，但尚未由 Workflow 根据业务版本、写后验证或
   数据新鲜度自动授权；调试入口不能等同最终用户权限策略。
@@ -1217,3 +1219,82 @@ POST /internal/tools/{tool_name}/invoke
 - Run上下文只保留最近128个并存在单进程内，淘汰、重启、多worker或多实例后不会恢复。
 - Swagger和真实Java调用证明Tool链路可独立调试，不代表已完成LangGraph、LLM Tool Calling、
   确定性诊断Workflow或Agent端到端评测。
+
+---
+
+## M2.1 Agent Run/Step 持久化与可观测性基础
+
+### 面试价值判断
+
+核心关注。Agent 的可靠性不能只靠应用日志；一次用户请求需要稳定 Run，内部上下文读取、Tool
+调用和规则判断需要有序 Step，才能回答“执行到哪里、依据是什么、在哪一步失败”。M2.1 把
+Session、Message、Run、Step 建成 Agent 自有事实，并用真实 PostgreSQL migration 和 Repository
+测试锁定结构，为后续 Workflow 可观测性和失败恢复提供可验证基础。
+
+### 与 Agent 开发的关系
+
+当前数据层级是：
+
+```text
+AgentSession
+├── AgentMessage（用户/助手消息，按会话序号排序）
+└── AgentRun（一次请求、状态、结果、错误定位）
+    └── AgentStep（CONTEXT/TOOL/RULE/LLM、摘要、耗时）
+```
+
+这些表只保存 Agent 会话与执行元数据，不映射 Java 的订单、任务、质检、复核或交付表。未来
+`ORDER-003` 的业务事实仍必须由 Java Tool 提供；Run/Step 只记录“Agent 如何取得和处理事实”，
+不能成为第二套业务事实来源。
+
+### 需要掌握的原理和设计取舍
+
+- Run 和 Step 使用稳定字符串 ID，便于与 Trace、日志、SSE 和 ToolContext 关联；当前还未完成
+  这些链路的自动绑定。
+- `(session_id, sequence_number)` 和 `(run_id, sequence_number)` 唯一约束把消息顺序、执行顺序
+  下沉到数据库，避免并发写入产生两个“第1步”。
+- 状态和类型使用 Python `StrEnum` 加数据库 VARCHAR Check Constraint，而不是 PostgreSQL 私有
+  enum。这样保留类型/数据约束，同时降低后续增加状态时修改数据库 enum 类型的迁移复杂度。
+- Repository 只 `flush` 不 `commit`。`flush` 能尽早暴露外键和唯一约束，事务仍由上层生命周期
+  服务控制，后续可以让 Run 状态与 Step 记录原子提交或整体回滚。
+- Session 删除会级联 Message、Run、Step，Run 删除会级联 Step；删除请求 Message 只将 Run
+  外键置空，保留已经发生的执行记录。这是“清理从属数据”和“保留运行证据”之间的取舍。
+- Step 只预留输入/输出摘要，不默认保存完整 Prompt、Token、身份凭据或业务响应，避免可观测性
+  变成敏感数据复制渠道。摘要如何脱敏和截断仍需 M2.3 实现。
+- 数据库专项使用随机端口、临时数据目录的隔离 PostgreSQL，真实验证 upgrade、schema drift、
+  downgrade 和约束，避免测试误连本机或开发数据库。
+
+### 可能的面试问题及回答要点
+
+**为什么 Agent 需要 Run/Step，结构化日志不够吗？**
+
+回答要点：日志适合排障但不保证业务级结构、顺序和查询契约；Run/Step 能稳定关联一次请求的
+状态、结果、错误步骤和执行证据，供前端进度、SSE、评测和恢复使用。日志与持久化记录互补。
+
+**为什么 Repository 不直接 commit？**
+
+回答要点：一次 Agent 执行会同时修改 Run 和多个 Step。如果每个 Repository 方法独立提交，
+中途失败会留下互相矛盾的半成品。Repository 负责 flush 和约束反馈，上层服务负责事务边界。
+
+**Run/Step 表会不会复制业务数据，形成两个事实源？**
+
+回答要点：不会映射 Java 业务表；只保存执行状态和受控摘要。订单当前状态仍需重新调用 Java
+Tool 获取。最终结果可以保存当次诊断快照，但必须明确它是历史执行结果，不是最新业务状态。
+
+**如何保证 Step 顺序在并发下可靠？**
+
+回答要点：每个 Run 的 `sequence_number` 有数据库唯一约束，Repository flush 时即可发现冲突。
+M2.3 还需要设计序号分配或并发控制；当前只证明数据库会拒绝重复序号，不能声称已完成并发分配。
+
+### 简历表述建议
+
+> 设计 Agent Session/Message/Run/Step 持久化模型与 Alembic 迁移，以数据库唯一序号、状态约束、
+> 外键级联和上层事务边界支撑可追踪执行；在隔离 PostgreSQL 上验证 migration drift、回滚、
+> Repository CRUD 和约束异常，并保持 Agent 元数据与 Java 业务事实源隔离。
+
+### 不能过度声称
+
+- 当前只有表、枚举、约束、迁移和 Run/Step Repository，M2.2 状态机和 M2.3 自动 Step 记录尚未
+  实现，不能声称 Workflow 已可观测或可恢复。
+- Tool 调试 API、M1.7 内存账本与数据库 Run 仍未连接；服务重启后不能恢复 Tool 去重上下文。
+- 尚无 LangGraph、诊断 Workflow、SSE、评测面板、Trace-to-Step 自动关联或数据保留/归档策略。
+- 开发环境 Java 与 Python 仍共用数据库角色，代码边界已保持，但不是生产级数据库权限隔离。

@@ -14,3 +14,4 @@ def test_alembic_configuration_points_to_migrations() -> None:
     assert Path(script_location) == project_root / "migrations"
     assert (project_root / "migrations" / "env.py").is_file()
     assert (project_root / "migrations" / "script.py.mako").is_file()
+    assert (project_root / "migrations" / "versions" / "0001_agent_runtime_base.py").is_file()

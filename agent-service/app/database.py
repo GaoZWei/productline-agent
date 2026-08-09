@@ -16,11 +16,12 @@ from app.settings import Settings
 
 # 异步数据库
 class Base(DeclarativeBase):
-    """后续 Agent Run、Step 和 Approval 数据表的元数据根类。"""
+    """Agent Session、Message、Run、Step 和后续 Approval 表的元数据根类。"""
 
 
 class Database:
     """管理异步引擎和会话。模块导入时不建立数据库连接。"""
+
     def __init__(self, database_url: str) -> None:
         settings = Settings(database_url=database_url)
         # Engine代表数据库驱动和连接池配置。

@@ -585,3 +585,40 @@
 - 已知非阻塞问题：调试Run上下文只保留最近128个且仅在当前进程有效；淘汰、进程重启、多
   worker或多实例不会共享。development调用方可填写调试身份和Python权限，不能把它视为
   生产认证或用户授权入口；Java最终权限校验边界不变
+
+## M2.1 Agent 基础数据表
+
+- 验证时间：2026-08-08
+- 测试先行基线：新增持久化测试后首次执行在收集阶段产生1个预期`ModuleNotFoundError`，目标
+  `app.models`尚未实现
+- `make test-agent-persistence`：5/5
+  - SQLAlchemy metadata只包含`agent_sessions/messages/runs/steps`四张Agent自有表：通过
+  - Alembic在隔离PostgreSQL执行`upgrade head`并创建四表和独立版本表：通过
+  - `alembic check`确认Model与migration无Schema漂移：通过
+  - Run/Step Repository增删查、默认PENDING、稳定排序和Run删除级联Step：通过
+  - 同一Run重复`sequence_number`触发数据库`IntegrityError`：通过
+  - `downgrade base`按依赖逆序移除四张表，仅保留空版本表：通过
+- Python全量：180通过、3跳过；跳过项是同一组数据库集成用例在未提供隔离数据库变量时的安全
+  门禁，已由`make test-agent-persistence`完整执行，不是弱化或删除测试
+- `make quality`：Ruff全部通过；mypy strict检查36个源/测试文件无问题
+- `docker compose build agent-service`和`make agent-migrate`：通过；开发数据库版本为
+  `0001_agent_runtime_base`，四张`agent_*`运行表均存在
+- `docker compose up --detach --build agent-service`和`make smoke`：通过；最终Agent镜像与Java、
+  Web三服务健康检查通过
+- `make test`：通过；基础/Compose、三服务smoke、Python M1分项、M2.1隔离数据库专项、Java
+  56/56、Web 7/7及Vue生产构建全部通过
+- 开发中发现并修复：
+  - 本机PostgreSQL和Docker映射同时占用5432，首轮数据库测试误连本机实例并因缺少`agent`角色
+    失败；新增随机宿主端口、tmpfs数据目录和退出自动清理的隔离测试容器，避免污染本机或开发库
+  - CRUD测试在查询后再次显式`session.begin()`触发SQLAlchemy`autobegin`冲突；由调用方直接在
+    当前事务完成删除并显式commit，验证Repository不隐式提交的真实边界
+  - 首次mypy发现asyncpg无`py.typed`标记；仅在测试导入处增加精确`import-untyped`说明，未关闭
+    项目级strict检查
+  - 完整Ruff发现既有`tool_debug.py`导入分组、空白和中文全角标点漂移；只做机械格式修复，无
+    运行行为变化
+- 最终失败：0
+- 未运行：`make reset-demo`；本次不修改Java固定数据，且该命令会删除本地持久卷
+- 已知非阻塞问题：四张表尚未接入Tool/Workflow，Run和Step状态不会自动流转；调试Run内存
+  上下文与持久化Run仍未关联；Step摘要脱敏/截断策略、数据保留清理和生产数据库角色隔离尚未
+  实现
+- 下一建议任务：T207～T213实现M2.2最小Run生命周期和合法状态流转测试
