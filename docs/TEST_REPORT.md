@@ -622,3 +622,30 @@
   上下文与持久化Run仍未关联；Step摘要脱敏/截断策略、数据保留清理和生产数据库角色隔离尚未
   实现
 - 下一建议任务：T207～T213实现M2.2最小Run生命周期和合法状态流转测试
+
+## M2.2 最小 Run 生命周期
+
+- 验证时间：2026-08-09
+- 测试先行基线：增加M2.2集成测试后首次执行`make test-agent-persistence`，在收集阶段产生1个
+  预期`ModuleNotFoundError: No module named 'app.services'`，证明生命周期服务尚未实现
+- `make test-run-lifecycle`：5/5
+  - `PENDING → RUNNING → SUCCEEDED`保存开始/结束时间和标准JSON结果：通过
+  - `PENDING → RUNNING → FAILED`保存机器错误码和失败步骤，且不保留成功结果：通过
+  - 跳过RUNNING、重复开始、终态回退、空错误码和非JSON结果均被拒绝：通过
+  - 未知Run与非法状态流转使用不同内部异常：通过
+  - 两个事务并发争抢成功/失败终态时恰好一个生效，最终字段与状态一致：通过
+- `make test-agent-persistence`：10/10，M2.1模型、migration、Repository及M2.2生命周期联合通过
+- Python全量：180通过、8跳过；跳过项是需要专用PostgreSQL环境变量的同组数据库集成用例，
+  已由隔离数据库专项真实执行
+- `make quality`：Ruff全部通过；mypy strict检查38个源/测试文件无问题
+- `docker compose up --detach --build agent-service`和`make smoke`：通过；最终代码已进入Agent镜像，
+  Agent、Business、Web三服务健康检查通过
+- `make test`：通过；基础/Compose、三服务smoke、Python M1分项、M2.1～M2.2隔离数据库专项、
+  Java 56/56、Web 7/7及Vue生产构建全部通过
+- 开发中发现并修复：首次完整Ruff检查发现已提交的M2.1模型中文学习注释存在空行、尾随空白和
+  全角标点格式漂移；保留说明含义，仅机械调整排版和标点，运行行为无变化
+- 最终失败：0
+- 未运行：`make reset-demo`；本次不修改Java固定数据，且该命令会删除本地持久卷
+- 已知非阻塞问题：生命周期尚未接入Tool、调试API或Workflow；Step不会自动记录；
+  `WAITING_APPROVAL`和`CANCELLED`只有数据枚举，没有状态操作；结果快照尚无大小/保留策略
+- 下一建议任务：T214～T220实现M2.3最小Step记录、摘要、错误和耗时

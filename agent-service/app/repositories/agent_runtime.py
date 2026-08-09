@@ -1,9 +1,12 @@
 """Agent Run 和 Step 的异步 Repository。"""
 
-from sqlalchemy import select
+from collections.abc import Mapping
+from typing import Any
+
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AgentRun, AgentStep
+from app.models import AgentRun, AgentRunStatus, AgentStep
 
 
 class AgentRunRepository:
@@ -43,6 +46,40 @@ class AgentRunRepository:
         await self._session.delete(run)
         await self._session.flush()
         return True
+
+    async def transition_status(
+        self,
+        run_id: str,
+        *,
+        expected_status: AgentRunStatus,
+        target_status: AgentRunStatus,
+        changes: Mapping[str, Any],
+    ) -> AgentRun | None:
+        """仅在当前状态符合预期时原子更新 Run, 防止并发终态互相覆盖。"""
+        # 限制可修改字段
+        allowed_changes = {
+            "started_at",
+            "finished_at",
+            "final_result",
+            "error_code",
+            "error_step",
+        }
+        unexpected_changes = set(changes) - allowed_changes
+        if unexpected_changes:
+            unexpected_names = ", ".join(sorted(unexpected_changes))
+            raise ValueError(f"unsupported run transition fields: {unexpected_names}")
+        # 组合更新内容
+        values: dict[str, Any] = {"status": target_status, **changes}
+        statement = (
+            update(AgentRun)
+            .where(
+                AgentRun.run_id == run_id,
+                AgentRun.status == expected_status,
+            )
+            .values(values)
+            .returning(AgentRun)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
 
 
 class AgentStepRepository:

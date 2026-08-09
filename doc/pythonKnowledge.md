@@ -2,7 +2,7 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M2.1 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M2.2 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
@@ -10,7 +10,7 @@
 Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
 最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测。M2.1 已增加 Session、Message、Run、
-Step 持久化基础，尚未实现 Workflow 或大模型调用。
+Step 持久化基础，M2.2 已实现最小Run状态流转，尚未实现Step自动记录、Workflow或大模型调用。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -69,7 +69,9 @@ agent-service/
 │   ├── models/
 │   │   └── agent_runtime.py         # Session、Message、Run、Step ORM 模型
 │   ├── repositories/
-│   │   └── agent_runtime.py         # Run、Step 异步增删查
+│   │   └── agent_runtime.py         # Run、Step异步增删查和原子状态更新
+│   ├── services/
+│   │   └── run_lifecycle.py         # 最小Run生命周期与内部异常
 │   ├── clients/
 │   │   └── business.py             # 调用 Java 的异步 HTTP Client
 │   └── schemas/
@@ -87,7 +89,7 @@ agent-service/
     ├── test_observability.py
     ├── test_alembic.py
     ├── test_business_client.py
-    └── test_agent_persistence.py   # 隔离 PostgreSQL 迁移与 Repository 测试
+    └── test_agent_persistence.py   # 隔离PostgreSQL迁移、Repository与生命周期测试
 ```
 
 本地运行后还会看到以下生成目录：
@@ -567,7 +569,47 @@ async with database.session() as session:
 
 数据库删除 Session 时级联 Message、Run、Step；删除 Run 时级联 Step。删除一条请求 Message
 则把 Run 的 `request_message_id` 置空而不是删除 Run，用于保留已经发生的执行证据。当前只实现
-数据结构和 Repository，M2.2 才会实现合法状态流转，M2.3 才会在执行期间自动记录 Step。
+数据结构和Repository。M2.2已实现合法Run状态流转，M2.3才会在执行期间自动记录Step。
+
+### 5.5 M2.2 的最小 Run 生命周期
+
+[`agent-service/app/services/run_lifecycle.py`](../agent-service/app/services/run_lifecycle.py) 类似
+Java中的`@Service`，在Repository之上集中控制以下状态机：
+
+```text
+create_run       → PENDING
+mark_running     → PENDING → RUNNING
+mark_succeeded   → RUNNING → SUCCEEDED
+mark_failed      → RUNNING → FAILED
+```
+
+成功时保存`final_result`标准JSON快照并清空错误字段；失败时保存`error_code`和`error_step`并
+清空结果。开始和结束时间使用带时区UTC时间，测试可以注入固定`now`函数，避免依赖真实时钟。
+
+状态更新不是“先查询再普通update”，而是Repository执行近似SQL：
+
+```sql
+UPDATE agent_runs
+SET status = :target_status, ...
+WHERE run_id = :run_id
+  AND status = :expected_status
+RETURNING *;
+```
+
+这是一种compare-and-set。两个并发请求同时尝试把RUNNING标记为成功和失败时，数据库行锁和
+旧状态条件保证只有一个更新成功。另一个更新影响0行，Service再查询当前状态并抛出
+`InvalidRunTransitionError`，不会发生“最后提交的人覆盖第一个终态”。
+
+内部异常分为：
+
+- `RunNotFoundError`：Run不存在；
+- `InvalidRunTransitionError`：当前状态不能进入目标状态；
+- `RunLifecycleValidationError`：ID、错误信息、时间或结果快照不合法。
+
+这些异常目前只服务Python内部调用，尚未绑定FastAPI HTTP响应或Tool错误码。Service和
+Repository都不调用`commit`，调用方仍需用`session.begin()`控制一次业务操作的整体事务。
+`WAITING_APPROVAL`和`CANCELLED`只存在于数据枚举，对应操作分别属于后续Approval或取消设计，
+M2.2没有提前实现。
 
 ## 6. Trace ID 与结构化日志
 
@@ -1343,6 +1385,7 @@ make test-agent-client      # 运行 M1.2 的 10 个 Client 测试
 make test-agent-errors      # 运行 M1.3 的 18 个标准错误测试
 make test-tools             # 运行 Tool 协议、只读 Tool 和重试策略测试
 make test-agent-persistence # 在隔离 PostgreSQL 上测试模型、迁移和 Repository
+make test-run-lifecycle     # 单独测试Run成功、失败、非法流转和并发终态
 make quality                # Ruff + mypy strict
 make agent-migrate          # 容器内执行 Alembic upgrade head
 make smoke                  # 验证 Java、Python、Web 健康检查
@@ -1502,7 +1545,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M2.1 已完成
+### 13.1 M1.1～M2.2 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1512,6 +1555,9 @@ async def lifespan(...):
 - Alembic骨架、独立版本表和首个 Agent 运行元数据 revision；
 - Session、Message、Run、Step SQLAlchemy模型；
 - Run/Step异步Repository、数据库约束和隔离PostgreSQL验收；
+- PENDING→RUNNING→SUCCEEDED/FAILED最小Run生命周期；
+- 最终结果JSON快照、错误码/错误步骤和带时区起止时间；
+- 基于期望旧状态的原子条件更新和并发终态竞争保护；
 - JSON日志和安全Trace ID；
 - 共享异步Java HTTP Client和连接池；
 - 身份、Token、Trace ID和幂等键透传；
@@ -1537,13 +1583,13 @@ async def lifespan(...):
 ### 13.2 当前尚未实现
 
 - 数据库readiness；
-- Run状态流转服务和Step开始/成功/失败记录；
+- Step开始/成功/失败记录；
 - Workflow、动态Agent、模型调用；
 - RAG、SSE和Approval。
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M2.1 结构和后续可能增加的内容
+### 13.3 当前 M2.2 结构和后续可能增加的内容
 
 当前关键结构为：
 
@@ -1552,7 +1598,9 @@ app/
 ├── models/
 │   └── agent_runtime.py         # 已实现的四个Agent运行元数据模型
 ├── repositories/
-│   └── agent_runtime.py         # 已实现的Run/Step异步增删查
+│   └── agent_runtime.py         # 已实现的Run/Step增删查和原子状态更新
+├── services/
+│   └── run_lifecycle.py         # 已实现的最小Run生命周期
 ├── schemas/
 │   └── tools.py                 # 已实现的七个只读Tool输入输出Schema
 ├── tools/
@@ -1566,8 +1614,8 @@ app/
     └── tool_debug.py            # 已实现的开发专用Tool调试接口与Run上下文存储
 ```
 
-上述文件均已存在。M2.1 只完成持久化结构和Repository；Tool执行尚未自动创建Run/Step，
-确定性Workflow和动态模型调用也未完成，不能把“有表”描述成“已有Agent运行闭环”。
+上述文件均已存在。M2.2只完成可独立调用的Run生命周期；Tool执行尚未自动创建Run/Step，
+确定性Workflow和动态模型调用也未完成，不能把“状态机可用”描述成“已有Agent运行闭环”。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 

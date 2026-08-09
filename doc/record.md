@@ -2221,3 +2221,125 @@
     可举证的Agent工程设计取舍。
 - 下一建议任务：
   - `[T207-T213] M2.2 最小Run生命周期`。
+
+---
+
+## 2026-08-09 17:30 — `[T207-T213] M2.2 最小 Run 生命周期`
+
+- 里程碑：M2 确定性订单诊断
+- 任务类型：功能 / 状态机 / 并发安全 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：在M2.1的`agent_runs`表和Repository上实现Run创建、开始、成功、失败四个生命周期
+    操作；保存开始/结束时间、标准JSON结果、失败错误码和错误步骤；用隔离PostgreSQL验证合法与
+    非法流转、资源不存在和并发终态竞争。
+  - 明确不实现：不进入M2.3，不自动创建Step；不接入Tool调试API、HTTP入口、LangGraph、确定性
+    Workflow、LLM、RAG、SSE或前端；不实现`WAITING_APPROVAL`、`CANCELLED`、暂停恢复和审批；
+    不修改Java接口、固定业务数据或数据库Schema。
+- 需求与关键决策：
+  - 最小状态图只开放`PENDING → RUNNING → SUCCEEDED/FAILED`。数据库枚举约束只保证状态值合法，
+    生命周期服务负责限制合法边及终态字段的一致性。
+  - 成功终态保存`final_result`并清空错误字段；失败终态保存`error_code/error_step`并清空结果，
+    避免同一Run同时表现为成功和失败。结果是本次执行快照，不作为最新Java业务事实。
+  - Repository使用带预期状态条件的单条`UPDATE ... RETURNING`实现compare-and-set。并发成功和
+    失败都从RUNNING抢终态时只有一个事务能更新，避免“先查再写”的丢失更新。
+  - 条件更新未命中后再读当前记录：不存在映射为`RunNotFoundError`，状态不匹配映射为
+    `InvalidRunTransitionError`，为后续入口层保留稳定、可区分的错误语义。
+  - `final_result`先执行标准JSON序列化和复制，拒绝`datetime`、NaN等跨语言不稳定值；时钟可注入
+    并拒绝无时区时间，确保测试确定性和部署时间语义明确。
+  - Service和Repository均不隐式commit，事务继续由未来HTTP/Workflow调用方控制。失败码暂不
+    绑定`ToolErrorCode`，因为Run还可能失败在CONTEXT、RULE或LLM步骤。
+- 核心实现：
+  - `agent-service/app/services/run_lifecycle.py` — `RunLifecycleService`：提供`create_run`、
+    `mark_running`、`mark_succeeded`、`mark_failed`，集中状态规则、时间、结果和错误字段校验。
+  - `agent-service/app/services/run_lifecycle.py` — `RunNotFoundError`、
+    `InvalidRunTransitionError`、`RunLifecycleValidationError`：分离资源缺失、状态冲突和调用参数错误，
+    暂不耦合HTTP或Tool协议。
+  - `agent-service/app/repositories/agent_runtime.py` — `transition_status`：限制可更新字段，并在数据库
+    单条语句中原子比较预期状态、更新目标状态和返回新Run。
+  - `agent-service/tests/test_agent_persistence.py` — 五个M2.2集成用例：成功、失败、非法输入/流转、
+    缺失Run和两个独立事务竞争终态。
+  - `scripts/test-agent-persistence.sh`、`Makefile` — 脚本透传pytest过滤参数；新增
+    `make test-run-lifecycle`独立验收，完整`make test-agent-persistence`保留M2.1～M2.2联合回归。
+  - 必要的最小流程：
+
+    ```text
+    上层在AsyncSession事务内构造RunLifecycleService
+    → create_run：INSERT PENDING + flush
+    → mark_running：WHERE status=PENDING原子更新RUNNING与started_at
+    → mark_succeeded或mark_failed：WHERE status=RUNNING原子抢占唯一终态
+    → 上层commit；异常时整体rollback
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：当前集成测试先创建父`AgentSession`，再由Lifecycle创建PENDING Run；开始和
+    结束动作通过同一个Service调用Repository条件更新。未来Workflow可以复用这条链，但本次未
+    自动接线。
+  - 核心类、函数、接口或配置项：`RunLifecycleService`四个公开方法、`_transition`、
+    `_json_snapshot`、三类内部异常、`AgentRunRepository.transition_status`、五个真实数据库用例及
+    `test-run-lifecycle`Make目标。
+  - 输入、输出、异常和边界：创建输入稳定Run/Session/可选Message ID，转换输入Run ID及结果或
+    错误定位，输出更新后的`AgentRun`。标识空白/超长、无时区时钟、非标准JSON、未知Run和非法
+    状态均在Service边界拒绝；父Session/Message外键错误仍由数据库在flush阶段暴露。
+  - 关键代码位置在全部修改和文档追加后重新核对，并以最终回复中的绝对路径行号为准。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：本次是内部生命周期层，不新增HTTP状态或权限校验；不把Java或Tool
+    错误转换逻辑复制到Run服务。错误码只保存机器可读定位，不保存异常堆栈、Token或原始业务响应。
+  - 幂等、并发或人工确认：重复开始、跳过RUNNING和终态回退被拒绝；并发终态由数据库CAS保护。
+    这不是完整请求幂等，也没有Approval；失败后若需整次重试，未来应创建新Run并保留关联，而非
+    重置历史终态。
+- 开发中发现并修复：
+  - 测试先行首次收集因`app.services`不存在产生1个预期`ModuleNotFoundError`，完成Service后消除。
+  - 首次完整`make quality`发现已提交M2.1模型中的中文学习注释存在导入间距、空行、尾随空白和
+    全角标点格式漂移；保留原说明含义，仅在`app/models/agent_runtime.py`机械调整格式，未修改
+    模型字段、约束或运行行为。
+- 未完成项与已知问题：
+  - 未完成项：M2.3 Step自动记录、摘要、错误和耗时；Tool/Workflow生命周期接线；
+    `WAITING_APPROVAL/CANCELLED`操作；Run级整次重试关联、超时回收、崩溃恢复、SSE和保留策略。
+  - 已知问题/阻塞：无阻塞。调试Run内存上下文与持久化Run仍是两套生命周期；`final_result`尚无
+    大小限制和归档策略；本地Java/Python数据库角色仍未隔离。
+- 替代方案：
+  - 采用的替代方案及原因：无临时业务替代方案。沿用M2.1的随机端口、tmpfs隔离PostgreSQL，
+    是正式数据库集成测试策略；本次没有用内存Store或SQLite替代真实并发语义。
+  - 已覆盖/未覆盖的验收要求：覆盖T207～T213最小生命周期、结果/错误保存、非法流转和并发竞争；
+    未覆盖Step、Workflow、审批、取消或生产调度能力，均未包装为已完成。
+  - 局限、风险和转正/移除条件：普通Python全量测试在未提供专用数据库环境变量时安全跳过8个
+    数据库用例，CI和开发验收必须执行`make test-agent-persistence`或完整`make test`；专项需要
+    Docker，但无需迁移为SQLite测试。
+- 后续影响：
+  - 对后续任务/里程碑：M2.3应复用同一事务所有权，在Run的执行窗口内记录Step，不能让每个Step
+    自行commit；Workflow接入时必须在异常路径调用`mark_failed`，并把具体失败Step名称保存到
+    `error_step`。
+  - 对接口/数据/测试/部署：没有Schema、Alembic revision、Java API、Tool Schema、固定数据或
+    前端契约变化；Agent镜像新增Service模块。未来公开HTTP/SSE前需单独设计生命周期错误映射和
+    结果Schema，不能直接暴露内部异常文本。
+- 测试与验证：
+  - `[预期失败] make test-agent-persistence` — 首次收集阶段1个`ModuleNotFoundError`，目标Service
+    尚不存在。
+  - `[通过] make test-run-lifecycle` — M2.2隔离PostgreSQL专项5/5。
+  - `[通过] make test-agent-persistence` — M2.1～M2.2持久化联合回归10/10。
+  - `[通过] agent-service内uv run --frozen pytest -q` — 180通过、8个数据库用例按环境门禁跳过；
+    同组用例已由专项真实执行。
+  - `[通过] make quality` — Ruff通过；mypy strict检查38个源/测试文件无问题。
+  - `[通过] docker compose up --detach --build agent-service + make smoke` — 最终Agent镜像和三服务
+    健康检查通过。
+  - `[通过] make test` — foundation/Compose、三服务smoke、Python M1分项、M2.1～M2.2专项、
+    Java 56/56、Web 7/7和Vue生产构建全部通过。
+  - `[未运行] make reset-demo` — 本次不修改Java固定业务数据，且命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/services/__init__.py`、`app/services/run_lifecycle.py`
+  - `agent-service/app/repositories/agent_runtime.py`
+  - `agent-service/app/models/agent_runtime.py`（只机械修复既有中文注释格式）
+  - `agent-service/tests/test_agent_persistence.py`
+  - `scripts/test-agent-persistence.sh`、`Makefile`
+  - `README.md`、`agent-service/README.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；已知非阻塞边界见“未完成项与已知问题”。
+  - 后续兼容注意事项：增加状态边必须同时更新Service、并发/非法流转测试和文档；公开
+    `final_result`前必须固定Schema和大小策略；不要把历史结果快照当作最新Java业务事实。
+- Agent面试价值评估：
+  - 有价值，已更新`doc/needCare.md`。本次真实实现并验证了Agent Run显式状态机、数据库CAS并发
+    保护、结果/错误互斥、标准JSON快照及事务边界，能够回答Agent可观测性和并发一致性取舍。
+- 下一建议任务：
+  - `[T214-T220] M2.3 最小Step记录`。

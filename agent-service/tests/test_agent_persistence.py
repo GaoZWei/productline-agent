@@ -1,6 +1,8 @@
+import asyncio
 import os
 import subprocess
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -23,6 +25,12 @@ from app.models import (
     AgentStepType,
 )
 from app.repositories import AgentRunRepository, AgentStepRepository
+from app.services import (
+    InvalidRunTransitionError,
+    RunLifecycleService,
+    RunLifecycleValidationError,
+    RunNotFoundError,
+)
 from app.settings import Settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -285,5 +293,203 @@ async def test_step_sequence_is_unique_inside_one_run(migrated_database_url: str
             with pytest.raises(IntegrityError):
                 await session.commit()
             await session.rollback()
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_run_lifecycle_persists_success_result(migrated_database_url: str) -> None:
+    started_at = datetime(2026, 8, 9, 1, 0, tzinfo=UTC)
+    finished_at = datetime(2026, 8, 9, 1, 0, 2, tzinfo=UTC)
+    clock_values = iter([started_at, finished_at])
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            async with session.begin():
+                session.add(AgentSession(session_id="session-success", user_id="user-001"))
+                service = RunLifecycleService(
+                    AgentRunRepository(session), now=lambda: next(clock_values)
+                )
+                created = await service.create_run(
+                    run_id="run-success",
+                    session_id="session-success",
+                )
+                assert created.status is AgentRunStatus.PENDING
+                assert created.started_at is None
+                assert created.finished_at is None
+
+                running = await service.mark_running("run-success")
+                assert running.status is AgentRunStatus.RUNNING
+                assert running.started_at == started_at
+
+                succeeded = await service.mark_succeeded(
+                    "run-success",
+                    final_result={"blocking_stage": "QUALITY_REVIEW"},
+                )
+                assert succeeded.status is AgentRunStatus.SUCCEEDED
+                assert succeeded.final_result == {"blocking_stage": "QUALITY_REVIEW"}
+                assert succeeded.finished_at == finished_at
+                assert succeeded.error_code is None
+                assert succeeded.error_step is None
+
+        async with database.session() as verification_session:
+            stored = await AgentRunRepository(verification_session).get("run-success")
+            assert stored is not None
+            assert stored.status is AgentRunStatus.SUCCEEDED
+            assert stored.final_result == {"blocking_stage": "QUALITY_REVIEW"}
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_run_lifecycle_persists_failure_details(migrated_database_url: str) -> None:
+    started_at = datetime(2026, 8, 9, 2, 0, tzinfo=UTC)
+    finished_at = datetime(2026, 8, 9, 2, 0, 1, tzinfo=UTC)
+    clock_values = iter([started_at, finished_at])
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            async with session.begin():
+                session.add(AgentSession(session_id="session-failed", user_id="user-001"))
+                service = RunLifecycleService(
+                    AgentRunRepository(session), now=lambda: next(clock_values)
+                )
+                await service.create_run(run_id="run-failed", session_id="session-failed")
+                await service.mark_running("run-failed")
+                failed = await service.mark_failed(
+                    "run-failed",
+                    error_code="TOOL_TIMEOUT",
+                    error_step="get_quality_issues",
+                )
+
+                assert failed.status is AgentRunStatus.FAILED
+                assert failed.started_at == started_at
+                assert failed.finished_at == finished_at
+                assert failed.final_result is None
+                assert failed.error_code == "TOOL_TIMEOUT"
+                assert failed.error_step == "get_quality_issues"
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_run_lifecycle_rejects_invalid_transitions_and_failure_data(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            async with session.begin():
+                session.add(AgentSession(session_id="session-invalid", user_id="user-001"))
+                service = RunLifecycleService(
+                    AgentRunRepository(session),
+                    now=lambda: datetime(2026, 8, 9, 3, 0, tzinfo=UTC),
+                )
+                await service.create_run(run_id="run-invalid", session_id="session-invalid")
+
+                with pytest.raises(InvalidRunTransitionError) as pending_success:
+                    await service.mark_succeeded("run-invalid", final_result={})
+                assert pending_success.value.current_status is AgentRunStatus.PENDING
+                assert pending_success.value.target_status is AgentRunStatus.SUCCEEDED
+
+                await service.mark_running("run-invalid")
+                with pytest.raises(InvalidRunTransitionError):
+                    await service.mark_running("run-invalid")
+                with pytest.raises(RunLifecycleValidationError) as invalid_error:
+                    await service.mark_failed(
+                        "run-invalid",
+                        error_code=" ",
+                        error_step="get_order_detail",
+                    )
+                assert invalid_error.value.field_name == "error_code"
+                with pytest.raises(RunLifecycleValidationError) as invalid_result:
+                    await service.mark_succeeded(
+                        "run-invalid",
+                        final_result={"generated_at": datetime(2026, 8, 9, tzinfo=UTC)},
+                    )
+                assert invalid_result.value.field_name == "final_result"
+
+                failed = await service.mark_failed(
+                    "run-invalid",
+                    error_code="TOOL_TIMEOUT",
+                    error_step="get_order_detail",
+                )
+                assert failed.status is AgentRunStatus.FAILED
+                with pytest.raises(InvalidRunTransitionError):
+                    await service.mark_succeeded("run-invalid", final_result={})
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_run_lifecycle_reports_missing_run(migrated_database_url: str) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            service = RunLifecycleService(AgentRunRepository(session))
+            with pytest.raises(RunNotFoundError) as missing:
+                await service.mark_running("run-missing")
+            assert missing.value.run_id == "run-missing"
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_run_lifecycle_allows_only_one_concurrent_terminal_transition(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as setup_session:
+            async with setup_session.begin():
+                setup_session.add(AgentSession(session_id="session-race", user_id="user-001"))
+                setup_service = RunLifecycleService(AgentRunRepository(setup_session))
+                await setup_service.create_run(run_id="run-race", session_id="session-race")
+                await setup_service.mark_running("run-race")
+
+        async def mark_succeeded() -> str:
+            async with database.session() as session:
+                async with session.begin():
+                    service = RunLifecycleService(AgentRunRepository(session))
+                    try:
+                        await service.mark_succeeded("run-race", final_result={"result": "ok"})
+                    except InvalidRunTransitionError:
+                        return "rejected"
+                    return "succeeded"
+
+        async def mark_failed() -> str:
+            async with database.session() as session:
+                async with session.begin():
+                    service = RunLifecycleService(AgentRunRepository(session))
+                    try:
+                        await service.mark_failed(
+                            "run-race",
+                            error_code="TOOL_TIMEOUT",
+                            error_step="get_order_detail",
+                        )
+                    except InvalidRunTransitionError:
+                        return "rejected"
+                    return "failed"
+
+        outcomes = await asyncio.gather(mark_succeeded(), mark_failed())
+        assert sorted(outcomes) in (["rejected", "succeeded"], ["failed", "rejected"])
+
+        async with database.session() as verification_session:
+            stored = await AgentRunRepository(verification_session).get("run-race")
+            assert stored is not None
+            if stored.status is AgentRunStatus.SUCCEEDED:
+                assert stored.final_result == {"result": "ok"}
+                assert stored.error_code is None
+                assert stored.error_step is None
+            else:
+                assert stored.status is AgentRunStatus.FAILED
+                assert stored.final_result is None
+                assert stored.error_code == "TOOL_TIMEOUT"
+                assert stored.error_step == "get_order_detail"
     finally:
         await database.dispose()

@@ -1293,8 +1293,92 @@ M2.3 还需要设计序号分配或并发控制；当前只证明数据库会拒
 
 ### 不能过度声称
 
-- 当前只有表、枚举、约束、迁移和 Run/Step Repository，M2.2 状态机和 M2.3 自动 Step 记录尚未
-  实现，不能声称 Workflow 已可观测或可恢复。
+- M2.2 已补充最小 Run 状态机；M2.3 自动 Step 记录仍未实现，不能声称 Workflow 已完整可观测
+  或可恢复。
 - Tool 调试 API、M1.7 内存账本与数据库 Run 仍未连接；服务重启后不能恢复 Tool 去重上下文。
 - 尚无 LangGraph、诊断 Workflow、SSE、评测面板、Trace-to-Step 自动关联或数据保留/归档策略。
 - 开发环境 Java 与 Python 仍共用数据库角色，代码边界已保持，但不是生产级数据库权限隔离。
+
+---
+
+## M2.2 Run 状态机、并发终态与结果快照
+
+### 面试价值判断
+
+核心关注。Agent 调用通常包含多个异步步骤，成功、异常处理、超时回调甚至重复消费可能并发更新
+同一个 Run。只在数据库中定义合法状态字符串并不能阻止状态倒退或两个终态互相覆盖。M2.2 用
+显式状态机和数据库 compare-and-set 更新，把一次执行的开始、成功结果或失败位置保存为一致、
+可验证的运行证据。
+
+### 与 Agent 开发的关系
+
+当前只允许以下最小主链：
+
+```text
+create_run
+→ PENDING
+→ mark_running：RUNNING + started_at
+├── mark_succeeded：SUCCEEDED + finished_at + final_result
+└── mark_failed：FAILED + finished_at + error_code + error_step
+```
+
+成功与失败字段互斥：成功终态清空错误信息，失败终态清空`final_result`。`final_result`保存的是
+这一次 Agent 执行结果快照，不是订单当前状态；未来仍要重新调用 Java Tool 获取最新业务事实。
+
+### 需要掌握的原理和设计取舍
+
+- 状态机位于`RunLifecycleService`，数据库Check Constraint只保证值属于枚举，两者职责不同。
+- Repository使用单条`UPDATE ... WHERE run_id = ? AND status = expected_status RETURNING ...`。
+  这是compare-and-set：只有仍处于预期状态的事务能更新。相比“先查状态、再更新”，它消除了
+  查询与写入之间的竞争窗口。
+- 条件更新失败后再查询：不存在时抛`RunNotFoundError`，存在但状态不符时抛
+  `InvalidRunTransitionError`。这让未来API或Workflow能区分资源缺失与重复/过期动作。
+- 生命周期异常暂不绑定HTTP状态码或`ToolResult`，避免底层执行状态被过早耦合到某个入口协议。
+- 结果先经过标准JSON序列化并复制，拒绝`datetime`、NaN等PostgreSQL JSON字段或跨语言消费者
+  可能无法稳定处理的值，避免到事务commit时才暴露错误。
+- 时钟可注入且只接受带时区时间，使测试可以固定时间，并避免不同部署时区产生含糊时间戳。
+- Service和Repository都不隐式commit；HTTP或Workflow调用方仍拥有事务边界，便于未来将Run和
+  Step变更作为一个业务动作提交。
+- 失败码没有强制复用`ToolErrorCode`。Run不仅可能因Tool失败，还可能因上下文、规则或LLM步骤
+  失败；当前只约束非空和长度，统一错误词汇需在Workflow接入时设计。
+
+### 可能的面试问题及回答要点
+
+**数据库已经有状态枚举，为什么还要状态机？**
+
+回答要点：枚举约束只能拒绝未知字符串，无法阻止`SUCCEEDED → RUNNING`或`PENDING → SUCCEEDED`。
+业务服务必须定义合法边，并对每次转换的时间、结果和错误字段做一致更新。
+
+**为什么不用先SELECT再UPDATE？**
+
+回答要点：两个事务都可能读到RUNNING，然后一个写SUCCEEDED、另一个写FAILED，后写者覆盖先写者。
+把预期状态放进UPDATE条件后，数据库原子决定胜者；失败方读回当前状态并返回状态冲突。
+
+**Run失败后为什么不能在同一个Run上重置为RUNNING？**
+
+回答要点：终态是一次执行的审计事实，重置会抹掉失败证据并让指标含义不清。需要重试整次执行时
+应创建新Run，并通过后续字段关联原Run；该关联能力当前尚未实现。
+
+**为什么要在写数据库前验证final_result是标准JSON？**
+
+回答要点：Agent结果最终会被数据库、API、SSE和前端共同消费。提前验证能在稳定服务边界报错，
+避免commit阶段才因不可序列化对象失败，也避免Python特有值泄漏到跨语言契约。
+
+**这算幂等吗？**
+
+回答要点：它实现的是状态转换的并发安全和重复动作拒绝，不等同于“相同请求返回相同响应”的
+完整业务幂等。Run创建ID冲突、整次执行重试关联和消息消费幂等仍需后续设计。
+
+### 简历表述建议
+
+> 实现 Agent Run 显式生命周期与并发安全终态写入，通过数据库条件更新避免成功/失败竞争覆盖，
+> 并对结果快照、错误定位和时区时间进行一致性校验；在隔离 PostgreSQL 上验证非法流转及并发
+> 竞争场景。
+
+### 不能过度声称
+
+- 生命周期尚未接入Tool调试API、确定性Workflow或HTTP入口，当前由服务集成测试直接调用。
+- M2.3 Step自动记录尚未实现，不能声称已经展示完整执行步骤、耗时或失败链路。
+- `WAITING_APPROVAL`和`CANCELLED`只是M2.1预留枚举，M2.2没有实现暂停、恢复、取消或审批语义。
+- 没有Run级重试关联、超时回收、心跳、崩溃恢复、跨实例调度、SSE或生产保留/归档策略。
+- compare-and-set保证单次终态不互相覆盖，不代表整个Agent Workflow已经具备exactly-once语义。

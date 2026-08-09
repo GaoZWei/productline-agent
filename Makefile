@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -35,8 +35,11 @@ test-agent-tool-protocol: ## 验证 M1.4 Tool 基础协议、执行门禁和注�
 test-tools: test-agent-tool-protocol ## 验证 M1.4-M1.8 Tool 协议、调用策略和开发调试 API
 	cd agent-service && uv run --frozen pytest -q tests/test_retry_policy.py tests/test_tool_call_deduplication.py tests/integration/tools tests/integration/test_tool_debug_api.py
 
-test-agent-persistence: ## 在隔离 PostgreSQL 上验证 M2.1 模型、迁移和 Repository
+test-agent-persistence: ## 在隔离 PostgreSQL 上验证 M2.1-M2.2 持久化与 Run 生命周期
 	./scripts/test-agent-persistence.sh
+
+test-run-lifecycle: ## 在隔离 PostgreSQL 上单独验证 M2.2 Run 生命周期
+	./scripts/test-agent-persistence.sh -k run_lifecycle
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查
 	cd agent-service && uv run --frozen ruff check .

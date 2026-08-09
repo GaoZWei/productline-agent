@@ -1,10 +1,10 @@
 # Agent Service
 
-M2.1 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M2.2 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
-包含 Session/Message/Run/Step 模型、Alembic 迁移和 Run/Step Repository，尚未包含 Workflow、
-RAG 或模型调用。
+包含 Session/Message/Run/Step 模型、Alembic 迁移、Run/Step Repository和最小Run生命周期，
+尚未包含Workflow、RAG或模型调用。
 
 ## 本地开发
 
@@ -112,13 +112,26 @@ agent_sessions  一段连续对话及其用户归属
 ```
 
 `AgentRunRepository` 和 `AgentStepRepository` 提供异步增、删、查。Repository 会 `flush` 以便
-尽早发现外键、唯一序号等数据库约束，但不会隐式 `commit`；事务边界由后续 Run 生命周期服务
+尽早发现外键、唯一序号等数据库约束，但不会隐式 `commit`；事务边界由 Run 生命周期调用方
 统一控制。删除 Session 会级联其 Message、Run 和 Step，删除 Run 会级联 Step；删除请求消息
 只把 Run 的 `request_message_id` 置空，保留已发生的运行记录。
 
 Run 状态和 Step 类型已按 M2 计划固化为字符串 Check Constraint。Step 输入/输出只预留受控
-摘要字段，不能写入完整 Token、密钥或未经脱敏的业务载荷。当前尚未实现 M2.2 状态流转服务，
-也尚未由 Tool 或 Workflow 自动创建这些记录。
+摘要字段，不能写入完整 Token、密钥或未经脱敏的业务载荷。
+
+`RunLifecycleService`实现以下最小状态机：
+
+```text
+create_run       → PENDING
+mark_running     → PENDING → RUNNING
+mark_succeeded   → RUNNING → SUCCEEDED，并保存标准JSON结果快照
+mark_failed      → RUNNING → FAILED，并保存error_code和error_step
+```
+
+状态更新使用`WHERE run_id=? AND status=?`的原子条件更新。并发成功/失败请求只有一个能修改
+`RUNNING` Run，另一个得到`InvalidRunTransitionError`，避免最后写入者覆盖先完成的终态。
+Repository和Service仍不隐式commit，事务由调用方统一提交。当前Tool和Workflow尚未自动调用
+该服务，`WAITING_APPROVAL`和`CANCELLED`操作也未提前实现。
 
 ## 测试与质量
 
@@ -137,6 +150,7 @@ make test-agent-errors
 make test-agent-tool-protocol
 make test-tools
 make test-agent-persistence
+make test-run-lifecycle
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
+
 # Message角色
 class AgentMessageRole(StrEnum):
     """会话消息发送方; 当前只持久化用户和助手消息。"""
@@ -135,7 +136,7 @@ class AgentMessage(Base):
     )
 
     session: Mapped[AgentSession] = relationship(back_populates="messages")
-    # 表示一条用户消息可能关联若干Run 
+    # 表示一条用户消息可能关联若干Run
     requested_runs: Mapped[list["AgentRun"]] = relationship(
         back_populates="request_message",
         foreign_keys="AgentRun.request_message_id",
@@ -152,11 +153,11 @@ class AgentRun(Base):
     )
 
     run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    # 删除Session时，其Run也删除
+    # 删除Session时, 其Run也删除
     session_id: Mapped[str] = mapped_column(
         ForeignKey("agent_sessions.session_id", ondelete="CASCADE"), nullable=False
     )
-    # 删除用户消息时，Run不会删除，只把request_message_id设为NULL。 为了保留历史运行证据
+    # 删除用户消息时, Run不会删除, 只把request_message_id设为NULL。 为了保留历史运行证据
     request_message_id: Mapped[str | None] = mapped_column(
         ForeignKey("agent_messages.message_id", ondelete="SET NULL"), nullable=True
     )
@@ -167,12 +168,12 @@ class AgentRun(Base):
         server_default=AgentRunStatus.PENDING.value,
         nullable=False,
     )
-    # 保存的是“本次Run当时得到的诊断结果”，订单最新状态仍要重新调用Java Tool获取
+    # 保存的是“本次Run当时得到的诊断结果”, 订单最新状态仍要重新调用Java Tool获取
     final_result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # 错误字段
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_step: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    # 时间字段（创建时间、更新时间、开始时间、结束时间）
+    # 时间字段(创建时间、更新时间、开始时间、结束时间)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -230,7 +231,7 @@ class AgentStep(Base):
     input_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # 时间 步骤未完成时可以是NULL，完成后必须是非负数
+    # 时间 步骤未完成时可以是NULL, 完成后必须是非负数
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
