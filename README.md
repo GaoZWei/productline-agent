@@ -81,7 +81,7 @@ make ps               # 查看服务状态
 ├── business-service/    # Spring Boot 业务服务与领域模型
 ├── web-console/         # Vue 前端目标目录（当前为静态启动骨架）
 ├── doc/                 # 原始需求、细化计划与开发记录
-├── docs/                # 路线图、状态和测试报告
+├── docs/                # 路线图和当前状态
 ├── scripts/             # 根级验证脚本
 ├── docker-compose.yml
 └── Makefile
@@ -93,7 +93,7 @@ make ps               # 查看服务状态
 
 1. 只完成当前里程碑内的一个可测试任务；
 2. 保证固定数据和 `ORDER-003` 黄金链路稳定；
-3. 运行任务对应测试并如实更新 `docs/STATUS.md`、`docs/TEST_REPORT.md`；
+3. 运行任务对应测试，并在 `docs/STATUS.md` 记录当前测试摘要、阻塞和下一任务；
 4. 首次开发阶段时，在 `doc/detailed-plan.md` 对应二级标题下补充 `### 解决的问题`；
 5. 实际功能开发按“核心解决的问题、实现的核心代码、实现的核心功能”三栏更新 `doc/record.md`；
 6. 评估本次开发的 Agent 面试价值，只有有价值时才按“解决的问题/对项目的价值、与 Agent 开发的关系、可能的面试问题”三栏更新 `doc/needCare.md`。
