@@ -2637,3 +2637,130 @@
     能说明Agent幻觉控制、TypedDict/Pydantic分工、错误最小化和可自动评测性的设计取舍。
 - 下一建议任务：
   - `[T227-T235] M2.5 固定Workflow节点`。
+
+---
+
+## 2026-08-09 20:15 — `[T227-T235] M2.5 固定 Workflow 节点`
+
+- 里程碑：M2 确定性订单诊断
+- 任务类型：LangGraph Workflow / Tool编排 / 状态合并 / 失败路由 / Step可观测性 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：引入LangGraph并固定串联`load_context → load_order → load_tasks → load_progress →
+    load_quality → load_review → load_delivery`；将现有只读Tool结果写入M2.4状态通道，支持多任务
+    稳定合并、首错中断和标准`StepError`；提供真实数据库Step短事务适配。
+  - 明确不实现：不进入M2.6/M2.7，不实现`diagnose_by_rules`、阻塞阶段枚举、证据生成、
+    `format_result`、LLM/RAG；不实现M2.8诊断HTTP API、Run创建/结束、SSE、前端或LangGraph
+    checkpointer；不修改Java接口、固定业务数据、Agent表结构或Alembic revision。
+- 需求与关键决策：
+  - 使用LangGraph`StateGraph`表达固定顺序，当前事实取证路径不交给模型自由决策；每个节点只返回
+    自己负责的partial state，由图合并后传给下一节点。
+  - `load_context`使用现有`OrderIdInput`校验订单ID，并验证图输入Run与`ToolContext.run_id`一致；
+    随后一次性初始化M2.4全部状态通道。
+  - `load_tasks`复用`get_related_tasks`，按`task_id`稳定排序并转换为结构相同的`TaskDetail`；
+    `get_task_detail`保留给后续动态Agent或需要单任务刷新/版本核对的路径，本次不制造计划外节点。
+  - `load_progress/load_quality/load_review`逐任务执行Tool，在局部字典全部成功后才返回状态更新；
+    以`task_id`作为键保留事实归属，并避免上游数组顺序变化影响结果。
+  - 所有Tool仍通过`ToolRegistry → BaseTool.execute`，因此权限、输入/输出Schema、有限重试、
+    Trace ID和Run内重复调用检测不被Workflow绕过；同一Workflow实例绑定一个`ToolContext`且只能
+    运行一次。
+  - Tool失败转换为`StepError(code/message/retryable/trace_id)`并追加到`errors`；条件边立即进入
+    `END`，保留前序已成功状态和Step证据，但不继续调用依赖完整事实的下游Tool。
+  - Step序号按真实执行顺序递增；Step ID使用`run_id + sequence + step_name`的SHA-256摘要，
+    不把完整Run ID复制到技术主键。摘要只保存业务ID、数量、状态、错误码和retryable白名单字段。
+  - `WorkflowStepRecorder`使用Protocol解耦图和持久化；`DatabaseWorkflowStepRecorder`在Tool前后
+    分别创建短事务，先提交RUNNING Step并释放父Run锁，网络调用完成后再提交成功或失败。
+- 核心实现：
+  - `agent-service/app/workflows/order_diagnosis.py` — `OrderDiagnosisWorkflow`、七个加载节点、
+    LangGraph图构建、Tool统一调用、StepError转换、条件停止、序号和安全Step ID。
+  - `agent-service/app/workflows/recording.py` — `WorkflowStepRecorder` Protocol与
+    `DatabaseWorkflowStepRecorder`短事务适配，复用M2.3 `StepLifecycleService`。
+  - `agent-service/app/workflows/__init__.py` — 提供固定Workflow和记录器的包级稳定导出。
+  - `agent-service/tests/test_order_diagnosis_workflow.py` — 5个测试，覆盖ORDER-003固定链路、增量
+    合并、多任务稳定顺序、Tool失败中断、非法上下文和M2.5图边界。
+  - `agent-service/tests/test_agent_persistence.py` — 新增真实PostgreSQL记录器测试，证明两个独立
+    终态与开始事务都已提交且父Run仍可继续由上层结束。
+  - `agent-service/pyproject.toml`、`uv.lock` — 新增`langgraph>=1.0,<2.0`，当前锁定1.2.10；解析器
+    将传递`websockets`从17.0.1调整为15.0.1，项目未直接使用其API，镜像、smoke和全量测试通过。
+  - `Makefile` — 新增`make test-workflow-nodes`并纳入根级`make test`，持久化目标说明扩展到M2.5。
+  - 核心数据流：
+
+    ```text
+    order_id + Run级ToolContext
+    → load_context初始化OrderDiagnosisState
+    → Registry获取既有只读Tool
+    → BaseTool权限/Schema/去重/重试/超时门禁
+    → Java强类型事实按order_id/task_id写入partial state
+    ├── success: Step成功 + LangGraph合并 + 下一节点
+    └── error: Step失败 + StepError + errors + END
+    ```
+
+- 代码解释与定位：
+  - 整体边界：Workflow只负责确定性取证和状态编排，不直接访问Java数据库、不解释阻塞原因，也不
+    创建业务事实；Java仍是事实源，Tool仍是唯一业务调用边界。
+  - 输入输出：输入订单ID和已绑定身份/权限/Trace/Run的`ToolContext`；输出填充到交付状态的
+    `OrderDiagnosisState`。成功时`diagnosis=None/errors=[]`，失败时保留前序事实并返回一个受控错误。
+  - 关键类、函数和测试的准确行号将在全部修改完成后重新核对，并通过最终回复提供绝对路径链接。
+- 异常、安全与边界：
+  - 非法订单ID或Run不匹配在HTTP前变成不可重试`PARAM_VALIDATION_ERROR`；Tool权限、404、超时、
+    上游不可用、响应校验和重复调用继续使用M1标准错误语义。
+  - Tool未注册收敛为安全`UNKNOWN_TOOL_ERROR`；异常响应或原始堆栈不进入状态和Step摘要。
+  - 多任务节点失败时不提交该节点的半份聚合状态；已经真实发生的成功Tool Step仍保留，便于审计。
+  - 持久化记录失败作为基础设施异常向上抛出，不伪装成业务Tool错误，因为此时无法可靠证明Step。
+- 开发中发现并修复：
+  - 测试先行首次执行因`app.workflows`不存在产生1个预期收集`ModuleNotFoundError`。
+  - 首次实现用`zip(..., strict=True)`遍历原序列和去首元素序列，两侧长度天然相差1，造成4个图
+    构建测试失败；改用标准库`itertools.pairwise`后准确表达相邻边并全部通过。
+  - 首次完整Ruff发现既有M2.4 Schema讲解注释存在全角标点和导入后缺空行；保留用户中文说明
+    含义，只机械调整为ASCII标点和空行，未改变M2.4运行契约。
+- 未完成项与已知问题：
+  - 未完成项：M2.6确定性诊断规则、M2.7结果/文案、M2.8 Run终态与诊断API、前端、RAG、动态
+    Agent、LangGraph checkpoint、崩溃恢复、并行/断点序号分配和真实Java Workflow端到端测试。
+  - 已知问题/阻塞：无阻塞。当前调用方必须预先创建并启动Run；进程在Tool执行中崩溃可能留下
+    RUNNING Step；Step没有持久化Trace/retry_count/Tool指纹；调试Run内存上下文仍未关联持久化Run。
+- 替代方案：
+  - 采用的阶段方案及原因：当前不启用LangGraph checkpointer，而复用Agent自有Step表记录业务
+    执行证据；M2.5只要求线性单次取证，暂时没有恢复入口、thread配置或持久化状态快照契约。
+  - 已覆盖/未覆盖：覆盖固定节点、状态合并、首错中断和步骤审计；不覆盖崩溃恢复、暂停继续或
+    exactly-once，不能把Step记录描述为LangGraph checkpoint。
+  - 局限、风险和移除条件：M2.8接入Run终态时需处理遗留RUNNING Step；未来出现人工中断、长流程
+    恢复或多实例续跑需求时，再引入与Agent表边界明确的checkpointer及迁移方案。
+  - 测试阶段使用httpx MockTransport验证完整Client/Tool/Workflow链路，并以独立Java契约测试和
+    三服务smoke作补充；尚未覆盖Workflow直接请求运行中Java服务，M2.8接口集成测试需补齐。
+- 后续影响：
+  - 对后续任务/里程碑：M2.6应在`load_delivery`后接入纯规则节点，消费现有状态并生成正式阻塞
+    阶段；不得重新请求业务事实或把缺失数据当作正常结论。M2.8需负责Run创建、RUNNING、最终
+    SUCCEEDED/FAILED和失败步骤映射，并提供`DatabaseWorkflowStepRecorder`。
+  - 对接口/数据/测试/部署：无Java API、Tool Schema、固定数据、Agent表或前端契约变化；Agent
+    新增LangGraph生产依赖和约380行锁文件变化，镜像安装51个运行包并已通过smoke。未来升级
+    LangGraph或websockets必须重新运行节点、镜像和全量回归。
+- 测试与验证：
+  - `[预期失败] agent-service内uv run --frozen pytest -q tests/test_order_diagnosis_workflow.py` —
+    收集阶段1个`ModuleNotFoundError`。
+  - `[开发中失败后修复] 同一专项` — 严格zip导致4个图构建失败，改用pairwise后消除。
+  - `[通过] make test-workflow-nodes` — 5/5。
+  - `[通过] make test-agent-persistence` — 隔离PostgreSQL 17/17，其中新增记录器1项。
+  - `[通过] agent-service内uv run --frozen pytest -q` — 203通过、15个数据库用例按环境门禁跳过；
+    同组用例已由隔离专项真实执行。
+  - `[通过] make quality` — Ruff通过；mypy strict检查45个源/测试文件无问题。
+  - `[通过] docker compose up --detach --build agent-service + make smoke` — LangGraph已进入生产镜像，
+    Agent、Business、Web三服务健康检查通过。
+  - `[通过] make test` — foundation/Compose、三服务smoke、Python M1、M2.1～M2.5、Java 56/56、
+    Web 7/7及Vue生产构建全部通过。
+  - `[未运行] make reset-demo` — 本次不修改Java固定业务数据，且命令会删除本地持久卷。
+- 变更文件：
+  - `agent-service/app/workflows/order_diagnosis.py`、`app/workflows/recording.py`、`app/workflows/__init__.py`
+  - `agent-service/app/schemas/workflow.py`（只机械修复既有讲解注释格式）
+  - `agent-service/tests/test_order_diagnosis_workflow.py`、`tests/test_agent_persistence.py`
+  - `agent-service/pyproject.toml`、`agent-service/uv.lock`、`Makefile`
+  - `README.md`、`agent-service/README.md`、`doc/detailed-plan.md`、`doc/pythonKnowledge.md`
+  - `docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；崩溃残留、Run终态、checkpointer和端到端边界见上文。
+  - 后续兼容注意事项：不得并发或重复调用同一个Workflow实例；扩展并行分支前必须替换实例内
+    序号分配；M2.6只增加规则节点，不应改变已验证的Tool取证顺序和状态键归属。
+- Agent面试价值评估：
+  - 有价值，已更新`doc/needCare.md`。本次实现固定图与动态Agent的边界、Tool事实确定性聚合、
+    标准错误控制流、失败后调用预算控制和短事务可观测性，能够基于真实代码说明可靠性取舍。
+- 下一建议任务：
+  - `[T236-T243] M2.6 确定性诊断规则`。

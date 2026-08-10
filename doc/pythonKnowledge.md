@@ -2,7 +2,7 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M2.4 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M2.5 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
@@ -11,7 +11,8 @@ Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康
 最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测。M2.1 已增加 Session、Message、Run、
 Step持久化基础，M2.2～M2.3已实现最小Run/Step状态流转，M2.4已定义Workflow状态与结构化诊断
-Schema，但尚未实现Workflow节点执行或大模型调用。
+Schema，M2.5已实现固定LangGraph数据加载节点、状态合并、失败中断和Step记录适配；诊断规则、
+HTTP入口和大模型调用尚未实现。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -74,6 +75,9 @@ agent-service/
 │   ├── services/
 │   │   ├── run_lifecycle.py         # 最小Run生命周期与内部异常
 │   │   └── step_lifecycle.py        # Step记录、摘要保护和耗时
+│   ├── workflows/
+│   │   ├── order_diagnosis.py       # 固定LangGraph加载节点与失败路由
+│   │   └── recording.py             # Workflow到Step生命周期的短事务适配
 │   ├── clients/
 │   │   └── business.py             # 调用 Java 的异步 HTTP Client
 │   └── schemas/
@@ -93,7 +97,8 @@ agent-service/
     ├── test_observability.py
     ├── test_alembic.py
     ├── test_business_client.py
-    └── test_agent_persistence.py   # 隔离PostgreSQL迁移、Repository与生命周期测试
+    ├── test_agent_persistence.py   # 隔离PostgreSQL迁移、Repository与生命周期测试
+    └── test_order_diagnosis_workflow.py # 固定节点、合并和失败中断测试
 ```
 
 本地运行后还会看到以下生成目录：
@@ -716,6 +721,58 @@ M2.4只先要求大写稳定代码，避免跨任务提前实现规则。
 `StepError`复用`ToolErrorCode`并只保存步骤名、安全文案、`retryable`和可选Trace ID，不允许附加
 原始响应或异常堆栈。这样M2.5节点失败后可以把错误放入状态，同时降低Token、业务载荷或内部异常
 细节继续传播的风险。
+
+### 5.8 M2.5 的固定 LangGraph Workflow
+
+[`agent-service/app/workflows/order_diagnosis.py`](../agent-service/app/workflows/order_diagnosis.py)
+把M2.4的`OrderDiagnosisState`真正交给LangGraph `StateGraph`执行。可以类比为：
+
+| Python实现 | Java类比 | Node.js类比 |
+| --- | --- | --- |
+| `StateGraph` | 代码定义的流程状态机/责任链 | 显式编排的异步pipeline |
+| node异步方法 | 一个只负责单阶段的Service方法 | 一个async middleware/handler |
+| node返回增量dict | 返回局部状态变更对象 | 返回partial state |
+| conditional edge | 根据结果选择下一状态 | 根据结果选择下一个handler或结束 |
+
+当前固定顺序是：
+
+```text
+load_context
+→ load_order
+→ load_tasks
+→ load_progress
+→ load_quality
+→ load_review
+→ load_delivery
+```
+
+`load_context`先用`OrderIdInput`做运行时校验，并初始化M2.4声明的全部状态字段。后续节点通过
+`ToolRegistry`查找已有只读Tool，并复用同一个`ToolContext`，所以权限、Pydantic输入输出校验、
+有限重试和Run内重复调用检测都不会被Workflow绕过。
+
+节点只返回它负责的增量，例如`load_order`返回`{"order": order}`。LangGraph把该增量与已有
+状态合并，不要求每个节点复制整份状态。任务列表会按`task_id`稳定排序，进度、质检、复核结果
+使用`dict[task_id, result]`合并；同一个多任务节点只有全部Tool调用成功后才提交该节点的字典更新，
+避免返回难以区分的半份聚合结果。
+
+Tool失败不是抛出一段自由文本，而是执行：
+
+```text
+ToolResult(success=false, error=ToolError)
+→ 转成StepError(code/message/retryable/trace_id)
+→ 追加到state.errors
+→ conditional edge选择END
+→ 后续Tool不再调用
+```
+
+[`agent-service/app/workflows/recording.py`](../agent-service/app/workflows/recording.py)定义
+`WorkflowStepRecorder` Protocol，类似Java接口或TypeScript interface；测试可使用内存实现，运行时
+使用`DatabaseWorkflowStepRecorder`。数据库实现会在动作开始前单独提交`RUNNING` Step，HTTP调用
+结束后再用新事务标记成功或失败，因此不会把Java网络等待包在父Run行锁事务里。
+
+每个Workflow实例绑定一个Run级`ToolContext`并只允许执行一次。Step序号按真实执行顺序递增，
+Step ID由`run_id + sequence + step_name`的SHA-256摘要生成，不把完整Run ID复制到技术主键中。
+当前编排到`load_delivery`即结束，尚未包含M2.6的`diagnose_by_rules`或M2.7的`format_result`。
 
 ## 6. Trace ID 与结构化日志
 
@@ -1653,7 +1710,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M2.4 已完成
+### 13.1 M1.1～M2.5 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1672,6 +1729,9 @@ async def lifespan(...):
 - 固定诊断`OrderDiagnosisState`十个必需状态通道；
 - 严格`DiagnosisResult/RootCause/Evidence/Suggestion/StepError` Pydantic契约；
 - Tool字段级标量证据约束、无阻塞根因互斥和0～1置信度校验；
+- LangGraph固定上下文、订单、任务、进度、质检、复核和交付加载节点；
+- 多任务稳定排序与按任务ID聚合、标准Tool错误到StepError及失败条件路由；
+- Workflow调用Step生命周期的Protocol边界和数据库短事务适配；
 - JSON日志和安全Trace ID；
 - 共享异步Java HTTP Client和连接池；
 - 身份、Token、Trace ID和幂等键透传；
@@ -1697,13 +1757,13 @@ async def lifespan(...):
 ### 13.2 当前尚未实现
 
 - 数据库readiness；
-- Tool/Workflow自动创建Run和Step；
-- Workflow节点执行、确定性诊断规则、动态Agent和模型调用；
+- Workflow自动创建/结束Run，以及调试API自动记录Step；
+- 确定性诊断规则、动态Agent和模型调用；
 - RAG、SSE和Approval。
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M2.4 结构和后续可能增加的内容
+### 13.3 当前 M2.5 结构和后续可能增加的内容
 
 当前关键结构为：
 
@@ -1719,6 +1779,9 @@ app/
 ├── schemas/
 │   ├── tools.py                 # 已实现的七个只读Tool输入输出Schema
 │   └── workflow.py              # 已实现的Workflow状态与结构化诊断Schema
+├── workflows/
+│   ├── order_diagnosis.py       # 已实现的固定LangGraph加载图
+│   └── recording.py             # 已实现的Step短事务记录适配
 ├── tools/
 │   ├── base.py                  # 已实现的Tool协议
 │   ├── deduplication.py         # 已实现的指纹和Run内调用账本
@@ -1730,8 +1793,8 @@ app/
     └── tool_debug.py            # 已实现的开发专用Tool调试接口与Run上下文存储
 ```
 
-上述文件均已存在。M2.4只完成状态和结果契约；Tool执行尚未自动创建Run/Step，固定Workflow节点、
-确定性诊断规则和动态模型调用也未完成，不能把“Schema可校验”描述成“已有Agent运行闭环”。
+上述文件均已存在。M2.5已完成业务事实加载图和Tool Step记录，但尚未实现阻塞阶段判断、诊断结果
+生成、Run终态、HTTP API或动态模型调用，不能把“状态加载完成”描述成“已有Agent诊断闭环”。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 

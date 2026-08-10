@@ -14,7 +14,8 @@ from app.schemas.tools import (
     ReviewResult,
     TaskDetail,
 )
-# 稳定机器代码类型，用于唯一标识Workflow节点、根因、Tool字段等。
+
+# 稳定机器代码类型, 用于唯一标识Workflow节点、根因、Tool字段等。
 StableCode = Annotated[
     str,
     Field(min_length=1, max_length=128, pattern=r"^[A-Z][A-Z0-9_]*$"),
@@ -47,7 +48,7 @@ ReadToolName = Literal[
     "get_delivery_status",
 ]
 
-# 公共父类，为Workflow内部结果提供严格、不可变且禁止额外字段的共同配置。
+# 公共父类, 为Workflow内部结果提供严格、不可变且禁止额外字段的共同配置。
 class WorkflowSchema(BaseModel):
     """为Workflow内部结果提供严格、不可变且禁止额外字段的共同配置。"""
 
@@ -65,11 +66,11 @@ class RootCause(WorkflowSchema):
     code: StableCode
     description: WorkflowText
 
-# 诊断依据（有价值的）
+# 诊断依据(有价值的)
 class Evidence(WorkflowSchema):
     """把一条诊断依据定位到具体只读Tool及其单个响应字段。"""
 
-    source_type: Literal["TOOL"]  # 当前只能是"TOOL"，模型自己的判断，不能直接成为业务事实证据
+    source_type: Literal["TOOL"]  # 当前只能是"TOOL", 模型自己的判断, 不能直接成为业务事实证据
     tool_name: ReadToolName
     field_path: EvidenceFieldPath  # 这条结论具体来自Tool结果中的哪个字段
     value: EvidenceValue  # 只允许标量值
@@ -82,7 +83,7 @@ class Suggestion(WorkflowSchema):
     action_type: StableCode
     description: WorkflowText
 
-# 未来某个Tool节点失败时，可以写入StepError
+# 未来某个Tool节点失败时, 可以写入StepError
 class StepError(WorkflowSchema):
     """保存Workflow分支所需的安全错误字段, 不承载原始响应或异常堆栈。"""
 
@@ -92,7 +93,7 @@ class StepError(WorkflowSchema):
     retryable: bool
     trace_id: TraceIdentifier | None = None
 
-# 订单诊断结果（稳定输出）
+# 订单诊断结果(稳定输出)
 class DiagnosisResult(WorkflowSchema):
     """订单阻塞阶段、结构化根因、可追溯证据和建议的稳定输出。"""
 

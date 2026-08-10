@@ -1,10 +1,10 @@
 # Agent Service
 
-M2.4 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M2.5 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
-Workflow状态/诊断Schema，尚未包含Workflow节点、RAG或模型调用。
+Workflow状态/诊断Schema和固定LangGraph数据加载节点，尚未包含诊断规则、RAG或模型调用。
 
 ## 本地开发
 
@@ -130,8 +130,8 @@ mark_failed      → RUNNING → FAILED，并保存error_code和error_step
 
 状态更新使用`WHERE run_id=? AND status=?`的原子条件更新。并发成功/失败请求只有一个能修改
 `RUNNING` Run，另一个得到`InvalidRunTransitionError`，避免最后写入者覆盖先完成的终态。
-Repository和Service仍不隐式commit，事务由调用方统一提交。当前Tool和Workflow尚未自动调用
-该服务，`WAITING_APPROVAL`和`CANCELLED`操作也未提前实现。
+Repository和Service仍不隐式commit，事务由调用方统一提交。M2.5 Workflow已通过
+`DatabaseWorkflowStepRecorder`复用Step生命周期；`WAITING_APPROVAL`和`CANCELLED`操作未提前实现。
 
 `StepLifecycleService`仅允许在`RUNNING` Run下开始Step，并在创建时自动写入`run_id`、序号、
 类型、名称、输入摘要和`started_at`。父Run使用`SELECT ... FOR UPDATE`校验，避免Run正在进入终态
@@ -140,8 +140,8 @@ Repository和Service仍不隐式commit，事务由调用方统一提交。当前
 
 摘要是调用方提供的受控说明，不接收原始业务对象；Service会压缩空白、遮盖常见Bearer Token、
 API Key、Password和Secret写法，并截断到1000字符。该规则是最小防护，不等同于完整PII/DLP
-识别，未来Workflow仍必须先选择允许保存的字段。当前Step服务已可独立调用，但Tool和Workflow
-还不会自动创建这些记录。
+识别。M2.5 Workflow只保存订单/任务ID、数量、状态、错误码和retryable等白名单摘要，不把完整
+Tool响应写入Step；开发调试API仍未接入持久化Run/Step。
 
 ## Workflow状态与诊断Schema
 
@@ -156,7 +156,33 @@ API Key、Password和Secret写法，并截断到1000字符。该规则是最小�
 
 `blocking_stage`当前只校验为稳定大写代码；`PRODUCTION_BLOCKED/QUALITY_REVIEW/REVIEW/DELIVERY/NONE`
 正式枚举属于M2.6。`NONE`不得同时携带根因，其他阶段至少需要一个根因。M2.4只定义状态和结果
-契约，没有执行Tool、生成诊断或接入Run/Step生命周期。
+契约；M2.5已经执行Tool并填充事实通道，但仍不生成诊断。
+
+## 固定 Workflow 节点
+
+`OrderDiagnosisWorkflow`使用LangGraph `StateGraph`固定串联：
+
+```text
+load_context
+→ load_order
+→ load_tasks
+→ load_progress
+→ load_quality
+→ load_review
+→ load_delivery
+```
+
+`load_context`校验`order_id`和Run一致性并初始化全部状态通道；其余节点只通过现有只读Tool读取
+Java事实。任务列表按`task_id`稳定排序，进度、质检和复核以`task_id`为键一次性合并，避免多任务
+结果失去归属。节点返回增量字典，由LangGraph合并到共享`OrderDiagnosisState`。
+
+Tool标准失败转换为`StepError`后，条件边直接进入`END`，因此失败节点后的Tool不会继续执行。
+每次Workflow实例绑定一个`ToolContext`且只能运行一次，确保Run内重复调用账本不会被跨Run误用。
+`WorkflowStepRecorder`用于测试替换，生产适配`DatabaseWorkflowStepRecorder`会在动作前后分别开启
+短事务记录Step，Java HTTP等待期间不持有数据库锁。
+
+本阶段图在`load_delivery`后结束，`diagnose_by_rules`属于M2.6，`format_result`和模型文案属于M2.7；
+当前没有诊断HTTP API，也不会返回`blocking_stage`。
 
 ## 测试与质量
 
@@ -178,6 +204,7 @@ make test-agent-persistence
 make test-run-lifecycle
 make test-step-lifecycle
 make test-workflow-schemas
+make test-workflow-nodes
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP

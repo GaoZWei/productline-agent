@@ -37,6 +37,7 @@ from app.services import (
     StepRunUnavailableError,
 )
 from app.settings import Settings
+from app.workflows import DatabaseWorkflowStepRecorder
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_DATABASE_URL_ENV = "AGENT_PERSISTENCE_TEST_DATABASE_URL"
@@ -856,4 +857,69 @@ async def test_step_lifecycle_serializes_step_start_with_parent_run_terminal_upd
                 assert stored_step.run_id == "run-step-parent-lock"
     finally:
         release_lock.set()
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_workflow_step_recorder_uses_committed_short_transactions(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as setup_session:
+            async with setup_session.begin():
+                setup_session.add(
+                    AgentSession(session_id="session-workflow-recorder", user_id="user-001")
+                )
+                run_service = RunLifecycleService(AgentRunRepository(setup_session))
+                await run_service.create_run(
+                    run_id="run-workflow-recorder",
+                    session_id="session-workflow-recorder",
+                )
+                await run_service.mark_running("run-workflow-recorder")
+
+        recorder = DatabaseWorkflowStepRecorder(database)
+        await recorder.start_step(
+            step_id="step-workflow-context",
+            run_id="run-workflow-recorder",
+            sequence_number=1,
+            step_type=AgentStepType.CONTEXT,
+            step_name="load_context",
+            input_summary="order_id=ORDER-003",
+        )
+        await recorder.mark_succeeded(
+            "step-workflow-context",
+            output_summary="order_id=ORDER-003",
+        )
+        await recorder.start_step(
+            step_id="step-workflow-quality",
+            run_id="run-workflow-recorder",
+            sequence_number=2,
+            step_type=AgentStepType.TOOL,
+            step_name="load_quality",
+            input_summary="task_id=TASK-003",
+        )
+        await recorder.mark_failed(
+            "step-workflow-quality",
+            error_code="RESOURCE_NOT_FOUND",
+            output_summary="code=RESOURCE_NOT_FOUND; retryable=false",
+        )
+
+        async with database.session() as verification_session:
+            stored_steps = await AgentStepRepository(verification_session).list_by_run(
+                "run-workflow-recorder"
+            )
+            stored_run = await AgentRunRepository(verification_session).get(
+                "run-workflow-recorder"
+            )
+            assert stored_run is not None
+            assert stored_run.status is AgentRunStatus.RUNNING
+            assert [step.status for step in stored_steps] == [
+                AgentStepStatus.SUCCEEDED,
+                AgentStepStatus.FAILED,
+            ]
+            assert stored_steps[0].output_summary == "order_id=ORDER-003"
+            assert stored_steps[1].error_code == "RESOURCE_NOT_FOUND"
+    finally:
         await database.dispose()

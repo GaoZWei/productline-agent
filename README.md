@@ -2,10 +2,10 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M2.4 Workflow 状态模型**：Python 服务已定义固定订单诊断节点共享的
-`OrderDiagnosisState`，以及严格的根因、Tool字段证据、建议、步骤错误和最终诊断Pydantic
-Schema。Run/Step生命周期、七个只读Tool及调试接口保持可用；当前尚未实现Workflow节点、
-确定性诊断规则或模型调用。
+当前进度为 **M2.5 固定 Workflow 节点**：Python 服务已使用LangGraph固定串联上下文、订单、
+任务、进度、质检、复核和交付加载节点，并将Java Tool事实合并到`OrderDiagnosisState`。标准
+Tool错误会写入`StepError`并中断后续节点，每次调用可通过短事务记录Run内Step；当前尚未实现
+M2.6确定性诊断规则、诊断API或模型调用。
 
 ## 环境要求
 
@@ -55,10 +55,11 @@ make test-agent-client # 验证 M1.2 Java HTTP Client
 make test-agent-errors # 验证 M1.3 标准错误模型
 make test-agent-tool-protocol # 验证 M1.4 Tool 基础协议
 make test-tools        # 验证 M1.4～M1.8 Tool 协议、调用策略和开发调试 API
-make test-agent-persistence # 在隔离 PostgreSQL 上验证 M2.1～M2.3 持久化
+make test-agent-persistence # 在隔离 PostgreSQL 上验证 M2.1～M2.5 运行记录持久化
 make test-run-lifecycle # 单独验证 M2.2 Run 生命周期与并发状态流转
 make test-step-lifecycle # 单独验证 M2.3 Step 记录、摘要和耗时
 make test-workflow-schemas # 单独验证 M2.4 Workflow 状态与诊断 Schema
+make test-workflow-nodes # 单独验证 M2.5 固定节点、状态合并和失败中断
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试

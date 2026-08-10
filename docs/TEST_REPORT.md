@@ -707,3 +707,35 @@
 - 已知非阻塞问题：本阶段只有TypedDict/Pydantic契约，没有Workflow节点执行；`blocking_stage`
   正式枚举属于M2.6；没有自动Run/Step记录、HTTP诊断API或前端展示
 - 下一建议任务：T227～T235实现M2.5固定Workflow节点
+
+## M2.5 固定 Workflow 节点
+
+- 验证时间：2026-08-09
+- 测试先行基线：新增节点测试后首次执行在收集阶段产生1个预期
+  `ModuleNotFoundError: No module named 'app.workflows'`
+- `make test-workflow-nodes`：5/5
+  - ORDER-003按固定节点顺序加载订单、任务、进度、质检、复核和交付事实：通过
+  - 每个节点只更新所属状态通道，最终保留`diagnosis=None`和空错误列表：通过
+  - 多任务输入即使上游顺序变化，仍按`task_id`稳定查询并合并三类任务结果：通过
+  - 质检Tool失败转换为`StepError`，保留此前进度并阻断复核和交付调用：通过
+  - 非法订单上下文在任何业务HTTP调用前失败；编译图不提前包含M2.6/M2.7节点：通过
+- `make test-agent-persistence`：17/17
+  - 新增1项真实PostgreSQL测试，验证`DatabaseWorkflowStepRecorder`以独立事务提交成功/失败Step，
+    父Run保持RUNNING供后续调用方结束
+- Python全量：203通过、15跳过；跳过项需要专用PostgreSQL变量，同组数据库测试已由隔离专项
+  17/17真实执行
+- `make quality`：Ruff通过；mypy strict检查45个源/测试文件无问题
+- `uv lock`：加入`langgraph>=1.0,<2.0`，当前锁定`langgraph 1.2.10`及传递依赖
+- `docker compose up --detach --build agent-service`和`make smoke`：通过；生产依赖已安装到最终
+  Agent镜像，Agent、Business、Web三服务健康检查通过
+- `make test`：通过；基础/Compose、三服务smoke、Python M1分项、M2.1～M2.5专项、Java 56/56、
+  Web 7/7和Vue生产构建全部通过
+- 开发中发现并修复：首次实现将长度相差1的相邻节点序列用于`zip(..., strict=True)`，导致图构建
+  4项失败；改为语义明确的`itertools.pairwise`后通过。首次完整Ruff还发现既有M2.4讲解注释的
+  全角标点和导入空行，保留含义并机械修正
+- 最终失败：0
+- 未运行：`make reset-demo`；本次不修改Java固定业务数据，且命令会删除本地持久卷
+- 已知非阻塞问题：当前图只加载事实，不执行M2.6规则或M2.7文案；M2.8尚未创建/结束Run或暴露
+  诊断API；没有LangGraph checkpointer、崩溃后RUNNING Step回收、并行/恢复序号分配或真实Java
+  Workflow端到端测试
+- 下一建议任务：T236～T243实现M2.6确定性诊断规则

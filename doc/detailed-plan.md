@@ -726,6 +726,9 @@ class OrderDiagnosisState(TypedDict):
 
 ## M2.5 固定 Workflow 节点
 
+本阶段使用LangGraph固定串联上下文和六类业务事实加载节点，将各只读Tool结果按订单、任务归属
+合并到共享状态，并在首个标准错误处中断后续调用、记录可定位Step，为M2.6规则判断提供可靠输入。
+
 固定执行流程：
 
 ```text
