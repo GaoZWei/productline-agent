@@ -2,10 +2,10 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M2.5 固定 Workflow 节点**：Python 服务已使用LangGraph固定串联上下文、订单、
-任务、进度、质检、复核和交付加载节点，并将Java Tool事实合并到`OrderDiagnosisState`。标准
-Tool错误会写入`StepError`并中断后续节点，每次调用可通过短事务记录Run内Step；当前尚未实现
-M2.6确定性诊断规则、诊断API或模型调用。
+当前进度为 **M2.6 确定性诊断规则**：Python服务已在固定LangGraph事实加载链后接入纯代码规则，
+参数化测试锁定五个固定订单应判定为生产中、生产失败、质检、复核或无阻塞；事实缺失时返回明确的
+`INSUFFICIENT_INFORMATION`，不会误报正常。当前尚未生成根因/证据/建议文案，也没有诊断API或
+模型调用。
 
 ## 环境要求
 
@@ -60,6 +60,7 @@ make test-run-lifecycle # 单独验证 M2.2 Run 生命周期与并发状态流�
 make test-step-lifecycle # 单独验证 M2.3 Step 记录、摘要和耗时
 make test-workflow-schemas # 单独验证 M2.4 Workflow 状态与诊断 Schema
 make test-workflow-nodes # 单独验证 M2.5 固定节点、状态合并和失败中断
+make test-diagnosis-rules # 单独验证 M2.6 阻塞阶段规则、信息完整性和优先级
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试

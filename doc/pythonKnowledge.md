@@ -2,7 +2,7 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M2.5 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M2.6 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
@@ -11,8 +11,8 @@ Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康
 最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测。M2.1 已增加 Session、Message、Run、
 Step持久化基础，M2.2～M2.3已实现最小Run/Step状态流转，M2.4已定义Workflow状态与结构化诊断
-Schema，M2.5已实现固定LangGraph数据加载节点、状态合并、失败中断和Step记录适配；诊断规则、
-HTTP入口和大模型调用尚未实现。
+Schema，M2.5已实现固定LangGraph数据加载节点、状态合并、失败中断和Step记录适配，M2.6已实现
+确定性阻塞阶段规则和信息完整性门禁；诊断文案、HTTP入口和大模型调用尚未实现。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -685,6 +685,7 @@ Pydantic则更接近额外使用Zod执行运行时解析。
 run_id / order_id
 order / tasks
 progress / quality_issues / reviews / delivery
+rule_decision
 diagnosis
 errors
 ```
@@ -714,9 +715,9 @@ description = 人类可读解释
 但订单状态、问题状态和数量等事实必须指向Tool字段。当前只允许标量`value`也是为了强迫证据落到
 具体字段，而不是塞入难以审查的嵌套对象。
 
-`DiagnosisResult`要求证据、建议和0～1置信度。`blocking_stage=NONE`时根因必须为空；其他稳定代码
-必须至少包含一个根因。当前没有提前定义完整阻塞阶段枚举，因为该枚举和具体判断规则属于M2.6；
-M2.4只先要求大写稳定代码，避免跨任务提前实现规则。
+`DiagnosisResult`要求证据、建议和0～1置信度。`blocking_stage=NONE`时根因必须为空；其他阶段必须
+至少包含一个根因。M2.6已将阻塞阶段收紧为`BlockingStage`枚举，并增加只保存订单ID与阶段的
+`RuleDecision`；它故意不提前填充M2.7负责的根因、证据和建议。
 
 `StepError`复用`ToolErrorCode`并只保存步骤名、安全文案、`retryable`和可选Trace ID，不允许附加
 原始响应或异常堆栈。这样M2.5节点失败后可以把错误放入状态，同时降低Token、业务载荷或内部异常
@@ -744,6 +745,7 @@ load_context
 → load_quality
 → load_review
 → load_delivery
+→ diagnose_by_rules
 ```
 
 `load_context`先用`OrderIdInput`做运行时校验，并初始化M2.4声明的全部状态字段。后续节点通过
@@ -772,7 +774,29 @@ ToolResult(success=false, error=ToolError)
 
 每个Workflow实例绑定一个Run级`ToolContext`并只允许执行一次。Step序号按真实执行顺序递增，
 Step ID由`run_id + sequence + step_name`的SHA-256摘要生成，不把完整Run ID复制到技术主键中。
-当前编排到`load_delivery`即结束，尚未包含M2.6的`diagnose_by_rules`或M2.7的`format_result`。
+M2.6在`load_delivery`后接入`diagnose_by_rules`。该节点只读取已加载状态，不再调用Tool；它把
+纯规则结果写入`rule_decision`并记录一个`RULE` Step。M2.7的`format_result`仍未实现。
+
+### 5.9 M2.6 的确定性诊断规则
+
+[`agent-service/app/workflows/diagnosis_rules.py`](../agent-service/app/workflows/diagnosis_rules.py)
+是一组没有HTTP、数据库或模型依赖的纯函数。`evaluate_diagnosis_rules(state)`先验证订单、任务、
+进度、质检、复核和交付事实是否齐全且父子ID一致，再按业务链的最早阶段依次判断：
+
+```text
+FAILED/BLOCKED任务或生产步骤 → PRODUCTION_BLOCKED
+PENDING/RUNNING任务或生产步骤 → PRODUCTION
+OPEN/PROCESSING质检问题       → QUALITY_REVIEW
+未通过复核或已解决但未复核     → REVIEW
+NOT_READY/FAILED/BLOCKED交付   → DELIVERY
+其余满足条件                   → NONE
+缺失、空的关键事实或归属矛盾   → INSUFFICIENT_INFORMATION
+```
+
+这里的顺序本身就是业务规则。例如同一状态中既有失败生产步骤又有开放质检问题，必须先返回
+`PRODUCTION_BLOCKED`，因为质检处在更下游。使用`StrEnum`而不是自由字符串，可以让Workflow、
+测试和后续API共享固定机器代码；使用单独的`RuleDecision`而不是立即构造`DiagnosisResult`，则让
+“事实判定”和“面向用户的解释”分别由M2.6、M2.7负责。
 
 ## 6. Trace ID 与结构化日志
 
@@ -1710,7 +1734,7 @@ async def lifespan(...):
 
 ## 13. 当前能力边界和后续目录
 
-### 13.1 M1.1～M2.5 已完成
+### 13.1 M1.1～M2.6 已完成
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1726,12 +1750,14 @@ async def lifespan(...):
 - CONTEXT/TOOL/RULE/LLM Step开始、成功和失败记录；
 - 父Run行锁门禁、Step自动Run关联和原子终态竞争保护；
 - 输入输出摘要空白压缩、常见凭据遮盖、1000字符截断和毫秒耗时；
-- 固定诊断`OrderDiagnosisState`十个必需状态通道；
+- 固定诊断`OrderDiagnosisState`十一个必需状态通道；
 - 严格`DiagnosisResult/RootCause/Evidence/Suggestion/StepError` Pydantic契约；
 - Tool字段级标量证据约束、无阻塞根因互斥和0～1置信度校验；
 - LangGraph固定上下文、订单、任务、进度、质检、复核和交付加载节点；
 - 多任务稳定排序与按任务ID聚合、标准Tool错误到StepError及失败条件路由；
 - Workflow调用Step生命周期的Protocol边界和数据库短事务适配；
+- 七值`BlockingStage`枚举和只承载机器决策的`RuleDecision`；
+- 五订单确定性阶段规则、信息完整性/归属门禁、最早业务阶段优先级和RULE Step；
 - JSON日志和安全Trace ID；
 - 共享异步Java HTTP Client和连接池；
 - 身份、Token、Trace ID和幂等键透传；
@@ -1758,12 +1784,12 @@ async def lifespan(...):
 
 - 数据库readiness；
 - Workflow自动创建/结束Run，以及调试API自动记录Step；
-- 确定性诊断规则、动态Agent和模型调用；
+- 根因/字段证据/建议文案、动态Agent和模型调用；
 - RAG、SSE和Approval。
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M2.5 结构和后续可能增加的内容
+### 13.3 当前 M2.6 结构和后续可能增加的内容
 
 当前关键结构为：
 
@@ -1780,7 +1806,8 @@ app/
 │   ├── tools.py                 # 已实现的七个只读Tool输入输出Schema
 │   └── workflow.py              # 已实现的Workflow状态与结构化诊断Schema
 ├── workflows/
-│   ├── order_diagnosis.py       # 已实现的固定LangGraph加载图
+│   ├── diagnosis_rules.py       # 已实现的纯确定性阻塞阶段规则
+│   ├── order_diagnosis.py       # 已实现的固定LangGraph加载与规则图
 │   └── recording.py             # 已实现的Step短事务记录适配
 ├── tools/
 │   ├── base.py                  # 已实现的Tool协议
@@ -1793,8 +1820,8 @@ app/
     └── tool_debug.py            # 已实现的开发专用Tool调试接口与Run上下文存储
 ```
 
-上述文件均已存在。M2.5已完成业务事实加载图和Tool Step记录，但尚未实现阻塞阶段判断、诊断结果
-生成、Run终态、HTTP API或动态模型调用，不能把“状态加载完成”描述成“已有Agent诊断闭环”。
+上述文件均已存在。M2.6已完成业务事实加载和阻塞阶段机器决策，但尚未生成根因、字段证据、建议、
+Run终态或HTTP API，也没有动态模型调用，不能把“阶段判断完成”描述成“已有Agent诊断闭环”。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 

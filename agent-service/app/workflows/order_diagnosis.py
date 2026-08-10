@@ -1,4 +1,4 @@
-"""M2.5 固定订单诊断数据加载图, 不包含后续诊断规则和文案生成。"""
+"""M2.5-M2.6 固定订单事实加载与确定性阻塞阶段诊断图。"""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from app.schemas.tools import (
 )
 from app.schemas.workflow import OrderDiagnosisState, StepError
 from app.tools import ToolContext, ToolError, ToolNotRegisteredError, ToolRegistry
+from app.workflows.diagnosis_rules import evaluate_diagnosis_rules
 from app.workflows.recording import WorkflowStepRecorder
 
 DataT = TypeVar("DataT", bound=BaseModel)
@@ -44,7 +45,7 @@ _LOADER_NODES = (
 
 # 订单诊断工作流
 class OrderDiagnosisWorkflow:
-    """按固定顺序读取 Java 业务事实, 并在首个错误处停止。"""
+    """按固定顺序读取 Java 事实并计算阶段, 在首个错误处停止。"""
 
     def __init__(
         self,
@@ -62,7 +63,7 @@ class OrderDiagnosisWorkflow:
 
     async def ainvoke(self, order_id: str) -> OrderDiagnosisState:
         """执行一次绑定当前 ToolContext 的固定图, 同一实例不允许重复运行。"""
-        # 一个Workflow实例只能执行一次，避免重复调用
+        # 一个Workflow实例只能执行一次, 避免重复调用
         if self._invoked:
             raise RuntimeError("one workflow instance can only execute once")
         self._invoked = True
@@ -73,12 +74,12 @@ class OrderDiagnosisWorkflow:
             }
         )
         return cast(OrderDiagnosisState, result)
-    # 图构建代码（重点）
+    # 图构建代码(重点)
     def _build_graph(self) -> CompiledStateGraph[Any, Any, Any, Any]:
-        """编译当前阶段的线性加载图, 错误路由只进入 END。"""
+        """编译线性加载与规则图, Tool错误路由只进入 END。"""
         # 先定义共享状态通道
         builder = StateGraph(OrderDiagnosisState)
-        # 注册节点 add_node只是注册“节点名称对应哪个Python函数”，并没有说明执行顺序
+        # 注册节点 add_node只是注册“节点名称对应哪个Python函数”, 并没有说明执行顺序
         builder.add_node("load_context", self.load_context)
         builder.add_node("load_order", self.load_order)
         builder.add_node("load_tasks", self.load_tasks)
@@ -86,20 +87,26 @@ class OrderDiagnosisWorkflow:
         builder.add_node("load_quality", self.load_quality)
         builder.add_node("load_review", self.load_review)
         builder.add_node("load_delivery", self.load_delivery)
+        builder.add_node("diagnose_by_rules", self.diagnose_by_rules)
         # 执行顺序由边决定
         builder.add_edge(START, "load_context")
-        # 后续节点使用条件边，根据路由决策继续执行或停止
+        # 后续节点使用条件边, 根据路由决策继续执行或停止
         for current_name, next_name in pairwise(_LOADER_NODES):
             builder.add_conditional_edges(
                 current_name,
                 self._route_after_node,
                 {"continue": next_name, "stop": END},
             )
-        builder.add_edge("load_delivery", END)
-        return builder.compile(name="order-diagnosis-loaders")
-    # 不调用Java，它负责初始化执行上下文
+        builder.add_conditional_edges(
+            "load_delivery",
+            self._route_after_node,
+            {"continue": "diagnose_by_rules", "stop": END},
+        )
+        builder.add_edge("diagnose_by_rules", END)
+        return builder.compile(name="order-diagnosis-rules")
+    # 不调用Java, 它负责初始化执行上下文
     async def load_context(self, state: OrderDiagnosisState) -> StateUpdate:
-        """校验 Run 与订单上下文, 并初始化全部 M2.4 状态通道。"""
+        """校验 Run 与订单上下文, 并初始化全部 Workflow 状态通道。"""
 
         step_id = await self._start_step(
             step_name="load_context",
@@ -116,14 +123,15 @@ class OrderDiagnosisWorkflow:
             "quality_issues": {},
             "reviews": {},
             "delivery": None,
+            "rule_decision": None,
             "diagnosis": None,
             "errors": [],
         }
-        # Run一致性：避免Workflow状态说自己属于run-A，ToolContext却使用run-B的身份和调用账本
+        # Run一致性: 避免Workflow状态说自己属于run-A, ToolContext却使用run-B的身份和调用账本
         try:
             if state.get("run_id") != self._tool_context.run_id:
                 raise ValueError("workflow run_id does not match ToolContext")
-            # 订单ID校验：确保订单ID是有效的字符串
+            # 订单ID校验: 确保订单ID是有效的字符串
             validated_input = OrderIdInput.model_validate(
                 {"order_id": state.get("order_id")}
             )
@@ -198,7 +206,7 @@ class OrderDiagnosisWorkflow:
             if isinstance(result, StepError):
                 return self._failed_update(state, result)
             progress[task.task_id] = result
-        # 只有所有任务查询成功，才返回
+        # 只有所有任务查询成功, 才返回
         return {"progress": progress}
 
     async def load_quality(self, state: OrderDiagnosisState) -> StateUpdate:
@@ -251,6 +259,23 @@ class OrderDiagnosisWorkflow:
         if isinstance(result, StepError):
             return self._failed_update(state, result)
         return {"delivery": result}
+
+    async def diagnose_by_rules(self, state: OrderDiagnosisState) -> StateUpdate:
+        """计算稳定阻塞阶段, 并把规则执行作为独立 Step 记录。"""
+
+        step_id = await self._start_step(
+            step_name="diagnose_by_rules",
+            step_type=AgentStepType.RULE,
+            input_summary=(
+                f"order_id={state['order_id']}; task_count={len(state['tasks'])}"
+            ),
+        )
+        decision = evaluate_diagnosis_rules(state)
+        await self._step_recorder.mark_succeeded(
+            step_id,
+            output_summary=f"blocking_stage={decision.blocking_stage.value}",
+        )
+        return {"rule_decision": decision}
     # 所有业务节点最终都会进入
     async def _invoke_tool(
         self,
@@ -272,7 +297,7 @@ class OrderDiagnosisWorkflow:
         try:
             tool = self._tool_registry.get(tool_name)
             tool_result = await tool.execute(raw_input, self._tool_context)
-        except ToolNotRegisteredError:  # 如果注册表里找不到Tool，返回错误 
+        except ToolNotRegisteredError:  # 如果注册表里找不到Tool, 返回错误
             error = ToolError(
                 code=ToolErrorCode.UNKNOWN_TOOL_ERROR,
                 message="required workflow tool is not registered",
@@ -285,7 +310,7 @@ class OrderDiagnosisWorkflow:
             if tool_result.error is None:
                 raise RuntimeError("failed ToolResult must contain an error")
             return await self._record_tool_failure(step_id, step_name, tool_result.error)
-        if not isinstance(tool_result.data, expected_type):  # 为了防止注册配置错误，校验数据类型
+        if not isinstance(tool_result.data, expected_type):  # 防止注册配置错误, 校验数据类型
             error = ToolError(
                 code=ToolErrorCode.RESPONSE_VALIDATION_ERROR,
                 message="workflow received an unexpected tool result type",
@@ -352,7 +377,7 @@ class OrderDiagnosisWorkflow:
         """保留已有错误并追加当前首个失败。"""
 
         return {"errors": [*state["errors"], error]}
-    # 每个节点之后检查error是否为空，为空就继续执行下一个节点，否则结束图
+    # 每个节点之后检查error是否为空, 为空就继续执行下一个节点, 否则结束图
     @staticmethod
     def _route_after_node(state: OrderDiagnosisState) -> RouteDecision:
         """存在错误时结束图, 否则进入固定的下一个节点。"""

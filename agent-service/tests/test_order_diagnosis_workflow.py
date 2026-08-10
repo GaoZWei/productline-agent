@@ -12,6 +12,7 @@ from app.clients.business import BusinessHttpClient
 from app.errors import ToolErrorCode
 from app.models import AgentStepType
 from app.schemas.business import BusinessIdentity
+from app.schemas.workflow import BlockingStage
 from app.settings import Settings
 from app.tools import ToolContext, create_read_tool_registry
 from app.workflows import OrderDiagnosisWorkflow, WorkflowStepRecorder
@@ -245,9 +246,11 @@ async def test_fixed_workflow_loads_order_003_in_declared_order_and_merges_state
     assert state["reviews"]["TASK-003"] is not None
     assert state["delivery"] is not None
     assert state["delivery"].records[0].status == "BLOCKED"
+    assert state["rule_decision"] is not None
+    assert state["rule_decision"].blocking_stage is BlockingStage.QUALITY_REVIEW
     assert state["diagnosis"] is None
     assert state["errors"] == []
-    assert [step.sequence_number for step in recorder.steps] == list(range(1, 8))
+    assert [step.sequence_number for step in recorder.steps] == list(range(1, 9))
     assert [step.step_name for step in recorder.steps] == [
         "load_context",
         "load_order",
@@ -256,7 +259,10 @@ async def test_fixed_workflow_loads_order_003_in_declared_order_and_merges_state
         "load_quality",
         "load_review",
         "load_delivery",
+        "diagnose_by_rules",
     ]
+    assert recorder.steps[-1].step_type is AgentStepType.RULE
+    assert recorder.steps[-1].output_summary == "blocking_stage=QUALITY_REVIEW"
     assert all(step.status == "SUCCEEDED" for step in recorder.steps)
 
 
@@ -324,7 +330,7 @@ async def test_multi_task_nodes_merge_results_by_stable_task_id() -> None:
     assert calls.index("/api/tasks/TASK-003/review") < calls.index(
         "/api/tasks/TASK-004/review"
     )
-    assert [step.sequence_number for step in recorder.steps] == list(range(1, 11))
+    assert [step.sequence_number for step in recorder.steps] == list(range(1, 12))
     assert all(step.status == "SUCCEEDED" for step in recorder.steps)
 
 
@@ -359,6 +365,7 @@ async def test_tool_failure_is_added_to_state_and_interrupts_later_nodes() -> No
     assert state["quality_issues"] == {}
     assert state["reviews"] == {}
     assert state["delivery"] is None
+    assert state["rule_decision"] is None
     assert len(state["errors"]) == 1
     error = state["errors"][0]
     assert error.step_name == "load_quality"
@@ -394,7 +401,7 @@ async def test_invalid_order_context_stops_before_any_business_tool_call() -> No
 
 
 @pytest.mark.asyncio
-async def test_compiled_graph_contains_only_m25_loader_nodes() -> None:
+async def test_compiled_graph_contains_m25_loaders_and_m26_rule_node() -> None:
     client = BusinessHttpClient(_settings(), transport=httpx.MockTransport(lambda _: _success({})))
     workflow = OrderDiagnosisWorkflow(
         tool_registry=create_read_tool_registry(client),
@@ -416,5 +423,6 @@ async def test_compiled_graph_contains_only_m25_loader_nodes() -> None:
         "load_quality",
         "load_review",
         "load_delivery",
+        "diagnose_by_rules",
         "__end__",
     }

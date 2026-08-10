@@ -7,11 +7,13 @@ from pydantic import ValidationError
 
 from app.errors import ToolErrorCode
 from app.schemas import (
+    BlockingStage,
     DiagnosisResult,
     Evidence,
     OrderDiagnosisState,
     ReadToolName,
     RootCause,
+    RuleDecision,
     StepError,
     Suggestion,
 )
@@ -29,7 +31,7 @@ from app.tools.readonly import READ_TOOL_NAMES
 def _golden_diagnosis() -> DiagnosisResult:
     return DiagnosisResult(
         order_id="ORDER-003",
-        blocking_stage="QUALITY_REVIEW",
+        blocking_stage=BlockingStage.QUALITY_REVIEW,
         root_causes=[
             RootCause(
                 code="OPEN_COORDINATE_SYSTEM_ISSUE",
@@ -89,6 +91,7 @@ def test_diagnosis_result_accepts_structured_order_003_golden_result() -> None:
     [
         ("order_id", "TASK-003"),
         ("blocking_stage", "quality-review"),
+        ("blocking_stage", "UNKNOWN_STAGE"),
         ("root_causes", []),
         ("evidence", []),
         ("suggestions", []),
@@ -168,14 +171,14 @@ def test_nested_diagnosis_schemas_are_strict_and_forbid_extra_fields() -> None:
 @pytest.mark.unit
 def test_diagnosis_result_does_not_allow_root_causes_for_no_blocker() -> None:
     payload = _golden_diagnosis().model_dump()
-    payload["blocking_stage"] = "NONE"
+    payload["blocking_stage"] = BlockingStage.NONE
 
     with pytest.raises(ValidationError):
         DiagnosisResult.model_validate(payload)
 
     payload["root_causes"] = []
     diagnosis = DiagnosisResult.model_validate(payload)
-    assert diagnosis.blocking_stage == "NONE"
+    assert diagnosis.blocking_stage is BlockingStage.NONE
     assert diagnosis.root_causes == []
 
 
@@ -219,6 +222,7 @@ def test_order_diagnosis_state_exposes_required_workflow_channels() -> None:
         "quality_issues": dict[str, list[QualityIssue]],
         "reviews": dict[str, ReviewResult | None],
         "delivery": DeliveryStatus | None,
+        "rule_decision": RuleDecision | None,
         "diagnosis": DiagnosisResult | None,
         "errors": list[StepError],
     }

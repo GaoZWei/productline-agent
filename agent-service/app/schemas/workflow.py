@@ -1,5 +1,6 @@
 """确定性订单诊断Workflow的状态通道和结构化结果契约。"""
 
+from enum import StrEnum
 from typing import Annotated, Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -48,6 +49,18 @@ ReadToolName = Literal[
     "get_delivery_status",
 ]
 
+# 统一阻塞阶段枚举
+class BlockingStage(StrEnum):
+    """限定确定性诊断可以输出的稳定阻塞阶段。"""
+
+    PRODUCTION = "PRODUCTION"  # 还在正常生产，并非异常情况
+    PRODUCTION_BLOCKED = "PRODUCTION_BLOCKED"  # 生产任务或生产步骤失败、阻塞
+    QUALITY_REVIEW = "QUALITY_REVIEW"  # 存在未处理完的质检问题
+    REVIEW = "REVIEW"  # 质检问题已处理，但复核没有通过
+    DELIVERY = "DELIVERY"  # 上游完成，但交付还未就绪、失败或阻塞
+    NONE = "NONE"  # 当前没有阻塞，不代表一定已经交付
+    INSUFFICIENT_INFORMATION = "INSUFFICIENT_INFORMATION"  # 事实不完整，不能可靠诊断
+
 # 公共父类, 为Workflow内部结果提供严格、不可变且禁止额外字段的共同配置。
 class WorkflowSchema(BaseModel):
     """为Workflow内部结果提供严格、不可变且禁止额外字段的共同配置。"""
@@ -93,12 +106,19 @@ class StepError(WorkflowSchema):
     retryable: bool
     trace_id: TraceIdentifier | None = None
 
-# 订单诊断结果(稳定输出)
+# 只只回答两个问题：诊断的是哪个订单？它当前处于哪个阶段？ 机器做出的稳定业务裁决
+class RuleDecision(WorkflowSchema):
+    """保存规则节点得出的机器可读阶段, 不提前生成诊断文案。"""
+
+    order_id: OrderIdentifier
+    blocking_stage: BlockingStage
+
+# 订单诊断结果(稳定输出) 未来真正返回给前端的完整结果  在机器裁决基础上生成的完整诊断说明
 class DiagnosisResult(WorkflowSchema):
     """订单阻塞阶段、结构化根因、可追溯证据和建议的稳定输出。"""
 
     order_id: OrderIdentifier
-    blocking_stage: StableCode
+    blocking_stage: BlockingStage
     root_causes: list[RootCause]
     evidence: Annotated[list[Evidence], Field(min_length=1)]
     suggestions: Annotated[list[Suggestion], Field(min_length=1)]
@@ -108,9 +128,9 @@ class DiagnosisResult(WorkflowSchema):
     def validate_root_causes_for_blocking_stage(self) -> Self:
         """有阻塞时必须给出根因; 无阻塞时不得制造根因。"""
 
-        if self.blocking_stage == "NONE" and self.root_causes:
+        if self.blocking_stage is BlockingStage.NONE and self.root_causes:
             raise ValueError("NONE blocking stage must not contain root causes")
-        if self.blocking_stage != "NONE" and not self.root_causes:
+        if self.blocking_stage is not BlockingStage.NONE and not self.root_causes:
             raise ValueError("blocked diagnosis must contain at least one root cause")
         return self
 
@@ -126,5 +146,6 @@ class OrderDiagnosisState(TypedDict):
     quality_issues: dict[str, list[QualityIssue]]
     reviews: dict[str, ReviewResult | None]
     delivery: DeliveryStatus | None
+    rule_decision: RuleDecision | None
     diagnosis: DiagnosisResult | None
     errors: list[StepError]

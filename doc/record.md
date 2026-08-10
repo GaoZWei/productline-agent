@@ -2764,3 +2764,103 @@
     标准错误控制流、失败后调用预算控制和短事务可观测性，能够基于真实代码说明可靠性取舍。
 - 下一建议任务：
   - `[T236-T243] M2.6 确定性诊断规则`。
+
+---
+
+## 2026-08-10 20:49 — `[T236-T243] M2.6 确定性诊断规则`
+
+- 里程碑：M2 确定性订单诊断
+- 任务类型：Workflow规则 / Schema / Step可观测性 / 测试 / 文档
+- 目标与范围：
+  - 本次实现：定义正式阻塞阶段枚举；根据M2.5已加载的Java Tool事实，以纯代码规则判断生产中、
+    生产阻塞、质检、复核、交付、无阻塞或信息不足；把规则节点接到LangGraph并记录RULE Step。
+  - 明确不实现：不进入M2.7，不生成根因、字段证据、建议、置信度或用户文案；不实现模型/RAG、
+    诊断HTTP API、前端、Run创建/终态；不修改Java接口、固定数据、数据库表或Alembic revision。
+- 需求与关键决策：
+  - 业务背景/固定数据映射：ORDER-001～005分别映射到`PRODUCTION/PRODUCTION_BLOCKED/
+    QUALITY_REVIEW/REVIEW/NONE`；ORDER-003继续由TASK-003完成、ISSUE-001开放和复核PENDING得到
+    `QUALITY_REVIEW`。
+  - 方案选择及原因：使用独立纯函数`evaluate_diagnosis_rules`，只消费已经通过Tool Pydantic校验的
+    状态，不重新请求Java，也不让模型决定业务阶段。优先级固定为生产失败、生产中、质检、复核、
+    交付、无阻塞，返回业务链上最早未满足的阶段。
+  - 信息完整性：订单/交付父ID、任务父ID、按任务聚合键、生产步骤、质检问题、复核引用和交付
+    记录必须完整且归属一致；缺失或矛盾统一得到`INSUFFICIENT_INFORMATION`，不能降级成`NONE`。
+  - 契约、状态或兼容性影响：`DiagnosisResult.blocking_stage`从自由稳定代码收紧为七值
+    `BlockingStage`；新增`RuleDecision`及`OrderDiagnosisState.rule_decision`，M2.7必须消费该决策，
+    不得重新计算或由模型改写阻塞阶段。
+- 核心实现：
+  - `agent-service/app/schemas/workflow.py` — `BlockingStage`、`RuleDecision`、枚举化
+    `DiagnosisResult.blocking_stage`和第十一个Workflow状态通道。
+  - `agent-service/app/workflows/diagnosis_rules.py` — `evaluate_diagnosis_rules`、事实完整性/归属门禁、
+    固定规则优先级和未通过复核识别。
+  - `agent-service/app/workflows/order_diagnosis.py` — 在`load_delivery`成功后接入
+    `diagnose_by_rules`，输出规则决策并记录安全的RULE Step摘要。
+  - `agent-service/tests/test_diagnosis_rules.py` — 15个参数化/边界测试，覆盖五订单、缺失事实、
+    空嵌套事实、规则优先级、未复核问题和交付失败。
+  - `Makefile` — 新增`make test-diagnosis-rules`并纳入根级`make test`。
+  - 必要的最小关键片段：
+
+    ```text
+    完整性失败 → INSUFFICIENT_INFORMATION
+    否则按 PRODUCTION_BLOCKED → PRODUCTION → QUALITY_REVIEW → REVIEW → DELIVERY → NONE
+    ```
+
+- 代码解释与定位：
+  - 整体调用/数据流：Java API → 七个只读Tool → M2.5加载节点 → `OrderDiagnosisState` →
+    `diagnose_by_rules` → `RuleDecision`；`DiagnosisResult`继续保持None。
+  - 核心类、函数、接口或配置项：`BlockingStage`固定跨节点机器代码；`RuleDecision`隔离机器判定和
+    M2.7文案；`_has_complete_facts`阻止缺数据误报；`_evaluate_complete_facts`表达阶段优先级。
+  - 输入、输出、异常和边界：输入是完整Workflow状态，输出只有订单ID与阻塞阶段；纯规则不产生
+    Tool错误。前序Tool失败仍由M2.5在进入规则前中断，直接调用规则遇到不完整状态则返回信息不足。
+  - 关键代码位置：`workflow.py:53`枚举、`:110`规则决策、`:138`状态；
+    `diagnosis_rules.py:12`入口、`:22`完整性、`:65`优先级；`order_diagnosis.py:78`图、`:263`规则节点。
+- 异常、安全与边界：
+  - 参数/权限/超时/上游异常：仍由现有Context/Tool门禁和`StepError`处理；规则节点不绕过Tool或
+    Java权限。缺事实明确为信息不足，不补造状态。
+  - 幂等、并发或人工确认：本次为只读纯计算，不涉及写入或Approval；沿用Workflow实例单次执行和
+    Run级调用账本边界。
+- 未完成项与已知问题：
+  - 未完成项：M2.7根因/证据/建议和可选模型表达，M2.8 API/Run终态，前端、RAG、动态Agent。
+  - 已知问题/阻塞：无阻塞。当前`DiagnosisResult`仍为None；无HTTP入口；规则没有版本字段，后续
+    新增业务状态或更改优先级时必须同步契约和黄金测试。
+- 替代方案：
+  - 采用的替代方案及原因：无临时替代方案；按计划采用确定性代码规则作为模型前的业务基线。
+  - 已覆盖/未覆盖的验收要求：覆盖T236～T243阶段枚举、六类结果、信息不足和参数化测试；不覆盖
+    T244以后文案、模型输出和API。
+  - 局限、风险和转正/移除条件：确定性规则不是后续模型的临时降级品，M2.7/M5可以增加表达或
+    动态取证，但不得移除规则对最终阻塞阶段的控制；规则变化必须有业务审批和评测用例。
+- 后续影响：
+  - 对后续任务/里程碑：M2.7应读取`RuleDecision`生成`DiagnosisResult`，以原状态字段构造可追溯
+    Evidence；模型只能整理表达，不能修改阶段、ID、状态或数值。
+  - 对接口/数据/测试/部署：新增Python内部枚举、Schema、状态通道、规则模块和测试命令；无Java
+    API、Tool输入输出、数据库、固定数据和前端变化。最终Agent镜像已包含规则代码。
+- 测试与验证：
+  - `[预期失败] make test-diagnosis-rules` — 收集阶段1个`BlockingStage`导入错误。
+  - `[通过] make test-diagnosis-rules` — 15/15。
+  - `[通过] make test-workflow-schemas` — 19/19。
+  - `[通过] make test-workflow-nodes` — 5/5。
+  - `[通过] agent-service内 uv run --frozen pytest -q` — 219通过、15跳过；跳过数据库用例已由隔离
+    PostgreSQL专项17/17执行。
+  - `[通过] make quality` — Ruff通过；mypy strict检查47个源/测试文件无问题。
+  - `[通过] docker compose up --detach --build agent-service + make smoke` — 最终镜像与三服务健康。
+  - `[通过] make test` — Python M1/M2、Java 56/56、Web 7/7及生产构建全部通过。
+  - `[未运行] make reset-demo` — 本次不修改Java固定数据，且该命令会删除本地持久卷。
+- 开发中发现并修复：首次质量检查报告20个中文全角标点告警，其中4个来自本次新增说明，其余为
+  既有M2.5学习注释；只机械修复标点、空白和过时表述，无运行行为变化，最终质量检查通过。
+- 变更文件：
+  - `agent-service/app/schemas/workflow.py`、`app/schemas/__init__.py`
+  - `agent-service/app/workflows/diagnosis_rules.py`、`order_diagnosis.py`、`workflows/__init__.py`
+  - `agent-service/tests/test_diagnosis_rules.py`、`test_workflow_schemas.py`、
+    `test_order_diagnosis_workflow.py`
+  - `Makefile`、`README.md`、`agent-service/README.md`、`doc/detailed-plan.md`、
+    `doc/pythonKnowledge.md`、`docs/ROADMAP.md`、`docs/STATUS.md`、`docs/TEST_REPORT.md`
+  - `doc/needCare.md`、`doc/record.md`
+- 风险与遗留：
+  - 已知风险/阻塞：无阻塞；未完成能力见上文。
+  - 后续兼容注意事项：新增生产、质检、复核或交付状态时，必须同步Java/Tool Schema、
+    `BlockingStage`判断和参数化测试；M2.7不得根据文案再次推断阶段。
+- Agent面试价值评估：
+  - 有价值，已更新`doc/needCare.md`。本次可基于真实实现说明确定性规则与LLM职责分离、信息不足
+    门禁、规则优先级、可重复黄金评测和RULE Step可观测性。
+- 下一建议任务：
+  - `[T244-T250] M2.7 诊断文案生成`。

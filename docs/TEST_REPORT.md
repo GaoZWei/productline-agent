@@ -739,3 +739,34 @@
   诊断API；没有LangGraph checkpointer、崩溃后RUNNING Step回收、并行/恢复序号分配或真实Java
   Workflow端到端测试
 - 下一建议任务：T236～T243实现M2.6确定性诊断规则
+
+## M2.6 确定性诊断规则
+
+- 验证时间：2026-08-10
+- 测试先行基线：新增规则测试后首次执行`make test-diagnosis-rules`，在收集阶段产生1个预期
+  `ImportError: cannot import name 'BlockingStage'`，证明正式阶段枚举和规则尚未实现
+- `make test-diagnosis-rules`：15/15
+  - ORDER-001～005分别稳定得到`PRODUCTION/PRODUCTION_BLOCKED/QUALITY_REVIEW/REVIEW/NONE`：通过
+  - 订单、任务、进度、质检、复核或交付事实缺失时返回`INSUFFICIENT_INFORMATION`：通过
+  - 空生产步骤不被误判为无阻塞：通过
+  - 多种异常同时存在时优先返回最早的生产阻塞阶段：通过
+  - 已解决问题没有通过复核时停在REVIEW，生产与复核完成但交付失败时停在DELIVERY：通过
+- `make test-workflow-schemas`：19/19；`BlockingStage`同时约束`RuleDecision`和最终
+  `DiagnosisResult`，`OrderDiagnosisState`新增规则决策通道
+- `make test-workflow-nodes`：5/5；ORDER-003事实加载后执行`diagnose_by_rules`并记录第8个RULE Step，
+  Tool失败路径仍在规则节点前中断
+- Python全量：219通过、15跳过；跳过项需要专用PostgreSQL变量，同组数据库测试已由隔离专项
+  17/17真实执行
+- `make quality`：Ruff通过；mypy strict检查47个源/测试文件无问题
+- `docker compose up --detach --build agent-service`和`make smoke`：通过；最终规则代码已进入Agent
+  镜像，Agent、Business、Web三服务健康检查通过
+- `make test`：通过；基础/Compose、三服务smoke、Python M1、M2.1～M2.6专项、Java 56/56、
+  Web 7/7和Vue生产构建全部通过
+- 开发中发现并修复：首次质量检查报告20个中文全角标点告警，其中4个来自本次新增说明，其余
+  来自既有M2.5学习注释；只机械调整标点、空白和已过时的“M2.4全部通道”表述，运行行为不变
+- 最终失败：0
+- 未运行：`make reset-demo`；本次不修改Java固定业务数据，且命令会删除本地持久卷
+- 已知非阻塞问题：M2.6只输出机器可读`RuleDecision`，尚未生成根因、字段证据、建议、置信度或
+  用户文案；没有诊断HTTP API、自动Run终态、前端诊断卡片、模型或RAG；规则依赖当前状态集合，
+  后续新增Java状态必须同步枚举、规则与参数化测试
+- 下一建议任务：T244～T250实现M2.7诊断文案生成
