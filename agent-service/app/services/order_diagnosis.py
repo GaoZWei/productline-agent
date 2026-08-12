@@ -55,7 +55,7 @@ class OrderDiagnosisExecutionError(Exception):
         self.error_step = error_step
         super().__init__(f"{code}: {message}")
 
-# 订单诊断服务 （完整的请求级生命周期Service）
+# 订单诊断服务, 负责完整的请求级生命周期
 class OrderDiagnosisService:
     """为一次 HTTP 请求创建运行上下文并收口固定 Workflow。"""
 
@@ -95,7 +95,8 @@ class OrderDiagnosisService:
         workflow = OrderDiagnosisWorkflow(
             tool_registry=self._tool_registry,  # 找到七个只读Tool节点
             tool_context=context,  # 提供身份、权限、Trace和RunID
-            step_recorder=DatabaseWorkflowStepRecorder(self._database),  #  把每个Workflow节点记录为数据库Step
+            # 把每个Workflow节点记录为数据库Step
+            step_recorder=DatabaseWorkflowStepRecorder(self._database),
         )
         # 执行Workflow
         try:
@@ -113,7 +114,7 @@ class OrderDiagnosisService:
                 retryable=False,
                 error_step="order_diagnosis_workflow",
             ) from exception
-        # 处理Workflow执行错误 Workflow遇到标准Tool错误不会直接抛原始异常，而是写入state["errors"]中
+        # 标准Tool错误不会直接抛出原始异常, 而是写入state["errors"]
         if state["errors"]:
             error = state["errors"][0]
             await self._mark_failed(

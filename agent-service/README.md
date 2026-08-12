@@ -1,6 +1,6 @@
 # Agent Service
 
-M2.8 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M2.10 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
@@ -232,7 +232,13 @@ make test-workflow-nodes
 make test-diagnosis-rules
 make test-diagnosis-generation
 make test-diagnosis-api
+make test-agent-e2e
 ```
+
+`make test-agent-e2e`使用独立 Compose 项目启动临时 PostgreSQL 和真实 Java 服务，在 pytest
+进程内运行完整 Agent API 生命周期，验证五个固定订单、Run/Step持久化、订单不存在、Java超时和
+非法响应。异常通过测试专用Transport注入Java已有演示故障Header，不暴露新的生产API入口；完成后
+自动删除本次容器、网络、数据卷和临时业务镜像。
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP
 边界及 PostgreSQL 持久化。`make test-agent-persistence` 使用随机宿主端口和临时数据目录启动

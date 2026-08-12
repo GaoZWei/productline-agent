@@ -35,6 +35,7 @@ testpaths = ["tests"]
 markers = [
   "unit: isolated test without external services",
   "integration: test covering application component boundaries",
+  "e2e: test covering the real Agent, Java, and PostgreSQL boundaries",
 ]
 
 [tool.ruff]
