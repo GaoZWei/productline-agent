@@ -10,6 +10,7 @@ const defaultDistDirectory = join(moduleDirectory, "dist");
 export function createWebServer({
   distDirectory = defaultDistDirectory,
   businessApiUrl = process.env.BUSINESS_API_URL ?? "http://localhost:8080",
+  agentApiUrl = process.env.AGENT_API_URL ?? "http://localhost:8000",
 } = {}) {
   return createServer(async (request, response) => {
     try {
@@ -25,7 +26,12 @@ export function createWebServer({
       }
 
       if (url.pathname === "/business-api" || url.pathname.startsWith("/business-api/")) {
-        proxyBusinessRequest(request, response, businessApiUrl);
+        proxyServiceRequest(request, response, businessApiUrl, "/business-api", "业务");
+        return;
+      }
+
+      if (url.pathname === "/agent-api" || url.pathname.startsWith("/agent-api/")) {
+        proxyServiceRequest(request, response, agentApiUrl, "/agent-api", "诊断");
         return;
       }
 
@@ -64,10 +70,10 @@ async function serveFrontend(pathname, method, response, distDirectory) {
   response.end(method === "HEAD" ? undefined : body);
 }
 
-function proxyBusinessRequest(clientRequest, clientResponse, businessApiUrl) {
+function proxyServiceRequest(clientRequest, clientResponse, serviceUrl, prefix, serviceLabel) {
   const clientUrl = new URL(clientRequest.url ?? "/", "http://web-console.local");
-  const upstreamPath = clientUrl.pathname.slice("/business-api".length) || "/";
-  const upstreamUrl = new URL(`${upstreamPath}${clientUrl.search}`, businessApiUrl);
+  const upstreamPath = clientUrl.pathname.slice(prefix.length) || "/";
+  const upstreamUrl = new URL(`${upstreamPath}${clientUrl.search}`, serviceUrl);
   const requestUpstream = upstreamUrl.protocol === "https:" ? httpsRequest : httpRequest;
   const headers = { ...clientRequest.headers, host: upstreamUrl.host };
 
@@ -81,22 +87,28 @@ function proxyBusinessRequest(clientRequest, clientResponse, businessApiUrl) {
   );
 
   upstreamRequest.on("error", (error) => {
-    console.error("business API proxy failed", error.message);
+    console.error(`${serviceLabel} API proxy failed`, error.message);
     if (!clientResponse.headersSent) {
-      sendJson(clientResponse, 502, {
-        success: false,
-        code: "UPSTREAM_UNAVAILABLE",
-        message: "业务服务暂时不可用",
-        data: null,
-        trace_id: "web-proxy-unavailable",
-        retryable: true,
-      });
+      sendJson(clientResponse, 502, unavailablePayload(prefix, serviceLabel));
     } else {
       clientResponse.destroy();
     }
   });
 
   clientRequest.pipe(upstreamRequest);
+}
+
+function unavailablePayload(prefix, serviceLabel) {
+  const common = {
+    code: "UPSTREAM_UNAVAILABLE",
+    message: `${serviceLabel}服务暂时不可用`,
+    trace_id: "web-proxy-unavailable",
+    retryable: true,
+  };
+  if (prefix === "/agent-api") {
+    return { run_id: null, ...common, error_step: null };
+  }
+  return { success: false, ...common, data: null };
 }
 
 function sendJson(response, status, value, method = "GET") {

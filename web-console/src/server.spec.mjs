@@ -17,21 +17,29 @@ afterEach(async () => {
 });
 
 describe("production web server", () => {
-  it("提供健康检查、SPA 回退并将同源业务请求转发给 Java", async () => {
+  it("提供健康检查、SPA 回退并转发同源业务与诊断请求", async () => {
     const distDirectory = await mkdtemp(join(tmpdir(), "productline-web-"));
     temporaryDirectories.push(distDirectory);
     await writeFile(join(distDirectory, "index.html"), "<main>M0.8 page</main>");
 
-    let upstreamPath;
+    const upstreamRequests = [];
     const upstream = createServer((request, response) => {
-      upstreamPath = request.url;
+      upstreamRequests.push({
+        method: request.method,
+        path: request.url,
+        userId: request.headers["x-user-id"],
+      });
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ success: true }));
     });
     servers.push(upstream);
     const upstreamUrl = await listen(upstream);
 
-    const web = createWebServer({ distDirectory, businessApiUrl: upstreamUrl });
+    const web = createWebServer({
+      distDirectory,
+      businessApiUrl: upstreamUrl,
+      agentApiUrl: upstreamUrl,
+    });
     servers.push(web);
     const webUrl = await listen(web);
 
@@ -40,7 +48,22 @@ describe("production web server", () => {
 
     const api = await fetch(`${webUrl}/business-api/api/orders/ORDER-003`);
     expect(api.status).toBe(200);
-    expect(upstreamPath).toBe("/api/orders/ORDER-003");
+    expect(upstreamRequests[0]).toMatchObject({
+      method: "GET",
+      path: "/api/orders/ORDER-003",
+    });
+
+    const diagnosis = await fetch(`${webUrl}/agent-api/api/agent/order-diagnosis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "reviewer-001" },
+      body: JSON.stringify({ order_id: "ORDER-003", user_message: "why" }),
+    });
+    expect(diagnosis.status).toBe(200);
+    expect(upstreamRequests[1]).toEqual({
+      method: "POST",
+      path: "/api/agent/order-diagnosis",
+      userId: "reviewer-001",
+    });
 
     const fallback = await fetch(`${webUrl}/orders/ORDER-003`);
     expect(await fallback.text()).toContain("M0.8 page");

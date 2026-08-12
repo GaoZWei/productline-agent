@@ -201,7 +201,7 @@ def _production_blocked_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
         1.0,
     )
 
-# 生成诊断
+# 生成诊断(四条字段级证据)
 def _quality_review_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
     issues = _indexed_issues(state, statuses=_QUALITY_UNRESOLVED)
     root_causes: list[RootCause] = []

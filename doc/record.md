@@ -504,3 +504,24 @@
 - `POST /api/agent/order-diagnosis`返回Run、Trace和完整诊断结果。
 - 每次请求创建Session、用户Message和Run，成功保存结果快照，失败保存错误码和失败节点。
 - Tool错误映射为稳定HTTP响应，未预期Workflow异常不回传内部详情。
+
+---
+
+## 2026-08-12 — `[T258-T267] M2.9 前端 Agent 侧边栏`
+
+### 核心解决的问题
+
+把当前订单接入可演示的诊断界面，并让确定性结论、字段级事实证据和失败位置都能被用户审查。
+
+### 实现的核心代码
+
+- `web-console/src/components/AgentDiagnosisDrawer.vue`：请求状态、诊断结果和结构化错误展示。
+- `web-console/src/api/agentClient.ts`：诊断契约校验、演示身份Header和错误归一化。
+- `web-console/server.mjs`：开发与生产环境的同源Agent API代理。
+- `web-console/src/components/AgentDiagnosisDrawer.spec.ts`：黄金诊断、加载状态和错误展示用例。
+
+### 实现的核心功能
+
+- 从当前业务快照取得订单上下文，提交用户问题并防止切换订单时展示过期结果。
+- 分区展示阻塞环节、稳定根因、Tool字段路径和值、建议及Run/Trace。
+- 明确建议尚未执行，并显示可重试错误、失败步骤和Trace定位信息。

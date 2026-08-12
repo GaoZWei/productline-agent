@@ -96,11 +96,11 @@ test-java-faults: ## 验证 M0.7 只读故障模拟和默认关闭保护
 		-Dtest=DemoFaultSimulationIntegrationTest,DemoFaultDisabledIntegrationTest \
 		test
 
-test-web: ## 验证 M0.8 API 契约、状态切换、页面组件和生产服务
+test-web: ## 验证业务页面、M2.9 诊断侧边栏和生产代理
 	npm --prefix web-console test
 	npm --prefix web-console run build
 
-build-web: ## 构建 M0.8 前端生产资源
+build-web: ## 构建含 M2.9 诊断侧边栏的前端生产资源
 	npm --prefix web-console run build
 
 dev: ## 构建并启动 PostgreSQL、Java、Python 和 Web

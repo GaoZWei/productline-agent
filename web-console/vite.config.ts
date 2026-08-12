@@ -4,6 +4,7 @@ import vue from "@vitejs/plugin-vue";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const businessApiUrl = env.VITE_BUSINESS_API_URL || "http://localhost:8080";
+  const agentApiUrl = env.VITE_AGENT_API_URL || "http://localhost:8000";
 
   return {
     plugins: [vue()],
@@ -14,6 +15,11 @@ export default defineConfig(({ mode }) => {
           target: businessApiUrl,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/business-api/, ""),
+        },
+        "/agent-api": {
+          target: agentApiUrl,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/agent-api/, ""),
         },
       },
     },

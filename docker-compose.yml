@@ -73,9 +73,12 @@ services:
     environment:
       PORT: 5173
       BUSINESS_API_URL: http://business-service:8080
+      AGENT_API_URL: http://agent-service:8000
     ports:
       - "${WEB_CONSOLE_PORT:-5173}:5173"
     depends_on:
+      agent-service:
+        condition: service_started
       business-service:
         condition: service_started
     init: true

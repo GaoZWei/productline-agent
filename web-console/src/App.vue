@@ -3,6 +3,7 @@ import { ElAlert, ElButton, ElLoading, ElSkeleton } from "element-plus";
 import { onMounted } from "vue";
 import { storeToRefs } from "pinia";
 
+import AgentDiagnosisDrawer from "./components/AgentDiagnosisDrawer.vue";
 import DeliveryStatusPanel from "./components/DeliveryStatusPanel.vue";
 import OrderSummary from "./components/OrderSummary.vue";
 import OrderSwitcher from "./components/OrderSwitcher.vue";
@@ -33,8 +34,8 @@ onMounted(() => store.initialize());
         <span><strong>产线协同中心</strong><small>遥感数据生产业务</small></span>
       </a>
       <div class="topbar-status">
-        <span class="environment">M0 · 业务视图</span>
-        <span class="service-health"><i></i>Java 事实源</span>
+        <span class="environment">M2 · 诊断视图</span>
+        <span class="service-health"><i></i>Java 事实源 · Agent 诊断</span>
       </div>
     </header>
 
@@ -52,8 +53,11 @@ onMounted(() => store.initialize());
             <span class="eyebrow">业务事实</span>
             <h2>订单业务全景</h2>
           </div>
-          <div v-if="traceId" class="trace-chip" title="用于关联 Java 服务日志">
-            TRACE · {{ traceId }}
+          <div class="page-actions">
+            <div v-if="traceId" class="trace-chip" title="用于关联 Java 服务日志">
+              TRACE · {{ traceId }}
+            </div>
+            <AgentDiagnosisDrawer :order="overview?.order" />
           </div>
         </div>
 
@@ -90,7 +94,7 @@ onMounted(() => store.initialize());
 
         <footer class="page-footer">
           <span>事实数据均由 Java business-service 提供</span>
-          <span>本页面不调用模型，不生成业务结论</span>
+          <span>诊断由固定 Workflow 生成，不执行写操作</span>
         </footer>
       </main>
     </div>
