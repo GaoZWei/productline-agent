@@ -874,6 +874,11 @@ Java接口已经返回订单、任务、生产进度、质检、复核和交付�
 
 ## M2.8 诊断 API
 
+### 解决的问题
+
+本阶段把固定诊断Workflow暴露为可调用的HTTP入口，并为每次请求建立可追踪的Session、Message、Run
+和Step记录；成功保存诊断快照，Tool或Workflow失败保存稳定错误和失败步骤。
+
 ```text
 POST /api/agent/order-diagnosis
 ```

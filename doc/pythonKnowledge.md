@@ -2,7 +2,7 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M2.7 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M2.8 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
@@ -12,8 +12,8 @@ Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康
 只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测。M2.1 已增加 Session、Message、Run、
 Step持久化基础，M2.2～M2.3已实现最小Run/Step状态流转，M2.4已定义Workflow状态与结构化诊断
 Schema，M2.5已实现固定LangGraph数据加载节点、状态合并、失败中断和Step记录适配，M2.6已实现
-确定性阻塞阶段规则和信息完整性门禁，M2.7已实现规则诊断文案、可选结构化模型改写和失败回退；
-诊断HTTP入口和具体模型供应商适配尚未实现。
+确定性阻塞阶段规则和信息完整性门禁，M2.7已实现规则诊断文案、可选结构化模型改写和失败回退，
+M2.8已实现诊断HTTP入口与请求级Run闭环；具体模型供应商适配尚未实现。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -810,6 +810,20 @@ NOT_READY/FAILED/BLOCKED交付   → DELIVERY
 `apply_model_narrative`先执行严格Pydantic校验，再逐项检查code和action type是否与规则结果一致；
 最终合并始终复用规则结果的订单、阻塞阶段、证据和置信度。调用失败或结构无效会记录失败LLM Step，
 Workflow状态继续保留规则诊断。这是表达增强的降级策略，不适用于未来由模型承担不可替代判断的场景。
+
+### 5.11 M2.8 的诊断 API 与请求级 Run
+
+`POST /api/agent/order-diagnosis`把HTTP请求交给`OrderDiagnosisService`。请求体只有`order_id`与
+`user_message`，身份从`X-User-Id`和`X-User-Role`读取，Trace ID继续复用请求中间件生成的值。
+
+当前尚未进入M3多轮会话，因此每次请求创建独立的一次性Session和第一条用户Message，再创建
+PENDING Run并立即转换为RUNNING。这个事务必须在Workflow前提交，因为后续Step使用不同数据库
+连接记录；如果父Run未提交，Step既无法通过外键，也无法确认父Run处于RUNNING。
+
+Workflow成功后，应用服务把`DiagnosisResult.model_dump(mode="json")`作为当时的结果快照保存到
+SUCCEEDED Run。标准Tool错误已经是`StepError`，因此可同时写入FAILED Run并映射HTTP状态；未预期
+异常只返回`WORKFLOW_EXECUTION_ERROR`，不把异常文本或堆栈交给调用方。数据库事务只围绕创建或
+终态更新，Java HTTP请求发生在事务外。
 
 ## 6. Trace ID 与结构化日志
 
@@ -1773,6 +1787,9 @@ async def lifespan(...):
 - 五订单确定性阶段规则、信息完整性/归属门禁、最早业务阶段优先级和RULE Step；
 - 七类裁决的规则文案、稳定根因、Tool字段证据、建议和置信度装配；
 - `DiagnosisNarrative`结构化模型边界、稳定code校验和规则结果回退；
+- 诊断请求/响应/错误Schema和`POST /api/agent/order-diagnosis`；
+- 一次性Session/Message、Run创建与成功/失败终态、诊断结果快照；
+- Tool错误HTTP映射和未预期Workflow异常安全收口；
 - JSON日志和安全Trace ID；
 - 共享异步Java HTTP Client和连接池；
 - 身份、Token、Trace ID和幂等键透传；
@@ -1798,13 +1815,13 @@ async def lifespan(...):
 ### 13.2 当前尚未实现
 
 - 数据库readiness；
-- Workflow自动创建/结束Run，以及调试API自动记录Step；
+- 调试API自动记录Run/Step，以及多轮会话上下文；
 - 具体模型供应商适配、Prompt版本管理、真实模型评测和动态Agent；
 - RAG、SSE和Approval。
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M2.7 结构和后续可能增加的内容
+### 13.3 当前 M2.8 结构和后续可能增加的内容
 
 当前关键结构为：
 
@@ -1815,9 +1832,11 @@ app/
 ├── repositories/
 │   └── agent_runtime.py         # 已实现的Run/Step增删查和原子状态更新
 ├── services/
+│   ├── order_diagnosis.py       # 已实现的API、Run和Workflow编排
 │   ├── run_lifecycle.py         # 已实现的最小Run生命周期
 │   └── step_lifecycle.py        # 已实现的Step记录、摘要保护和耗时
 ├── schemas/
+│   ├── agent.py                 # 已实现的诊断API传输Schema
 │   ├── tools.py                 # 已实现的七个只读Tool输入输出Schema
 │   └── workflow.py              # 已实现的Workflow状态与结构化诊断Schema
 ├── workflows/
@@ -1833,11 +1852,12 @@ app/
 │   ├── registry.py              # 已实现的Tool注册与查找
 │   └── readonly.py              # 已实现的七个只读Tool和装配工厂
 └── api/
+    ├── order_diagnosis.py       # 已实现的订单诊断对外接口
     └── tool_debug.py            # 已实现的开发专用Tool调试接口与Run上下文存储
 ```
 
-上述文件均已存在。M2.7已完成业务事实加载、阻塞阶段机器决策和完整规则诊断，但尚未管理Run终态、
-提供HTTP API或装配具体模型客户端，也没有动态Agent决策，不能描述成“已有Agent诊断闭环”。
+上述文件均已存在。M2.8已完成业务事实加载、机器决策、完整规则诊断、HTTP入口和请求级Run闭环，
+但尚未提供前端侧边栏、装配具体模型客户端或实现动态Agent决策，不能描述成“完整Agent产品闭环”。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 

@@ -288,7 +288,7 @@ class OrderDiagnosisWorkflow:
             output_summary=f"blocking_stage={decision.blocking_stage.value}",
         )
         return {"rule_decision": decision}
-    # 规则诊断结果生成：负责规则文案生成
+    # 规则诊断结果生成, 负责规则文案生成
     async def generate_diagnosis(self, state: OrderDiagnosisState) -> StateUpdate:
         """根据稳定规则裁决生成完整诊断结果。"""
 
@@ -300,7 +300,7 @@ class OrderDiagnosisWorkflow:
             step_type=AgentStepType.RULE,
             input_summary=f"blocking_stage={decision.blocking_stage.value}",
         )
-        # 执行规则文案生成，并记录一个 RULE Step
+        # 执行规则文案生成, 并记录一个 RULE Step
         diagnosis = generate_rule_diagnosis(state)
         # 输出摘要只记录阻塞阶段和来源
         await self._step_recorder.mark_succeeded(
@@ -310,7 +310,7 @@ class OrderDiagnosisWorkflow:
             ),
         )
         return {"diagnosis": diagnosis}
-    # 规则诊断结果生成：负责规则文案整理（有无模型）
+    # 规则诊断结果生成, 负责规则文案整理(有无模型)
     async def refine_diagnosis(self, state: OrderDiagnosisState) -> StateUpdate:
         """使用可选模型整理说明文字, 失败时保留规则结果。"""
         # 如果没有配置模型, 则直接返回规则结果
@@ -325,7 +325,7 @@ class OrderDiagnosisWorkflow:
             step_type=AgentStepType.LLM,
             input_summary=f"blocking_stage={rule_result.blocking_stage.value}",
         )
-        # 如果配置了模型，则记录一个 LLM Step
+        # 如果配置了模型, 则记录一个 LLM Step
         try:
             raw_output = await self._narrative_model.generate(rule_result)
             refined = apply_model_narrative(rule_result, raw_output)
@@ -350,7 +350,7 @@ class OrderDiagnosisWorkflow:
             step_id,
             output_summary="source=model; protected_facts=preserved",
         )
-        # 成功后更新：诊断结果
+        # 成功后更新诊断结果
         return {"diagnosis": refined}
 
     # 所有业务节点最终都会进入

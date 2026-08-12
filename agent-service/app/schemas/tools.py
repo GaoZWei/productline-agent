@@ -19,10 +19,10 @@ type ProductionStatus = Literal["PENDING", "RUNNING", "COMPLETED", "FAILED", "BL
 type QualityIssueStatus = Literal["OPEN", "PROCESSING", "RESOLVED", "CLOSED"]
 type ReviewStatus = Literal["PENDING", "APPROVED", "REJECTED", "REWORK_REQUIRED"]
 type DeliveryState = Literal["NOT_READY", "READY", "DELIVERING", "DELIVERED", "FAILED", "BLOCKED"]
-# 订单标识格式限制
+# 订单标识格式限制 
 OrderIdentifier = Annotated[
     str,
-    Field(min_length=1, max_length=128, pattern=r"^ORDER-[A-Z0-9][A-Z0-9-]*$"),
+    Field(min_length=1, max_length=128, pattern=r"^ORDER-[A-Z0-9][A-Z0-9-]*$"), 
 ]
 # 任务标识格式限制
 TaskIdentifier = Annotated[

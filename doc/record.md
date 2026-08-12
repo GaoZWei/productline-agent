@@ -483,3 +483,24 @@
 - 为七类规则裁决生成阶段说明、稳定根因、Tool字段证据、建议和置信度。
 - 模型只能改写带稳定code的说明文字，不能覆盖订单、阻塞阶段、证据或置信度。
 - 模型调用失败、Schema无效或稳定code变化时记录失败LLM Step并回退规则结果。
+
+---
+
+## 2026-08-12 — `[T251-T257] M2.8 诊断 API`
+
+### 核心解决的问题
+
+把固定诊断Workflow变成可调用且可追踪的HTTP链路，并让成功结果和失败位置都有持久化Run证据。
+
+### 实现的核心代码
+
+- `agent-service/app/api/order_diagnosis.py`：请求身份、成功响应和稳定错误HTTP映射。
+- `agent-service/app/services/order_diagnosis.py`：一次性请求上下文、Run生命周期和Workflow编排。
+- `agent-service/app/schemas/agent.py`：诊断请求、响应和错误Schema。
+- `agent-service/tests/test_order_diagnosis_api.py`：黄金结果、数据库终态、Tool失败和异常用例。
+
+### 实现的核心功能
+
+- `POST /api/agent/order-diagnosis`返回Run、Trace和完整诊断结果。
+- 每次请求创建Session、用户Message和Run，成功保存结果快照，失败保存错误码和失败节点。
+- Tool错误映射为稳定HTTP响应，未预期Workflow异常不回传内部详情。

@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -55,6 +55,9 @@ test-diagnosis-rules: ## 单独验证 M2.6 确定性诊断规则、信息完整�
 
 test-diagnosis-generation: ## 单独验证 M2.7 规则文案、模型校验和失败回退
 	cd agent-service && uv run --frozen pytest -q tests/test_diagnosis_generation.py tests/test_order_diagnosis_workflow.py
+
+test-diagnosis-api: ## 在隔离 PostgreSQL 上验证 M2.8 诊断 API、Run终态和失败映射
+	./scripts/test-agent-persistence.sh -k order_diagnosis_api
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查
 	cd agent-service && uv run --frozen ruff check .

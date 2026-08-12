@@ -34,7 +34,7 @@ class DiagnosisNarrativeModel(Protocol):
 class InvalidDiagnosisNarrativeError(ValueError):
     """模型文案没有通过 Schema 或稳定代码一致性校验。"""
 
-# 规则诊断结果生成：只负责生成文案
+# 规则诊断结果生成, 只负责生成文案
 def generate_rule_diagnosis(state: OrderDiagnosisState) -> DiagnosisResult:
     """根据规则裁决和已加载 Tool 事实装配可追溯的完整诊断结果。"""
     # 前一个节点已经生成规则裁决, 且已加载 Tool 事实
@@ -43,7 +43,7 @@ def generate_rule_diagnosis(state: OrderDiagnosisState) -> DiagnosisResult:
         raise ValueError("rule decision is required before diagnosis generation")
 
     stage = decision.blocking_stage
-    # 根据 blocking_stage 选择对应生成函数，生成函数返回统一的五部分诊断结果
+    # 根据 blocking_stage 选择对应生成函数, 生成函数返回统一的五部分诊断结果
     builders = {
         BlockingStage.PRODUCTION: _production_diagnosis,
         BlockingStage.PRODUCTION_BLOCKED: _production_blocked_diagnosis,

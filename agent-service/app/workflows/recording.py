@@ -7,7 +7,7 @@ from typing import Protocol
 from app.database import Database
 from app.models import AgentStepType
 from app.repositories import AgentRunRepository, AgentStepRepository
-from app.services import StepLifecycleService
+from app.services.step_lifecycle import StepLifecycleService
 
 
 class WorkflowStepRecorder(Protocol):

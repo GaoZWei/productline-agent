@@ -143,8 +143,8 @@ class DiagnosisResult(WorkflowSchema):
     order_id: OrderIdentifier  # 诊断订单ID
     blocking_stage: BlockingStage  # 规则判断出的阻塞环节
     summary: WorkflowText  # 面向用户的阶段说明
-    root_causes: list[RootCause]  # 结构化根因，包含稳定 code 和说明
-    evidence: Annotated[list[Evidence], Field(min_length=1)]  # 具体来自哪个 Tool、哪个字段以及字段值
+    root_causes: list[RootCause]  # 结构化根因, 包含稳定 code 和说明
+    evidence: Annotated[list[Evidence], Field(min_length=1)]  # Tool字段级证据
     suggestions: Annotated[list[Suggestion], Field(min_length=1)]  # 建议动作类型和说明
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]  # 规则结果置信度, 0-1之间, 1表示完全信
 

@@ -327,7 +327,81 @@ delivery_status = BLOCKED
 复用本文件中的枚举值，不为前端或 Python 创建另一套状态字符串。五组固定数据的
 完整 ID 映射见 [`DEMO_DATA.md`](DEMO_DATA.md)。
 
-## 8. 演进规则
+## 8. Agent 订单诊断 API
+
+### `POST /api/agent/order-diagnosis`
+
+请求必须携带最小身份Header：
+
+```text
+X-User-Id: reviewer-001
+X-User-Role: REVIEWER
+X-Trace-Id: trace-diagnosis-003   # 可选
+Authorization: Bearer <token>     # 可选
+```
+
+请求体只接受：
+
+```json
+{
+  "order_id": "ORDER-003",
+  "user_message": "这个订单为什么还没有交付？"
+}
+```
+
+成功返回本次运行标识、Trace ID和完整结构化诊断：
+
+```json
+{
+  "run_id": "run-<uuid>",
+  "trace_id": "trace-diagnosis-003",
+  "diagnosis": {
+    "order_id": "ORDER-003",
+    "blocking_stage": "QUALITY_REVIEW",
+    "summary": "订单阻塞在质量复核环节。",
+    "root_causes": [
+      {
+        "code": "OPEN_COORDINATE_SYSTEM_ISSUE",
+        "description": "关联任务存在未关闭的坐标系质量问题"
+      },
+      {
+        "code": "REVIEW_PENDING",
+        "description": "质检复核尚未完成"
+      }
+    ],
+    "evidence": [
+      {
+        "source_type": "TOOL",
+        "tool_name": "get_quality_issues",
+        "field_path": "issues[0].status",
+        "value": "OPEN",
+        "description": "ISSUE-001问题状态为OPEN"
+      }
+    ],
+    "suggestions": [
+      {
+        "action_type": "CREATE_COORDINATE_SYSTEM_REWORK",
+        "description": "创建坐标系处理返工任务"
+      },
+      {
+        "action_type": "RESUBMIT_REVIEW",
+        "description": "问题处理完成后重新提交复核"
+      }
+    ],
+    "confidence": 1.0
+  }
+}
+```
+
+示例证据为缩略结构；实际结果还包含生产完成、待复核和交付阻塞的字段级证据。响应Header中的
+`X-Trace-Id`与响应体`trace_id`一致。成功Run保存诊断快照，Tool失败Run保存错误码和失败步骤。
+
+错误体固定包含`run_id`、`trace_id`、`code`、安全`message`、`retryable`和`error_step`。请求体
+Schema错误发生在Run创建前，由FastAPI返回422；缺少身份返回401且`run_id=null`；资源不存在返回
+404；上游不可用或响应无效返回502；Tool超时返回504；未预期Workflow异常返回500和
+`WORKFLOW_EXECUTION_ERROR`。当前身份Header不等同于完整认证系统。
+
+## 9. 演进规则
 
 状态契约变化必须：
 

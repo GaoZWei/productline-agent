@@ -1,11 +1,11 @@
 # Agent Service
 
-M2.7 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M2.8 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
-Workflow状态/诊断Schema、固定LangGraph数据加载节点、确定性阻塞阶段规则和诊断文案生成；模型
-通过可选结构化接口整理表达，尚未包含具体模型供应商适配、RAG或对外诊断API。
+Workflow状态/诊断Schema、固定LangGraph数据加载节点、确定性阻塞阶段规则、诊断文案生成和对外
+诊断API；模型通过可选结构化接口整理表达，尚未包含具体模型供应商适配或RAG。
 
 ## 本地开发
 
@@ -194,7 +194,19 @@ Tool标准失败转换为`StepError`后，条件边直接进入`END`，因此失
 Step记录。`refine_diagnosis`只有在调用方注入`DiagnosisNarrativeModel`时才执行模型调用；模型结果先
 经过严格Schema校验，再检查根因code和建议action type与规则结果完全一致，最后只覆盖说明文字。
 调用异常或结构无效会记录失败的`LLM` Step并保留规则诊断，不写入Workflow业务错误通道。当前只
-提供供应商无关的模型适配接口，具体模型客户端留给后续运行时装配；诊断HTTP API仍未实现。
+提供供应商无关的模型适配接口，具体模型客户端留给后续运行时装配。
+
+## 订单诊断 API
+
+`POST /api/agent/order-diagnosis`严格接收`order_id`和`user_message`，最小身份通过`X-User-Id`与
+`X-User-Role` Header提供，可选Bearer Token继续透传Java。当前Header只是开发阶段身份上下文，
+不是完整认证系统；Python授予该固定只读Workflow所需的内部Tool能力，最终业务事实仍由Java返回。
+
+每次请求创建独立的一次性Session、用户Message和Run，先提交`RUNNING`再执行Workflow，避免Step
+因看不到父Run而失败。成功响应返回`run_id`、`trace_id`和完整`DiagnosisResult`，同时把结果JSON
+快照保存到`SUCCEEDED` Run。标准Tool失败按稳定错误码映射为HTTP 400/403/404/409/502/504，Run
+保存错误码和失败节点；未预期Workflow异常返回安全的`WORKFLOW_EXECUTION_ERROR`且不泄露异常。
+一次性Session只用于M2.8运行归属，不代表M3会话上下文已经实现。
 
 ## 测试与质量
 
@@ -219,6 +231,7 @@ make test-workflow-schemas
 make test-workflow-nodes
 make test-diagnosis-rules
 make test-diagnosis-generation
+make test-diagnosis-api
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP

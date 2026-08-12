@@ -39,4 +39,8 @@ fi
 
 cd "$(dirname "$0")/../agent-service"
 AGENT_PERSISTENCE_TEST_DATABASE_URL="postgresql://${test_user}:${test_password}@localhost:${test_port}/${test_database}" \
-  uv run --frozen pytest -q tests/test_agent_persistence.py tests/test_alembic.py "$@"
+  uv run --frozen pytest -q \
+    tests/test_agent_persistence.py \
+    tests/test_order_diagnosis_api.py \
+    tests/test_alembic.py \
+    "$@"
