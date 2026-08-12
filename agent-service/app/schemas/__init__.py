@@ -2,6 +2,7 @@
 
 from app.schemas.workflow import (
     BlockingStage,
+    DiagnosisNarrative,
     DiagnosisResult,
     Evidence,
     OrderDiagnosisState,
@@ -14,6 +15,7 @@ from app.schemas.workflow import (
 
 __all__ = [
     "BlockingStage",
+    "DiagnosisNarrative",
     "DiagnosisResult",
     "Evidence",
     "OrderDiagnosisState",

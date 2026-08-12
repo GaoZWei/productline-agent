@@ -11,15 +11,15 @@ _DELIVERY_BLOCKED = frozenset({"NOT_READY", "FAILED", "BLOCKED"})
 
 def evaluate_diagnosis_rules(state: OrderDiagnosisState) -> RuleDecision:
     """按最早业务阶段优先原则返回稳定决策, 不生成根因或建议文案。"""
-    # 第一步：数据够不够？
+    # 第一步检查数据是否足够
     if not _has_complete_facts(state):
         stage = BlockingStage.INSUFFICIENT_INFORMATION
-    else: 
-        # 第二步：数据够的情况下卡在哪？
+    else:
+        # 第二步判断完整数据对应的阻塞阶段
         stage = _evaluate_complete_facts(state)
     return RuleDecision(order_id=state["order_id"], blocking_stage=stage)
 
-# 完整性检查：防止缺数据误报正常
+# 完整性检查防止缺数据误报正常
 def _has_complete_facts(state: OrderDiagnosisState) -> bool:
     """确认规则依赖的每组 Tool 事实都已加载且归属一致。"""
 
@@ -114,7 +114,7 @@ def _requires_review(
     # 存在未通过复核
     if any(review.status != "APPROVED" for review in reviews):
         return True
-    # 问题已解决，但还没有通过复核
+    # 问题已解决, 但还没有通过复核
     approved_issue_ids = {
         review.issue_id for review in reviews if review.status == "APPROVED"
     }

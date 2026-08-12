@@ -1,4 +1,4 @@
-"""M2.5-M2.6 固定订单事实加载与确定性阻塞阶段诊断图。"""
+"""M2.5-M2.7 固定订单事实加载、规则裁决与诊断文案生成图。"""
 
 from __future__ import annotations
 
@@ -26,6 +26,12 @@ from app.schemas.tools import (
 )
 from app.schemas.workflow import OrderDiagnosisState, StepError
 from app.tools import ToolContext, ToolError, ToolNotRegisteredError, ToolRegistry
+from app.workflows.diagnosis_generation import (
+    DiagnosisNarrativeModel,
+    InvalidDiagnosisNarrativeError,
+    apply_model_narrative,
+    generate_rule_diagnosis,
+)
 from app.workflows.diagnosis_rules import evaluate_diagnosis_rules
 from app.workflows.recording import WorkflowStepRecorder
 
@@ -53,10 +59,12 @@ class OrderDiagnosisWorkflow:
         tool_registry: ToolRegistry,  # 找到需要调用的只读Tool实例
         tool_context: ToolContext,  # 保存身份、权限、Trace ID、Run ID和重复调用账本
         step_recorder: WorkflowStepRecorder,  # 记录每次节点开始、成功、失败和耗时
+        narrative_model: DiagnosisNarrativeModel | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._tool_context = tool_context
         self._step_recorder = step_recorder
+        self._narrative_model = narrative_model
         self._next_sequence_number = 1
         self._invoked = False
         self.graph = self._build_graph()
@@ -88,6 +96,8 @@ class OrderDiagnosisWorkflow:
         builder.add_node("load_review", self.load_review)
         builder.add_node("load_delivery", self.load_delivery)
         builder.add_node("diagnose_by_rules", self.diagnose_by_rules)
+        builder.add_node("generate_diagnosis", self.generate_diagnosis)
+        builder.add_node("refine_diagnosis", self.refine_diagnosis)
         # 执行顺序由边决定
         builder.add_edge(START, "load_context")
         # 后续节点使用条件边, 根据路由决策继续执行或停止
@@ -102,8 +112,10 @@ class OrderDiagnosisWorkflow:
             self._route_after_node,
             {"continue": "diagnose_by_rules", "stop": END},
         )
-        builder.add_edge("diagnose_by_rules", END)
-        return builder.compile(name="order-diagnosis-rules")
+        builder.add_edge("diagnose_by_rules", "generate_diagnosis")
+        builder.add_edge("generate_diagnosis", "refine_diagnosis")
+        builder.add_edge("refine_diagnosis", END)
+        return builder.compile(name="order-diagnosis")
     # 不调用Java, 它负责初始化执行上下文
     async def load_context(self, state: OrderDiagnosisState) -> StateUpdate:
         """校验 Run 与订单上下文, 并初始化全部 Workflow 状态通道。"""
@@ -276,6 +288,71 @@ class OrderDiagnosisWorkflow:
             output_summary=f"blocking_stage={decision.blocking_stage.value}",
         )
         return {"rule_decision": decision}
+    # 规则诊断结果生成：负责规则文案生成
+    async def generate_diagnosis(self, state: OrderDiagnosisState) -> StateUpdate:
+        """根据稳定规则裁决生成完整诊断结果。"""
+
+        decision = state["rule_decision"]
+        if decision is None:
+            raise ValueError("rule decision is required before diagnosis generation")
+        step_id = await self._start_step(
+            step_name="generate_diagnosis",
+            step_type=AgentStepType.RULE,
+            input_summary=f"blocking_stage={decision.blocking_stage.value}",
+        )
+        # 执行规则文案生成，并记录一个 RULE Step
+        diagnosis = generate_rule_diagnosis(state)
+        # 输出摘要只记录阻塞阶段和来源
+        await self._step_recorder.mark_succeeded(
+            step_id,
+            output_summary=(
+                f"blocking_stage={diagnosis.blocking_stage.value}; source=rule"
+            ),
+        )
+        return {"diagnosis": diagnosis}
+    # 规则诊断结果生成：负责规则文案整理（有无模型）
+    async def refine_diagnosis(self, state: OrderDiagnosisState) -> StateUpdate:
+        """使用可选模型整理说明文字, 失败时保留规则结果。"""
+        # 如果没有配置模型, 则直接返回规则结果
+        if self._narrative_model is None:
+            return {}
+        rule_result = state["diagnosis"]
+        if rule_result is None:
+            raise ValueError("rule diagnosis is required before model refinement")
+
+        step_id = await self._start_step(
+            step_name="refine_diagnosis",
+            step_type=AgentStepType.LLM,
+            input_summary=f"blocking_stage={rule_result.blocking_stage.value}",
+        )
+        # 如果配置了模型，则记录一个 LLM Step
+        try:
+            raw_output = await self._narrative_model.generate(rule_result)
+            refined = apply_model_narrative(rule_result, raw_output)
+        # 结构化输出无效
+        except InvalidDiagnosisNarrativeError:
+            await self._step_recorder.mark_failed(
+                step_id,
+                error_code="MODEL_OUTPUT_INVALID",
+                output_summary="source=rule_fallback",
+            )
+            return {}
+        # 调用异常
+        except Exception:
+            await self._step_recorder.mark_failed(
+                step_id,
+                error_code="MODEL_CALL_FAILED",
+                output_summary="source=rule_fallback",
+            )
+            return {}
+
+        await self._step_recorder.mark_succeeded(
+            step_id,
+            output_summary="source=model; protected_facts=preserved",
+        )
+        # 成功后更新：诊断结果
+        return {"diagnosis": refined}
+
     # 所有业务节点最终都会进入
     async def _invoke_tool(
         self,
@@ -377,6 +454,7 @@ class OrderDiagnosisWorkflow:
         """保留已有错误并追加当前首个失败。"""
 
         return {"errors": [*state["errors"], error]}
+
     # 每个节点之后检查error是否为空, 为空就继续执行下一个节点, 否则结束图
     @staticmethod
     def _route_after_node(state: OrderDiagnosisState) -> RouteDecision:

@@ -32,6 +32,7 @@ def _golden_diagnosis() -> DiagnosisResult:
     return DiagnosisResult(
         order_id="ORDER-003",
         blocking_stage=BlockingStage.QUALITY_REVIEW,
+        summary="订单阻塞在质量复核环节。",
         root_causes=[
             RootCause(
                 code="OPEN_COORDINATE_SYSTEM_ISSUE",
@@ -78,6 +79,7 @@ def test_diagnosis_result_accepts_structured_order_003_golden_result() -> None:
 
     assert diagnosis.order_id == "ORDER-003"
     assert diagnosis.blocking_stage == "QUALITY_REVIEW"
+    assert diagnosis.summary == "订单阻塞在质量复核环节。"
     assert diagnosis.root_causes[0].code == "OPEN_COORDINATE_SYSTEM_ISSUE"
     assert diagnosis.evidence[0].tool_name == "get_quality_issues"
     assert diagnosis.evidence[0].field_path == "issues[0].status"
@@ -92,6 +94,7 @@ def test_diagnosis_result_accepts_structured_order_003_golden_result() -> None:
         ("order_id", "TASK-003"),
         ("blocking_stage", "quality-review"),
         ("blocking_stage", "UNKNOWN_STAGE"),
+        ("summary", " "),
         ("root_causes", []),
         ("evidence", []),
         ("suggestions", []),

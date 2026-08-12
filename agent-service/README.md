@@ -1,11 +1,11 @@
 # Agent Service
 
-M2.6 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M2.7 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
-Workflow状态/诊断Schema、固定LangGraph数据加载节点和确定性阻塞阶段规则，尚未包含诊断文案、
-RAG或模型调用。
+Workflow状态/诊断Schema、固定LangGraph数据加载节点、确定性阻塞阶段规则和诊断文案生成；模型
+通过可选结构化接口整理表达，尚未包含具体模型供应商适配、RAG或对外诊断API。
 
 ## 本地开发
 
@@ -150,14 +150,15 @@ Tool响应写入Step；开发调试API仍未接入持久化Run/Step。
 交付、诊断和错误通道。它主要服务mypy和后续LangGraph节点的静态类型检查，不会在运行时自动
 校验字典内容；外部事实仍必须先经过现有Tool Pydantic Schema。
 
-`DiagnosisResult`使用严格、不可变且禁止额外字段的Pydantic模型，包含订单ID、阻塞阶段、结构化
-`RootCause`、`Evidence`、`Suggestion`和0～1置信度。`Evidence`当前只接受七个已注册只读Tool、
+`DiagnosisResult`使用严格、不可变且禁止额外字段的Pydantic模型，包含订单ID、阻塞阶段、阶段说明、
+结构化`RootCause`、`Evidence`、`Suggestion`和0～1置信度。`Evidence`当前只接受七个已注册只读Tool、
 可定位字段路径和标量值，禁止把模型判断或整段业务响应冒充事实证据；`StepError`只保留稳定
 错误码、安全文案、retryable和可选Trace ID，不接收原始响应或异常堆栈。
 
 `blocking_stage`由`BlockingStage`限制为`PRODUCTION/PRODUCTION_BLOCKED/QUALITY_REVIEW/REVIEW/
 DELIVERY/NONE/INSUFFICIENT_INFORMATION`。`NONE`不得同时携带根因，其他阶段至少需要一个根因。
-M2.6只把规则决策保存到`RuleDecision`，最终`DiagnosisResult`仍留给M2.7生成。
+`DiagnosisNarrative`只允许模型返回阶段说明以及带稳定code的根因和建议文案，不接收订单ID、阻塞
+阶段、证据或置信度。
 
 ## 固定 Workflow 节点
 
@@ -172,6 +173,8 @@ load_context
 → load_review
 → load_delivery
 → diagnose_by_rules
+→ generate_diagnosis
+→ refine_diagnosis（可选模型）
 ```
 
 `load_context`校验`order_id`和Run一致性并初始化全部状态通道；其余节点只通过现有只读Tool读取
@@ -185,8 +188,13 @@ Tool标准失败转换为`StepError`后，条件边直接进入`END`，因此失
 
 `diagnose_by_rules`只消费前序Tool事实，不再发HTTP请求。规则先检查订单、任务、进度、质检、复核
 和交付事实是否完整，再按“生产失败 → 生产中 → 未关闭质检 → 未通过复核 → 交付阻塞 → 无阻塞”
-返回最早阶段；缺失或归属矛盾时返回`INSUFFICIENT_INFORMATION`。规则执行以`RULE`类型Step记录，
-但当前没有诊断HTTP API，也不会生成根因、字段证据、建议或用户文案。
+返回最早阶段；缺失或归属矛盾时返回`INSUFFICIENT_INFORMATION`。
+
+`generate_diagnosis`根据机器裁决装配阶段说明、稳定根因、Tool字段证据、建议和置信度，并以`RULE`
+Step记录。`refine_diagnosis`只有在调用方注入`DiagnosisNarrativeModel`时才执行模型调用；模型结果先
+经过严格Schema校验，再检查根因code和建议action type与规则结果完全一致，最后只覆盖说明文字。
+调用异常或结构无效会记录失败的`LLM` Step并保留规则诊断，不写入Workflow业务错误通道。当前只
+提供供应商无关的模型适配接口，具体模型客户端留给后续运行时装配；诊断HTTP API仍未实现。
 
 ## 测试与质量
 
@@ -210,6 +218,7 @@ make test-step-lifecycle
 make test-workflow-schemas
 make test-workflow-nodes
 make test-diagnosis-rules
+make test-diagnosis-generation
 ```
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP

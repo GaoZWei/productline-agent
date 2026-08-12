@@ -12,7 +12,7 @@ from app.clients.business import BusinessHttpClient
 from app.errors import ToolErrorCode
 from app.models import AgentStepType
 from app.schemas.business import BusinessIdentity
-from app.schemas.workflow import BlockingStage
+from app.schemas.workflow import BlockingStage, DiagnosisResult
 from app.settings import Settings
 from app.tools import ToolContext, create_read_tool_registry
 from app.workflows import OrderDiagnosisWorkflow, WorkflowStepRecorder
@@ -136,6 +136,38 @@ class MemoryStepRecorder(WorkflowStepRecorder):
         return next(step for step in self.steps if step.step_id == step_id)
 
 
+class ValidNarrativeModel:
+    async def generate(self, diagnosis: DiagnosisResult) -> object:
+        return {
+            "summary": "质量问题尚未闭环。当前无法进入交付。",
+            "root_causes": [
+                {"code": item.code, "description": f"整理说明: {item.description}"}
+                for item in diagnosis.root_causes
+            ],
+            "suggestions": [
+                {
+                    "action_type": item.action_type,
+                    "description": f"整理说明: {item.description}",
+                }
+                for item in diagnosis.suggestions
+            ],
+        }
+
+
+class InvalidNarrativeModel:
+    async def generate(self, diagnosis: DiagnosisResult) -> object:
+        return {
+            "summary": diagnosis.summary,
+            "root_causes": [],
+            "suggestions": [item.model_dump() for item in diagnosis.suggestions],
+        }
+
+
+class FailingNarrativeModel:
+    async def generate(self, diagnosis: DiagnosisResult) -> object:
+        raise RuntimeError("model unavailable")
+
+
 def _golden_handler(calls: list[str]) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
@@ -248,9 +280,18 @@ async def test_fixed_workflow_loads_order_003_in_declared_order_and_merges_state
     assert state["delivery"].records[0].status == "BLOCKED"
     assert state["rule_decision"] is not None
     assert state["rule_decision"].blocking_stage is BlockingStage.QUALITY_REVIEW
-    assert state["diagnosis"] is None
+    assert state["diagnosis"] is not None
+    assert state["diagnosis"].blocking_stage is BlockingStage.QUALITY_REVIEW
+    assert [cause.code for cause in state["diagnosis"].root_causes] == [
+        "OPEN_COORDINATE_SYSTEM_ISSUE",
+        "REVIEW_PENDING",
+    ]
+    assert [suggestion.action_type for suggestion in state["diagnosis"].suggestions] == [
+        "CREATE_COORDINATE_SYSTEM_REWORK",
+        "RESUBMIT_REVIEW",
+    ]
     assert state["errors"] == []
-    assert [step.sequence_number for step in recorder.steps] == list(range(1, 9))
+    assert [step.sequence_number for step in recorder.steps] == list(range(1, 10))
     assert [step.step_name for step in recorder.steps] == [
         "load_context",
         "load_order",
@@ -260,10 +301,83 @@ async def test_fixed_workflow_loads_order_003_in_declared_order_and_merges_state
         "load_review",
         "load_delivery",
         "diagnose_by_rules",
+        "generate_diagnosis",
     ]
+    assert recorder.steps[-2].output_summary == "blocking_stage=QUALITY_REVIEW"
     assert recorder.steps[-1].step_type is AgentStepType.RULE
-    assert recorder.steps[-1].output_summary == "blocking_stage=QUALITY_REVIEW"
+    assert recorder.steps[-1].output_summary == ("blocking_stage=QUALITY_REVIEW; source=rule")
     assert all(step.status == "SUCCEEDED" for step in recorder.steps)
+
+
+@pytest.mark.asyncio
+async def test_structured_model_only_refines_narrative_and_preserves_rule_facts() -> None:
+    calls: list[str] = []
+    client = BusinessHttpClient(_settings(), transport=_golden_handler(calls))
+    recorder = MemoryStepRecorder()
+    workflow = OrderDiagnosisWorkflow(
+        tool_registry=create_read_tool_registry(client),
+        tool_context=_context(),
+        step_recorder=recorder,
+        narrative_model=ValidNarrativeModel(),
+    )
+
+    try:
+        state = await workflow.ainvoke("ORDER-003")
+    finally:
+        await client.aclose()
+
+    diagnosis = state["diagnosis"]
+    assert diagnosis is not None
+    assert diagnosis.summary == "质量问题尚未闭环。当前无法进入交付。"
+    assert diagnosis.order_id == "ORDER-003"
+    assert diagnosis.blocking_stage is BlockingStage.QUALITY_REVIEW
+    assert [(item.tool_name, item.value) for item in diagnosis.evidence] == [
+        ("get_related_tasks", "COMPLETED"),
+        ("get_quality_issues", "OPEN"),
+        ("get_review_result", "PENDING"),
+        ("get_delivery_status", "BLOCKED"),
+    ]
+    assert recorder.steps[-1].step_type is AgentStepType.LLM
+    assert recorder.steps[-1].status == "SUCCEEDED"
+    assert recorder.steps[-1].output_summary == "source=model; protected_facts=preserved"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "expected_error_code"),
+    [
+        (InvalidNarrativeModel(), "MODEL_OUTPUT_INVALID"),
+        (FailingNarrativeModel(), "MODEL_CALL_FAILED"),
+    ],
+)
+async def test_model_failure_records_llm_step_and_falls_back_to_rule_result(
+    model: InvalidNarrativeModel | FailingNarrativeModel,
+    expected_error_code: str,
+) -> None:
+    calls: list[str] = []
+    client = BusinessHttpClient(_settings(), transport=_golden_handler(calls))
+    recorder = MemoryStepRecorder()
+    workflow = OrderDiagnosisWorkflow(
+        tool_registry=create_read_tool_registry(client),
+        tool_context=_context(),
+        step_recorder=recorder,
+        narrative_model=model,
+    )
+
+    try:
+        state = await workflow.ainvoke("ORDER-003")
+    finally:
+        await client.aclose()
+
+    diagnosis = state["diagnosis"]
+    assert diagnosis is not None
+    assert diagnosis.summary == "订单阻塞在质量复核环节。"
+    assert diagnosis.blocking_stage is BlockingStage.QUALITY_REVIEW
+    assert recorder.steps[-1].step_type is AgentStepType.LLM
+    assert recorder.steps[-1].status == "FAILED"
+    assert recorder.steps[-1].error_code == expected_error_code
+    assert recorder.steps[-1].output_summary == "source=rule_fallback"
+    assert state["errors"] == []
 
 
 @pytest.mark.asyncio
@@ -321,16 +435,12 @@ async def test_multi_task_nodes_merge_results_by_stable_task_id() -> None:
     assert list(state["progress"]) == ["TASK-003", "TASK-004"]
     assert list(state["quality_issues"]) == ["TASK-003", "TASK-004"]
     assert list(state["reviews"]) == ["TASK-003", "TASK-004"]
-    assert calls.index("/api/tasks/TASK-003/progress") < calls.index(
-        "/api/tasks/TASK-004/progress"
-    )
+    assert calls.index("/api/tasks/TASK-003/progress") < calls.index("/api/tasks/TASK-004/progress")
     assert calls.index("/api/tasks/TASK-003/quality-issues") < calls.index(
         "/api/tasks/TASK-004/quality-issues"
     )
-    assert calls.index("/api/tasks/TASK-003/review") < calls.index(
-        "/api/tasks/TASK-004/review"
-    )
-    assert [step.sequence_number for step in recorder.steps] == list(range(1, 12))
+    assert calls.index("/api/tasks/TASK-003/review") < calls.index("/api/tasks/TASK-004/review")
+    assert [step.sequence_number for step in recorder.steps] == list(range(1, 13))
     assert all(step.status == "SUCCEEDED" for step in recorder.steps)
 
 
@@ -401,7 +511,7 @@ async def test_invalid_order_context_stops_before_any_business_tool_call() -> No
 
 
 @pytest.mark.asyncio
-async def test_compiled_graph_contains_m25_loaders_and_m26_rule_node() -> None:
+async def test_compiled_graph_contains_m25_to_m27_nodes() -> None:
     client = BusinessHttpClient(_settings(), transport=httpx.MockTransport(lambda _: _success({})))
     workflow = OrderDiagnosisWorkflow(
         tool_registry=create_read_tool_registry(client),
@@ -424,5 +534,7 @@ async def test_compiled_graph_contains_m25_loaders_and_m26_rule_node() -> None:
         "load_review",
         "load_delivery",
         "diagnose_by_rules",
+        "generate_diagnosis",
+        "refine_diagnosis",
         "__end__",
     }

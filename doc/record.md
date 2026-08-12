@@ -462,3 +462,24 @@
 - 固定输出生产中、生产阻塞、质检、复核、交付、无阻塞或信息不足七种机器阶段。
 - 先校验事实完整性，再按生产、质检、复核、交付的最早阶段优先判断。
 - `RuleDecision`与最终`DiagnosisResult`分离，后续模型或文案节点不能重新决定阻塞阶段。
+
+---
+
+## 2026-08-10 — `[T244-T250] M2.7 诊断文案生成`
+
+### 核心解决的问题
+
+把稳定阻塞阶段转换为可读且可追溯的完整诊断结果，并在模型整理表达失败时保持确定性输出可用。
+
+### 实现的核心代码
+
+- `agent-service/app/workflows/diagnosis_generation.py`：规则文案装配、模型文案Schema校验与安全合并。
+- `agent-service/app/schemas/workflow.py`：阶段说明和`DiagnosisNarrative`结构化模型输出契约。
+- `agent-service/app/workflows/order_diagnosis.py`：规则生成、可选模型改写和回退Step。
+- `agent-service/tests/test_diagnosis_generation.py`：各阻塞阶段、黄金订单和模型边界用例。
+
+### 实现的核心功能
+
+- 为七类规则裁决生成阶段说明、稳定根因、Tool字段证据、建议和置信度。
+- 模型只能改写带稳定code的说明文字，不能覆盖订单、阻塞阶段、证据或置信度。
+- 模型调用失败、Schema无效或稳定code变化时记录失败LLM Step并回退规则结果。

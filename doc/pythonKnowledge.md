@@ -2,7 +2,7 @@
 
 本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M2.6 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文描述的是当前 M1.1～M2.7 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
 
 ## 1. 先建立整体认识
 
@@ -12,7 +12,8 @@ Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康
 只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测。M2.1 已增加 Session、Message、Run、
 Step持久化基础，M2.2～M2.3已实现最小Run/Step状态流转，M2.4已定义Workflow状态与结构化诊断
 Schema，M2.5已实现固定LangGraph数据加载节点、状态合并、失败中断和Step记录适配，M2.6已实现
-确定性阻塞阶段规则和信息完整性门禁；诊断文案、HTTP入口和大模型调用尚未实现。
+确定性阻塞阶段规则和信息完整性门禁，M2.7已实现规则诊断文案、可选结构化模型改写和失败回退；
+诊断HTTP入口和具体模型供应商适配尚未实现。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -775,7 +776,7 @@ ToolResult(success=false, error=ToolError)
 每个Workflow实例绑定一个Run级`ToolContext`并只允许执行一次。Step序号按真实执行顺序递增，
 Step ID由`run_id + sequence + step_name`的SHA-256摘要生成，不把完整Run ID复制到技术主键中。
 M2.6在`load_delivery`后接入`diagnose_by_rules`。该节点只读取已加载状态，不再调用Tool；它把
-纯规则结果写入`rule_decision`并记录一个`RULE` Step。M2.7的`format_result`仍未实现。
+纯规则结果写入`rule_decision`并记录一个`RULE` Step。M2.7继续执行规则结果装配与可选模型改写。
 
 ### 5.9 M2.6 的确定性诊断规则
 
@@ -797,6 +798,18 @@ NOT_READY/FAILED/BLOCKED交付   → DELIVERY
 `PRODUCTION_BLOCKED`，因为质检处在更下游。使用`StrEnum`而不是自由字符串，可以让Workflow、
 测试和后续API共享固定机器代码；使用单独的`RuleDecision`而不是立即构造`DiagnosisResult`，则让
 “事实判定”和“面向用户的解释”分别由M2.6、M2.7负责。
+
+### 5.10 M2.7 的诊断文案与模型边界
+
+`generate_rule_diagnosis`把`RuleDecision`和已加载Tool事实装配为完整`DiagnosisResult`。阶段说明、
+根因code、Evidence字段路径和值、建议action type和置信度均由代码生成，因此即使不配置模型也能
+稳定返回结果。`ORDER-003`固定得到未关闭坐标系问题与待复核根因，以及创建坐标系返工任务和重新
+提交复核建议。
+
+可选模型实现`DiagnosisNarrativeModel`，只返回`summary`以及带稳定code的根因、建议说明。
+`apply_model_narrative`先执行严格Pydantic校验，再逐项检查code和action type是否与规则结果一致；
+最终合并始终复用规则结果的订单、阻塞阶段、证据和置信度。调用失败或结构无效会记录失败LLM Step，
+Workflow状态继续保留规则诊断。这是表达增强的降级策略，不适用于未来由模型承担不可替代判断的场景。
 
 ## 6. Trace ID 与结构化日志
 
@@ -1758,6 +1771,8 @@ async def lifespan(...):
 - Workflow调用Step生命周期的Protocol边界和数据库短事务适配；
 - 七值`BlockingStage`枚举和只承载机器决策的`RuleDecision`；
 - 五订单确定性阶段规则、信息完整性/归属门禁、最早业务阶段优先级和RULE Step；
+- 七类裁决的规则文案、稳定根因、Tool字段证据、建议和置信度装配；
+- `DiagnosisNarrative`结构化模型边界、稳定code校验和规则结果回退；
 - JSON日志和安全Trace ID；
 - 共享异步Java HTTP Client和连接池；
 - 身份、Token、Trace ID和幂等键透传；
@@ -1784,12 +1799,12 @@ async def lifespan(...):
 
 - 数据库readiness；
 - Workflow自动创建/结束Run，以及调试API自动记录Step；
-- 根因/字段证据/建议文案、动态Agent和模型调用；
+- 具体模型供应商适配、Prompt版本管理、真实模型评测和动态Agent；
 - RAG、SSE和Approval。
 
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M2.6 结构和后续可能增加的内容
+### 13.3 当前 M2.7 结构和后续可能增加的内容
 
 当前关键结构为：
 
@@ -1806,8 +1821,9 @@ app/
 │   ├── tools.py                 # 已实现的七个只读Tool输入输出Schema
 │   └── workflow.py              # 已实现的Workflow状态与结构化诊断Schema
 ├── workflows/
+│   ├── diagnosis_generation.py  # 已实现的规则文案、模型校验与回退
 │   ├── diagnosis_rules.py       # 已实现的纯确定性阻塞阶段规则
-│   ├── order_diagnosis.py       # 已实现的固定LangGraph加载与规则图
+│   ├── order_diagnosis.py       # 已实现的固定LangGraph加载、规则和文案图
 │   └── recording.py             # 已实现的Step短事务记录适配
 ├── tools/
 │   ├── base.py                  # 已实现的Tool协议
@@ -1820,8 +1836,8 @@ app/
     └── tool_debug.py            # 已实现的开发专用Tool调试接口与Run上下文存储
 ```
 
-上述文件均已存在。M2.6已完成业务事实加载和阻塞阶段机器决策，但尚未生成根因、字段证据、建议、
-Run终态或HTTP API，也没有动态模型调用，不能把“阶段判断完成”描述成“已有Agent诊断闭环”。
+上述文件均已存在。M2.7已完成业务事实加载、阻塞阶段机器决策和完整规则诊断，但尚未管理Run终态、
+提供HTTP API或装配具体模型客户端，也没有动态Agent决策，不能描述成“已有Agent诊断闭环”。
 
 对于负责Java接口对接的开发者，下一阶段最值得关注：
 
