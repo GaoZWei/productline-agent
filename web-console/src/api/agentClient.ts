@@ -9,7 +9,7 @@ import type {
 
 const AGENT_API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL ?? "/agent-api";
 const AGENT_USER_ID = import.meta.env.VITE_AGENT_USER_ID ?? "reviewer-001";
-const AGENT_USER_ROLE = import.meta.env.VITE_AGENT_USER_ROLE ?? "REVIEWER";
+export const AGENT_USER_ROLE = import.meta.env.VITE_AGENT_USER_ROLE ?? "REVIEWER";
 
 const BLOCKING_STAGES = new Set<BlockingStage>([
   "PRODUCTION",
@@ -135,7 +135,12 @@ function responseValidationError(status?: number, traceId?: string) {
 }
 
 function isOrderDiagnosisResponse(value: unknown): value is OrderDiagnosisResponse {
-  if (!isRecord(value) || !isNonEmptyString(value.run_id) || !isNonEmptyString(value.trace_id)) {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.run_id) ||
+    !isNonEmptyString(value.session_id) ||
+    !isNonEmptyString(value.trace_id)
+  ) {
     return false;
   }
   const diagnosis = value.diagnosis;

@@ -119,6 +119,8 @@ def test_agent_metadata_contains_only_agent_runtime_tables() -> None:
     assert set(Base.metadata.tables["agent_sessions"].columns.keys()) == {
         "session_id",
         "user_id",
+        "context",
+        "expires_at",
         "created_at",
         "updated_at",
     }

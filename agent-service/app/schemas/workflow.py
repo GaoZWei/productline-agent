@@ -6,6 +6,7 @@ from typing import Annotated, Literal, Self, TypedDict
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.errors import ToolErrorCode
+from app.schemas.context import PageContext
 from app.schemas.tools import (
     DeliveryStatus,
     OrderDetail,
@@ -164,6 +165,7 @@ class OrderDiagnosisState(TypedDict):
 
     run_id: str
     order_id: str
+    page_context: PageContext | None
     order: OrderDetail | None
     tasks: list[TaskDetail]
     progress: dict[str, ProgressResult]

@@ -3,7 +3,8 @@ import { ElAlert, ElButton, ElTag } from "element-plus";
 import { computed, nextTick, ref, watch } from "vue";
 
 import { diagnoseOrder } from "../api/agentApi";
-import { AgentApiError } from "../api/agentClient";
+import { AGENT_USER_ROLE, AgentApiError } from "../api/agentClient";
+import { createOrderDetailPageContext } from "../context/pageContext";
 import type { BlockingStage, OrderDiagnosisResponse } from "../types/agent";
 import type { Order } from "../types/business";
 
@@ -24,6 +25,7 @@ const userMessage = ref(DEFAULT_MESSAGE);
 const loading = ref(false);
 const result = ref<OrderDiagnosisResponse>();
 const error = ref<AgentApiError>();
+const sessionId = ref<string>();
 const messageInput = ref<HTMLTextAreaElement>();
 let requestSequence = 0;
 
@@ -37,6 +39,7 @@ watch(currentOrderId, () => {
   loading.value = false;
   result.value = undefined;
   error.value = undefined;
+  sessionId.value = undefined;
 });
 
 async function openDrawer() {
@@ -50,17 +53,22 @@ function closeDrawer() {
 }
 
 async function submitDiagnosis() {
-  const orderId = currentOrderId.value;
+  const order = props.order;
+  const orderId = order?.orderId;
   const message = userMessage.value.trim();
-  if (!orderId || !message || loading.value) return;
+  if (!order || !orderId || !message || loading.value) return;
 
   const sequence = ++requestSequence;
   loading.value = true;
   result.value = undefined;
   error.value = undefined;
   try {
-    const response = await diagnoseOrder(orderId, message);
+    // 创建订单详情页上下文
+    const pageContext = createOrderDetailPageContext(order, AGENT_USER_ROLE);
+    // 请求诊断订单
+    const response = await diagnoseOrder(orderId, message, pageContext, sessionId.value);
     if (sequence === requestSequence && currentOrderId.value === orderId) {
+      sessionId.value = response.session_id;
       result.value = response;
     }
   } catch (reason) {

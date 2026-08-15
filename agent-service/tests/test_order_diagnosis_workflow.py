@@ -1,4 +1,4 @@
-"""M2.5 固定订单诊断 Workflow 节点、状态合并和失败中断测试。"""
+"""M2.5-M3.1 固定订单诊断节点、页面上下文重校验和失败中断测试。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from app.clients.business import BusinessHttpClient
 from app.errors import ToolErrorCode
 from app.models import AgentStepType
 from app.schemas.business import BusinessIdentity
+from app.schemas.context import PageContext, PageType
 from app.schemas.workflow import BlockingStage, DiagnosisResult
 from app.settings import Settings
 from app.tools import ToolContext, create_read_tool_registry
@@ -291,7 +292,7 @@ async def test_fixed_workflow_loads_order_003_in_declared_order_and_merges_state
         "RESUBMIT_REVIEW",
     ]
     assert state["errors"] == []
-    assert [step.sequence_number for step in recorder.steps] == list(range(1, 10))
+    assert [step.sequence_number for step in recorder.steps] == list(range(1, 11))
     assert [step.step_name for step in recorder.steps] == [
         "load_context",
         "load_order",
@@ -300,6 +301,7 @@ async def test_fixed_workflow_loads_order_003_in_declared_order_and_merges_state
         "load_quality",
         "load_review",
         "load_delivery",
+        "validate_page_context",
         "diagnose_by_rules",
         "generate_diagnosis",
     ]
@@ -440,7 +442,7 @@ async def test_multi_task_nodes_merge_results_by_stable_task_id() -> None:
         "/api/tasks/TASK-004/quality-issues"
     )
     assert calls.index("/api/tasks/TASK-003/review") < calls.index("/api/tasks/TASK-004/review")
-    assert [step.sequence_number for step in recorder.steps] == list(range(1, 13))
+    assert [step.sequence_number for step in recorder.steps] == list(range(1, 14))
     assert all(step.status == "SUCCEEDED" for step in recorder.steps)
 
 
@@ -511,6 +513,39 @@ async def test_invalid_order_context_stops_before_any_business_tool_call() -> No
 
 
 @pytest.mark.asyncio
+async def test_quality_page_context_is_revalidated_against_loaded_java_facts() -> None:
+    calls: list[str] = []
+    client = BusinessHttpClient(_settings(), transport=_golden_handler(calls))
+    recorder = MemoryStepRecorder()
+    workflow = OrderDiagnosisWorkflow(
+        tool_registry=create_read_tool_registry(client),
+        tool_context=_context(),
+        step_recorder=recorder,
+    )
+    context = PageContext(
+        current_system="production-system",
+        current_page=PageType.QUALITY_ISSUE,
+        order_id="ORDER-003",
+        task_id="TASK-003",
+        issue_id="ISSUE-999",
+        product_type="DOM",
+        user_role="REVIEWER",
+    )
+
+    try:
+        state = await workflow.ainvoke("ORDER-003", page_context=context)
+    finally:
+        await client.aclose()
+
+    assert len(state["errors"]) == 1
+    assert state["errors"][0].step_name == "validate_page_context"
+    assert state["errors"][0].code is ToolErrorCode.PARAM_VALIDATION_ERROR
+    assert recorder.steps[-1].step_name == "validate_page_context"
+    assert recorder.steps[-1].status == "FAILED"
+    assert all(step.step_name != "diagnose_by_rules" for step in recorder.steps)
+
+
+@pytest.mark.asyncio
 async def test_compiled_graph_contains_m25_to_m27_nodes() -> None:
     client = BusinessHttpClient(_settings(), transport=httpx.MockTransport(lambda _: _success({})))
     workflow = OrderDiagnosisWorkflow(
@@ -533,6 +568,7 @@ async def test_compiled_graph_contains_m25_to_m27_nodes() -> None:
         "load_quality",
         "load_review",
         "load_delivery",
+        "validate_page_context",
         "diagnose_by_rules",
         "generate_diagnosis",
         "refine_diagnosis",

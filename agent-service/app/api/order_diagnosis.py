@@ -6,8 +6,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
-from pydantic import SecretStr, ValidationError
 
+from app.api.identity import resolve_business_identity
 from app.database import Database
 from app.observability import get_trace_id
 from app.schemas.agent import (
@@ -34,6 +34,10 @@ _ERROR_HTTP_STATUS = {
     "DUPLICATE_CALL": 409,
     "UNKNOWN_TOOL_ERROR": 500,
     "WORKFLOW_EXECUTION_ERROR": 500,
+    "SESSION_NOT_FOUND": 404,
+    "SESSION_EXPIRED": 410,
+    "SESSION_CONTEXT_INCOMPLETE": 400,
+    "SESSION_CONTEXT_INVALID": 500,
 }
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -49,6 +53,7 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
         403: {"model": OrderDiagnosisErrorResponse},
         404: {"model": OrderDiagnosisErrorResponse},
         409: {"model": OrderDiagnosisErrorResponse},
+        410: {"model": OrderDiagnosisErrorResponse},
         500: {"model": OrderDiagnosisErrorResponse},
         502: {"model": OrderDiagnosisErrorResponse},
         504: {"model": OrderDiagnosisErrorResponse},
@@ -65,7 +70,8 @@ async def diagnose_order(
     """创建 Run、执行固定 Workflow 并返回诊断或安全错误。"""
 
     trace_id = get_trace_id()
-    identity = _resolve_identity(
+    # 先处理身份信息，确保用户已认证
+    identity = resolve_business_identity(
         user_id=user_id,
         user_role=user_role,
         authorization=authorization,
@@ -83,13 +89,38 @@ async def diagnose_order(
             ),
         )
 
+    context_role = (
+        diagnosis_request.page_context.user_role
+        if diagnosis_request.page_context is not None
+        else None
+    )
+    # 检查用户是否有权限诊断订单
+    if not _has_diagnosis_permission(identity, context_role):
+        return _error_response(
+            status_code=403,
+            error=OrderDiagnosisErrorResponse(
+                run_id=None,
+                trace_id=trace_id,
+                code="PERMISSION_DENIED",
+                message="order diagnosis permission is required",
+                retryable=False,
+                error_step=None,
+            ),
+        )
+
     database: Database = request.app.state.database
     registry: ToolRegistry = request.app.state.tool_registry
-    service = OrderDiagnosisService(database, registry)
+    service = OrderDiagnosisService(
+        database,
+        registry,
+        session_ttl_seconds=request.app.state.settings.session_ttl_seconds,
+    )
     try:
         execution = await service.diagnose(
+            session_id=diagnosis_request.session_id,
             order_id=diagnosis_request.order_id,
             user_message=diagnosis_request.user_message,
+            page_context=diagnosis_request.page_context,
             identity=identity,
             trace_id=trace_id,
         )
@@ -108,31 +139,21 @@ async def diagnose_order(
 
     return OrderDiagnosisResponse(
         run_id=execution.run_id,
+        session_id=execution.session_id,
         trace_id=trace_id,
         diagnosis=execution.diagnosis,
     )
 
 
-def _resolve_identity(
-    *,
-    user_id: str | None,
-    user_role: str | None,
-    authorization: str | None,
-) -> BusinessIdentity | None:
-    """把最小身份 Header 转换为 Java Tool 使用的安全身份。"""
+def _has_diagnosis_permission(
+    identity: BusinessIdentity,
+    context_role: str | None,
+) -> bool:
+    """只信任服务端角色策略, 并要求页面角色提示与身份Header一致。"""
 
-    if user_id is None or user_role is None:
-        return None
-    token: SecretStr | None = None
-    if authorization is not None:
-        scheme, separator, value = authorization.partition(" ")
-        if separator != " " or scheme.lower() != "bearer" or not value.strip():
-            return None
-        token = SecretStr(value.strip())
-    try:
-        return BusinessIdentity(user_id=user_id, role=user_role, token=token)
-    except ValidationError:
-        return None
+    return identity.role == "REVIEWER" and (
+        context_role is None or context_role == identity.role
+    )
 
 
 def _error_response(

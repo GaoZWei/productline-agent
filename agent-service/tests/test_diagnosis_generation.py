@@ -62,6 +62,7 @@ def _state(
     return {
         "run_id": "run-generation-003",
         "order_id": order_id,
+        "page_context": None,
         "order": OrderDetail(
             order_id=order_id,
             product_type="DOM",

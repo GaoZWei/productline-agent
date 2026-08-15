@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from app.database import Database
 from app.models import AgentStepType
 from app.repositories import AgentRunRepository, AgentStepRepository
-from app.services.step_lifecycle import StepLifecycleService
+
+if TYPE_CHECKING:
+    from app.services.step_lifecycle import StepLifecycleService
+
+
+def _step_lifecycle_service(
+    step_repository: AgentStepRepository,
+    run_repository: AgentRunRepository,
+) -> StepLifecycleService:
+    """延迟加载生命周期服务, 避免 Workflow 与服务公开入口循环导入。"""
+
+    from app.services.step_lifecycle import StepLifecycleService
+
+    return StepLifecycleService(step_repository, run_repository)
 
 
 class WorkflowStepRecorder(Protocol):
@@ -68,7 +81,7 @@ class DatabaseWorkflowStepRecorder:
         """创建并提交 RUNNING Step 后立即释放父 Run 行锁。"""
 
         async with self._database.session() as session, session.begin():
-            service = StepLifecycleService(
+            service = _step_lifecycle_service(
                 AgentStepRepository(session),
                 AgentRunRepository(session),
             )
@@ -90,7 +103,7 @@ class DatabaseWorkflowStepRecorder:
         """使用新事务保存成功摘要和耗时。"""
 
         async with self._database.session() as session, session.begin():
-            service = StepLifecycleService(
+            service = _step_lifecycle_service(
                 AgentStepRepository(session),
                 AgentRunRepository(session),
             )
@@ -106,7 +119,7 @@ class DatabaseWorkflowStepRecorder:
         """使用新事务保存失败码、安全摘要和耗时。"""
 
         async with self._database.session() as session, session.begin():
-            service = StepLifecycleService(
+            service = _step_lifecycle_service(
                 AgentStepRepository(session),
                 AgentRunRepository(session),
             )

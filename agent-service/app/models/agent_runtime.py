@@ -1,6 +1,6 @@
 """Agent 会话与执行过程的 SQLAlchemy 持久化模型。"""
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -72,6 +72,12 @@ def _enum_column(enum_type: type[StrEnum], constraint_name: str, length: int) ->
         length=length,
     )
 
+
+def _default_session_expiration() -> datetime:
+    """为非HTTP内部调用提供30分钟默认TTL; 生产服务会显式覆盖。"""
+
+    return datetime.now(UTC) + timedelta(minutes=30)
+
 # 对应agent_sessions表 保存会话信息
 class AgentSession(Base):
     """一次连续对话的归属信息, 不保存 Java 业务事实。"""
@@ -81,6 +87,7 @@ class AgentSession(Base):
         CheckConstraint("char_length(session_id) > 0", name="ck_agent_sessions_id_not_blank"),
         CheckConstraint("char_length(user_id) > 0", name="ck_agent_sessions_user_not_blank"),
         Index("ix_agent_sessions_user_created", "user_id", "created_at"),
+        Index("ix_agent_sessions_expires_at", "expires_at"),
     )
 
     session_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -102,6 +109,10 @@ class AgentSession(Base):
         back_populates="session",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+    context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_default_session_expiration, nullable=False
     )
 
 # 对应agent_messages表 保存一条会话消息信息

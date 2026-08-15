@@ -1,9 +1,13 @@
 # Web Console
 
-M2.9 订单业务与诊断页面，使用 Vue 3、TypeScript、Vite、Pinia、Axios 和 Element Plus。
+M3.2 订单业务与诊断页面，使用 Vue 3、TypeScript、Vite、Pinia、Axios 和 Element Plus。
 页面固定展示 `ORDER-001`～`ORDER-005`，默认打开黄金场景 `ORDER-003`，并从 Java
 `/api/orders/{orderId}` 与 `/api/orders/{orderId}/overview` 读取业务事实。Agent 侧边栏把当前
-订单和用户问题提交给 Python `POST /api/agent/order-diagnosis`，展示阻塞环节、根因、字段级证据和建议。
+订单、页面上下文和用户问题提交给 Python `POST /api/agent/order-diagnosis`，展示阻塞环节、根因、
+字段级证据和建议。订单、任务与质检 Context Adapter 均为纯函数；当前已有订单页只调用订单Adapter，
+其余两个供后续对应页面复用。
+同一订单抽屉会保存首次响应的`session_id`并在后续诊断中复用；切换订单时清除本地会话引用，避免跨订单
+继承。服务端仍会重新校验每轮携带的页面上下文。
 
 ## 本地开发
 
@@ -29,8 +33,8 @@ make test-web
 make build-web
 ```
 
-`test-web` 覆盖业务与诊断响应解包、结构化错误、非法响应、固定五单加载、切换竞态、
-诊断抽屉结果、核心业务组件和生产代理；`build-web` 同时执行 Vue TypeScript 检查和 Vite 构建。
+`test-web` 覆盖三个页面Context Adapter、业务与诊断响应解包、结构化错误、非法响应、固定五单加载、
+切换竞态、诊断抽屉结果、核心业务组件和生产代理；`build-web` 同时执行Vue TypeScript检查和Vite构建。
 
 ## 生产运行
 
@@ -43,5 +47,5 @@ AGENT_API_URL=http://localhost:8000 \
 PORT=5173 node web-console/server.mjs
 ```
 
-当前侧边栏每次提交都会创建一次性 Session 与 Run，仅执行确定性 Workflow。它不包含多轮对话、
-SSE、动态模型路由或写操作确认；处理建议仅用于展示，不代表已经执行。
+当前侧边栏可在同一订单内复用Session，但每轮仍执行确定性Workflow；尚未实现自然语言意图继承、澄清、
+SSE、动态模型路由或写操作确认。处理建议仅用于展示，不代表已经执行。

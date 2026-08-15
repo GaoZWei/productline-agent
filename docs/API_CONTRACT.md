@@ -340,20 +340,49 @@ X-Trace-Id: trace-diagnosis-003   # 可选
 Authorization: Bearer <token>     # 可选
 ```
 
-请求体只接受：
+首次诊断必须携带订单和页面上下文。`current_page`只接受`order-detail`、`task-detail`或
+`quality-issue`；任务页必须提供`task_id`，质检页还必须提供`issue_id`：
 
 ```json
 {
   "order_id": "ORDER-003",
-  "user_message": "这个订单为什么还没有交付？"
+  "user_message": "这个订单为什么还没有交付？",
+  "page_context": {
+    "current_system": "production-system",
+    "current_page": "order-detail",
+    "order_id": "ORDER-003",
+    "task_id": null,
+    "issue_id": null,
+    "batch_id": null,
+    "product_type": "DOM",
+    "satellite_type": null,
+    "user_role": "REVIEWER"
+  }
 }
 ```
+
+`page_context`是客户端提示而非业务事实：顶层与上下文`order_id`、身份Header与`user_role`必须一致；
+订单、产品、任务和质检问题归属会在规则诊断前用Java Tool响应重校验。当前只有`REVIEWER`可调用诊断，
+`batch_id`和`satellite_type`尚无对应Java事实时不参与裁决。
+
+首次成功响应会返回`session_id`。同一用户后续可以只传会话和问题，继承当前订单或任务：
+
+```json
+{
+  "session_id": "session-<uuid>",
+  "user_message": "继续检查这个订单"
+}
+```
+
+继承值仍是上下文提示，Workflow会重新调用Java Tool验证订单、任务和质检归属。显式传入的新页面
+上下文会更新会话当前对象；页面与顶层订单矛盾时仍按M3.1规则拒绝，不会用会话掩盖冲突。
 
 成功返回本次运行标识、Trace ID和完整结构化诊断：
 
 ```json
 {
   "run_id": "run-<uuid>",
+  "session_id": "session-<uuid>",
   "trace_id": "trace-diagnosis-003",
   "diagnosis": {
     "order_id": "ORDER-003",
@@ -397,11 +426,45 @@ Authorization: Bearer <token>     # 可选
 `X-Trace-Id`与响应体`trace_id`一致。成功Run保存诊断快照，Tool失败Run保存错误码和失败步骤。
 
 错误体固定包含`run_id`、`trace_id`、`code`、安全`message`、`retryable`和`error_step`。请求体
-Schema错误发生在Run创建前，由FastAPI返回422；缺少身份返回401且`run_id=null`；资源不存在返回
-404；上游不可用或响应无效返回502；Tool超时返回504；未预期Workflow异常返回500和
+Schema错误发生在Run创建前，由FastAPI返回422；缺少身份返回401且`run_id=null`；无诊断权限或
+上下文角色与身份不一致返回403且不创建Run；上下文订单不一致或资源归属伪造返回400；资源不存在返回
+404；会话过期返回410且不创建Run；上游不可用或响应无效返回502；Tool超时返回504；未预期Workflow异常返回500和
 `WORKFLOW_EXECUTION_ERROR`。当前身份Header不等同于完整认证系统。
 
-## 9. 演进规则
+## 9. Agent 会话 API
+
+三个接口都要求`X-User-Id`和`X-User-Role`，且只能访问当前用户拥有的会话：
+
+```text
+POST   /api/agent/sessions              创建会话
+GET    /api/agent/sessions/{sessionId}  读取未过期会话
+DELETE /api/agent/sessions/{sessionId}  清除会话及其Agent运行元数据
+```
+
+创建请求可以不带页面上下文，也可以携带M3.1的`page_context`。响应示例：
+
+```json
+{
+  "session_id": "session-<uuid>",
+  "context": {
+    "current_order_id": "ORDER-003",
+    "current_task_id": null,
+    "previous_intent": null,
+    "confirmed_entities": {"order_id": "ORDER-003"},
+    "candidate_entities": {},
+    "recent_diagnosis_run_id": null,
+    "pending_action": null
+  },
+  "expires_at": "2026-08-13T01:00:00Z"
+}
+```
+
+会话默认30分钟滑动过期，可通过`SESSION_TTL_SECONDS`配置为60～86400秒。诊断或服务端上下文更新会
+延长过期时间，单纯GET不会延长。不存在返回404，跨用户访问返回403，过期读取或诊断返回410；所有者
+仍可删除过期会话。`confirmed_entities`和`candidate_entities`只保存有界标量引用，不复制Java业务
+响应；`pending_action`只是草稿，不代表Approval或执行授权。
+
+## 10. 演进规则
 
 状态契约变化必须：
 

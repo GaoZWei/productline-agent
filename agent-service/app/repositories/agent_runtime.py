@@ -3,10 +3,79 @@
 from collections.abc import Mapping
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AgentRun, AgentRunStatus, AgentStep, AgentStepStatus
+from app.models import (
+    AgentMessage,
+    AgentRun,
+    AgentRunStatus,
+    AgentSession,
+    AgentStep,
+    AgentStepStatus,
+)
+
+
+class AgentSessionRepository:
+    """封装会话增删查和行锁; 过期与身份策略由服务层决定。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, agent_session: AgentSession) -> AgentSession:
+        """加入会话并立即flush, 使标识冲突在当前事务内暴露。"""
+
+        self._session.add(agent_session)
+        await self._session.flush()
+        return agent_session
+
+    async def get(self, session_id: str) -> AgentSession | None:
+        """按会话标识查询, 未找到时返回None。"""
+
+        return await self._session.get(AgentSession, session_id)
+
+    async def get_for_update(self, session_id: str) -> AgentSession | None:
+        """锁定会话, 供上下文合并和消息序号分配使用。"""
+
+        statement = (
+            select(AgentSession)
+            .where(AgentSession.session_id == session_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def delete(self, session_id: str) -> bool:
+        """删除会话; 数据库级联清除其Message、Run与Step。"""
+
+        agent_session = await self.get(session_id)
+        if agent_session is None:
+            return False
+        await self._session.delete(agent_session)
+        await self._session.flush()
+        return True
+
+
+class AgentMessageRepository:
+    """封装会话消息写入和稳定序号查询。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, message: AgentMessage) -> AgentMessage:
+        """保存消息并立即flush。"""
+
+        self._session.add(message)
+        await self._session.flush()
+        return message
+
+    async def next_sequence_number(self, session_id: str) -> int:
+        """返回会话内下一个消息序号; 调用方必须先锁定父会话。"""
+
+        statement = select(func.coalesce(func.max(AgentMessage.sequence_number), 0) + 1).where(
+            AgentMessage.session_id == session_id
+        )
+        return int(await self._session.scalar(statement) or 1)
 
 
 class AgentRunRepository:

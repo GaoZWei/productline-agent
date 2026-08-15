@@ -215,7 +215,21 @@ async def _diagnose(
     ) as client:
         return await client.post(
             "/api/agent/order-diagnosis",
-            json={"order_id": order_id, "user_message": user_message},
+            json={
+                "order_id": order_id,
+                "user_message": user_message,
+                "page_context": {
+                    "current_system": "production-system",
+                    "current_page": "order-detail",
+                    "order_id": order_id,
+                    "task_id": None,
+                    "issue_id": None,
+                    "batch_id": None,
+                    "product_type": "DOM",
+                    "satellite_type": None,
+                    "user_role": "REVIEWER",
+                },
+            },
             headers={
                 "X-Trace-Id": trace_id,
                 "X-User-Id": "reviewer-e2e",

@@ -40,6 +40,18 @@ describe("Agent diagnosis drawer", () => {
     expect(mockedDiagnoseOrder).toHaveBeenCalledWith(
       "ORDER-003",
       "这个订单为什么还没有交付？",
+      {
+        current_system: "production-system",
+        current_page: "order-detail",
+        order_id: "ORDER-003",
+        task_id: null,
+        issue_id: null,
+        batch_id: null,
+        product_type: "DOM",
+        satellite_type: null,
+        user_role: "REVIEWER",
+      },
+      undefined,
     );
     expect(host?.textContent).toContain("正在核对订单事实");
 
@@ -54,6 +66,15 @@ describe("Agent diagnosis drawer", () => {
     expect(host?.textContent).toContain("RESUBMIT_REVIEW");
     expect(host?.textContent).toContain("仅建议，未执行");
     expect(host?.textContent).toContain("trace-order-003");
+
+    click('[data-testid="submit-diagnosis"]');
+    await settleUi();
+    expect(mockedDiagnoseOrder).toHaveBeenLastCalledWith(
+      "ORDER-003",
+      "这个订单为什么还没有交付？",
+      expect.objectContaining({ order_id: "ORDER-003" }),
+      "session-order-003",
+    );
   });
 
   it("显示可定位、可重试的结构化错误", async () => {
@@ -113,6 +134,7 @@ async function settleUi() {
 function goldenDiagnosis(): OrderDiagnosisResponse {
   return {
     run_id: "run-order-003",
+    session_id: "session-order-003",
     trace_id: "trace-order-003",
     diagnosis: {
       order_id: "ORDER-003",

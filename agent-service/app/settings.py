@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     business_read_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
     business_write_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
     business_pool_timeout_seconds: float = Field(default=1.0, gt=0, le=60)
+    session_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
     # 数据库 URL转换
     @property
     def async_database_url(self) -> str:

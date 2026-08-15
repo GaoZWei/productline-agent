@@ -4,14 +4,29 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from app.database import Database
 from app.models import AgentMessage, AgentMessageRole, AgentSession
-from app.repositories import AgentRunRepository
+from app.repositories import (
+    AgentMessageRepository,
+    AgentRunRepository,
+    AgentSessionRepository,
+)
 from app.schemas.business import BusinessIdentity
+from app.schemas.context import PageContext
+from app.schemas.session import (
+    context_from_page,
+    page_context_from_session,
+)
 from app.schemas.workflow import DiagnosisResult, StepError
 from app.services.run_lifecycle import RunLifecycleService
+from app.services.session_context import (
+    SessionAccessDeniedError,
+    SessionContextError,
+    SessionContextService,
+)
 from app.tools import ToolContext, ToolRegistry
 from app.workflows import DatabaseWorkflowStepRecorder, OrderDiagnosisWorkflow
 
@@ -33,6 +48,7 @@ class OrderDiagnosisExecution:
     """一次成功诊断的 Run 标识与结果。"""
 
     run_id: str
+    session_id: str
     diagnosis: DiagnosisResult
 
 
@@ -42,11 +58,11 @@ class OrderDiagnosisExecutionError(Exception):
     def __init__(
         self,
         *,
-        run_id: str,
+        run_id: str | None,
         code: str,
         message: str,
         retryable: bool,
-        error_step: str,
+        error_step: str | None,
     ) -> None:
         self.run_id = run_id
         self.code = code
@@ -59,31 +75,60 @@ class OrderDiagnosisExecutionError(Exception):
 class OrderDiagnosisService:
     """为一次 HTTP 请求创建运行上下文并收口固定 Workflow。"""
 
-    def __init__(self, database: Database, tool_registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        database: Database,
+        tool_registry: ToolRegistry,
+        *,
+        session_ttl_seconds: int,
+    ) -> None:
         self._database = database
         self._tool_registry = tool_registry
+        self._session_ttl = timedelta(seconds=session_ttl_seconds)
 
     async def diagnose(
         self,
         *,
-        order_id: str,
+        session_id: str | None,
+        order_id: str | None,
         user_message: str,
+        page_context: PageContext | None,
         identity: BusinessIdentity,
         trace_id: str,
     ) -> OrderDiagnosisExecution:
         """执行一次诊断并把 Run 从 PENDING 推进到唯一终态。"""
 
         request_id = uuid4().hex
-        session_id = f"session-{request_id}"
         message_id = f"message-{request_id}"
         run_id = f"run-{request_id}"
-        await self._create_running_run(
-            session_id=session_id,
-            message_id=message_id,
-            run_id=run_id,
-            user_id=identity.user_id,
-            user_message=user_message,
-        )
+        try:
+            resolved_session_id, resolved_order_id, resolved_page_context = (
+                await self._create_running_run(
+                    requested_session_id=session_id,
+                    order_id=order_id,
+                    page_context=page_context,
+                    message_id=message_id,
+                    run_id=run_id,
+                    identity=identity,
+                    user_message=user_message,
+                )
+            )
+        except SessionContextError as context_error:
+            raise OrderDiagnosisExecutionError(
+                run_id=None,
+                code=context_error.code,
+                message=context_error.message,
+                retryable=False,
+                error_step=None,
+            ) from context_error
+        except ValueError as context_error:
+            raise OrderDiagnosisExecutionError(
+                run_id=None,
+                code="SESSION_CONTEXT_INCOMPLETE",
+                message="agent session does not contain a current order",
+                retryable=False,
+                error_step=None,
+            ) from context_error
         # 创建工具上下文
         context = ToolContext(
             identity=identity,
@@ -100,7 +145,10 @@ class OrderDiagnosisService:
         )
         # 执行Workflow
         try:
-            state = await workflow.ainvoke(order_id)
+            state = await workflow.ainvoke(
+                resolved_order_id,
+                page_context=resolved_page_context,
+            )
         except Exception as exception:
             await self._mark_failed_safely(
                 run_id,
@@ -147,27 +195,89 @@ class OrderDiagnosisService:
                 final_result=diagnosis.model_dump(mode="json"),
             )
         # 最后返回诊断结果
-        return OrderDiagnosisExecution(run_id=run_id, diagnosis=diagnosis)
-    # 创建一次性Session和Message
+        return OrderDiagnosisExecution(
+            run_id=run_id,
+            session_id=resolved_session_id,
+            diagnosis=diagnosis,
+        )
+
     async def _create_running_run(
         self,
         *,
-        session_id: str,
+        requested_session_id: str | None,
+        order_id: str | None,
+        page_context: PageContext | None,
         message_id: str,
         run_id: str,
-        user_id: str,
+        identity: BusinessIdentity,
         user_message: str,
-    ) -> None:
-        """在一个事务中保存一次性请求上下文并提交 RUNNING Run。"""
+    ) -> tuple[str, str, PageContext]:
+        """原子创建或复用会话、追加消息并提交RUNNING Run。"""
 
+        now = datetime.now(UTC)
         async with self._database.session() as session, session.begin():
-            session.add(AgentSession(session_id=session_id, user_id=user_id))
-            # 保存用户消息到数据库
-            session.add(
+            session_repository = AgentSessionRepository(session)
+            message_repository = AgentMessageRepository(session)
+            if requested_session_id is None:
+                if order_id is None or page_context is None:
+                    raise ValueError("new diagnosis requires page context")
+                resolved_session_id = f"session-{uuid4().hex}"
+                stored_context = context_from_page(page_context)
+                agent_session = AgentSession(
+                    session_id=resolved_session_id,
+                    user_id=identity.user_id,
+                    context=stored_context.model_dump(mode="json"),
+                    expires_at=now + self._session_ttl,
+                )
+                await session_repository.create(agent_session)
+                sequence_number = 1
+            else:
+                resolved_session_id = requested_session_id
+                existing_session = await session_repository.get_for_update(
+                    resolved_session_id
+                )
+                SessionContextService.ensure_access(
+                    existing_session,
+                    identity=identity,
+                    now=now,
+                )
+                assert existing_session is not None
+                agent_session = existing_session
+                stored_context = SessionContextService.context(agent_session)
+                sequence_number = await message_repository.next_sequence_number(
+                    resolved_session_id
+                )
+
+            if page_context is not None:
+                if page_context.user_role != identity.role:
+                    raise SessionAccessDeniedError()
+                resolved_page_context = page_context
+                resolved_order_id = order_id or page_context.order_id
+                if order_id is None or order_id == page_context.order_id:
+                    stored_context = context_from_page(
+                        page_context,
+                        base=stored_context,
+                    )
+            else:
+                resolved_page_context = page_context_from_session(
+                    stored_context,
+                    user_role=identity.role,
+                )
+                resolved_order_id = order_id or resolved_page_context.order_id
+
+            stored_context = stored_context.model_copy(
+                update={
+                    "previous_intent": "ORDER_DIAGNOSIS",
+                    "recent_diagnosis_run_id": run_id,
+                }
+            )
+            agent_session.context = stored_context.model_dump(mode="json")
+            agent_session.expires_at = now + self._session_ttl
+            await message_repository.create(
                 AgentMessage(
                     message_id=message_id,
-                    session_id=session_id,
-                    sequence_number=1,
+                    session_id=resolved_session_id,
+                    sequence_number=sequence_number,
                     role=AgentMessageRole.USER,
                     content=user_message,
                 )
@@ -175,10 +285,11 @@ class OrderDiagnosisService:
             lifecycle = RunLifecycleService(AgentRunRepository(session))
             await lifecycle.create_run(
                 run_id=run_id,
-                session_id=session_id,
+                session_id=resolved_session_id,
                 request_message_id=message_id,
             )
             await lifecycle.mark_running(run_id)
+        return resolved_session_id, resolved_order_id, resolved_page_context
 
     async def _mark_failed(
         self,

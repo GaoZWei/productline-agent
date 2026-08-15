@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from app.api.order_diagnosis import router as order_diagnosis_router
+from app.api.sessions import router as sessions_router
 from app.api.tool_debug import ToolDebugRunContextStore
 from app.api.tool_debug import router as tool_debug_router
 from app.clients.business import BusinessHttpClient
@@ -70,6 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = resolved_settings
     application.include_router(order_diagnosis_router)
+    application.include_router(sessions_router)
     # 根据环境决定是否注册路由
     if resolved_settings.environment == "development":
         application.state.tool_debug_context_store = ToolDebugRunContextStore()

@@ -11,6 +11,7 @@ from app.schemas import (
     DiagnosisResult,
     Evidence,
     OrderDiagnosisState,
+    PageContext,
     ReadToolName,
     RootCause,
     RuleDecision,
@@ -219,6 +220,7 @@ def test_order_diagnosis_state_exposes_required_workflow_channels() -> None:
     assert hints == {
         "run_id": str,
         "order_id": str,
+        "page_context": PageContext | None,
         "order": OrderDetail | None,
         "tasks": list[TaskDetail],
         "progress": dict[str, ProgressResult],

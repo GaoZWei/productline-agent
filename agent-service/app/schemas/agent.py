@@ -2,15 +2,13 @@
 
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.context import PageContext
+from app.schemas.session import RunIdentifier, SessionIdentifier
 from app.schemas.tools import OrderIdentifier
 from app.schemas.workflow import DiagnosisResult, StableCode, TraceIdentifier
 
-RunIdentifier = Annotated[
-    str,
-    Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"),
-]
 UserMessage = Annotated[str, Field(min_length=1, max_length=2000)]
 
 
@@ -28,14 +26,27 @@ class AgentApiSchema(BaseModel):
 class OrderDiagnosisRequest(AgentApiSchema):
     """请求对一个明确订单执行固定诊断 Workflow。"""
 
-    order_id: OrderIdentifier
+    session_id: SessionIdentifier | None = None
+    order_id: OrderIdentifier | None = None
     user_message: UserMessage
+    page_context: PageContext | None = None
+
+    @model_validator(mode="after")
+    def require_initial_context(self) -> "OrderDiagnosisRequest":
+        """新会话必须给出订单和页面; 已有会话允许继承。"""
+
+        if self.session_id is None and (
+            self.order_id is None or self.page_context is None
+        ):
+            raise ValueError("new diagnosis requires order_id and page_context")
+        return self
 
 # 订单诊断成功响应Schema
 class OrderDiagnosisResponse(AgentApiSchema):
     """返回本次 Run 标识、Trace 标识和完整诊断结果。"""
 
     run_id: RunIdentifier
+    session_id: SessionIdentifier
     trace_id: TraceIdentifier
     diagnosis: DiagnosisResult
 

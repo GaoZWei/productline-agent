@@ -15,9 +15,11 @@ describe("agent API client", () => {
       requestOrderDiagnosis({
         order_id: "ORDER-003",
         user_message: "这个订单为什么还没有交付？",
+        page_context: orderPageContext(),
       }),
     ).resolves.toMatchObject({
       run_id: "run-order-003",
+      session_id: "session-order-003",
       trace_id: "trace-order-003",
       diagnosis: {
         order_id: "ORDER-003",
@@ -27,6 +29,15 @@ describe("agent API client", () => {
 
     expect(mock.history.post[0]?.headers?.["X-User-Id"]).toBe("reviewer-001");
     expect(mock.history.post[0]?.headers?.["X-User-Role"]).toBe("REVIEWER");
+    expect(JSON.parse(mock.history.post[0]?.data ?? "{}")).toMatchObject({
+      order_id: "ORDER-003",
+      page_context: {
+        current_page: "order-detail",
+        order_id: "ORDER-003",
+        product_type: "DOM",
+        user_role: "REVIEWER",
+      },
+    });
   });
 
   it("把服务端稳定错误转换为包含 Run 和失败步骤的客户端错误", async () => {
@@ -42,6 +53,7 @@ describe("agent API client", () => {
     const error = await requestOrderDiagnosis({
       order_id: "ORDER-003",
       user_message: "why",
+      page_context: orderPageContext(),
     }).catch((reason: unknown) => reason);
 
     expect(error).toBeInstanceOf(AgentApiError);
@@ -61,7 +73,11 @@ describe("agent API client", () => {
     mock.onPost("/api/agent/order-diagnosis").reply(200, response);
 
     await expect(
-      requestOrderDiagnosis({ order_id: "ORDER-003", user_message: "why" }),
+      requestOrderDiagnosis({
+        order_id: "ORDER-003",
+        user_message: "why",
+        page_context: orderPageContext(),
+      }),
     ).rejects.toMatchObject({
       code: "RESPONSE_VALIDATION_ERROR",
       traceId: "trace-order-003",
@@ -72,7 +88,11 @@ describe("agent API client", () => {
     mock.onPost("/api/agent/order-diagnosis").timeout();
 
     await expect(
-      requestOrderDiagnosis({ order_id: "ORDER-003", user_message: "why" }),
+      requestOrderDiagnosis({
+        order_id: "ORDER-003",
+        user_message: "why",
+        page_context: orderPageContext(),
+      }),
     ).rejects.toMatchObject({
       code: "REQUEST_TIMEOUT",
       retryable: true,
@@ -80,9 +100,24 @@ describe("agent API client", () => {
   });
 });
 
+function orderPageContext() {
+  return {
+    current_system: "production-system" as const,
+    current_page: "order-detail" as const,
+    order_id: "ORDER-003",
+    task_id: null,
+    issue_id: null,
+    batch_id: null,
+    product_type: "DOM",
+    satellite_type: null,
+    user_role: "REVIEWER",
+  };
+}
+
 function goldenResponse() {
   return {
     run_id: "run-order-003",
+    session_id: "session-order-003",
     trace_id: "trace-order-003",
     diagnosis: {
       order_id: "ORDER-003",

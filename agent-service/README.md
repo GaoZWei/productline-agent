@@ -1,11 +1,11 @@
 # Agent Service
 
-M2.10 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M3.2 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
-Workflow状态/诊断Schema、固定LangGraph数据加载节点、确定性阻塞阶段规则、诊断文案生成和对外
-诊断API；模型通过可选结构化接口整理表达，尚未包含具体模型供应商适配或RAG。
+Workflow状态/诊断Schema、严格页面与会话上下文、固定LangGraph数据加载节点、确定性阻塞阶段规则、诊断
+文案生成和对外诊断API；模型通过可选结构化接口整理表达，尚未包含具体模型供应商适配或RAG。
 
 ## 本地开发
 
@@ -19,7 +19,7 @@ uv run python -m app.main
 
 默认健康检查为 <http://localhost:8000/health>。可使用 `PORT`、`ENVIRONMENT`、
 `LOG_LEVEL`、`DATABASE_URL`、`BUSINESS_SERVICE_URL` 和四项
-`BUSINESS_*_TIMEOUT_SECONDS` 覆盖配置。
+`BUSINESS_*_TIMEOUT_SECONDS`和`SESSION_TTL_SECONDS`覆盖配置。
 
 ## Java HTTP Client
 
@@ -160,6 +160,16 @@ DELIVERY/NONE/INSUFFICIENT_INFORMATION`。`NONE`不得同时携带根因，其�
 `DiagnosisNarrative`只允许模型返回阶段说明以及带稳定code的根因和建议文案，不接收订单ID、阻塞
 阶段、证据或置信度。
 
+## 会话上下文
+
+`SessionContext`只持久化当前订单/任务、上一轮意图、已确认参数、候选对象、最近诊断Run和待确认动作
+草稿，不复制Java订单、质检或交付响应。会话通过`agent_sessions.context` JSON保存，并由严格Pydantic
+Schema在读写边界重新校验；`expires_at`实现默认30分钟滑动TTL。
+
+`POST /api/agent/sessions`创建会话，`GET /api/agent/sessions/{session_id}`读取未过期上下文，
+`DELETE`清除会话及级联的Message、Run和Step。所有操作校验用户归属；跨用户返回403，过期读取或
+诊断返回410。所有者可以删除过期会话。服务端上下文更新会延长TTL，只读GET不会延长。
+
 ## 固定 Workflow 节点
 
 `OrderDiagnosisWorkflow`使用LangGraph `StateGraph`固定串联：
@@ -172,14 +182,15 @@ load_context
 → load_quality
 → load_review
 → load_delivery
+→ validate_page_context
 → diagnose_by_rules
 → generate_diagnosis
 → refine_diagnosis（可选模型）
 ```
 
-`load_context`校验`order_id`和Run一致性并初始化全部状态通道；其余节点只通过现有只读Tool读取
-Java事实。任务列表按`task_id`稳定排序，进度、质检和复核以`task_id`为键一次性合并，避免多任务
-结果失去归属。节点返回增量字典，由LangGraph合并到共享`OrderDiagnosisState`。
+`load_context`校验Run、请求订单、页面订单和身份角色一致性并初始化全部状态通道；其余加载节点只通过
+现有只读Tool读取Java事实。任务列表按`task_id`稳定排序，进度、质检和复核以`task_id`为键一次性
+合并。`validate_page_context`再用已加载的订单、任务和质检事实校验资源归属，页面提示不参与业务裁决。
 
 Tool标准失败转换为`StepError`后，条件边直接进入`END`，因此失败节点后的Tool不会继续执行。
 每次Workflow实例绑定一个`ToolContext`且只能运行一次，确保Run内重复调用账本不会被跨Run误用。
@@ -198,15 +209,16 @@ Step记录。`refine_diagnosis`只有在调用方注入`DiagnosisNarrativeModel`
 
 ## 订单诊断 API
 
-`POST /api/agent/order-diagnosis`严格接收`order_id`和`user_message`，最小身份通过`X-User-Id`与
-`X-User-Role` Header提供，可选Bearer Token继续透传Java。当前Header只是开发阶段身份上下文，
-不是完整认证系统；Python授予该固定只读Workflow所需的内部Tool能力，最终业务事实仍由Java返回。
+`POST /api/agent/order-diagnosis`首次调用接收`order_id`、`user_message`和`page_context`，最小身份通过
+`X-User-Id`与`X-User-Role` Header提供，可选Bearer Token继续透传Java。当前只允许`REVIEWER`调用，
+并要求页面角色提示与Header一致；Header仍只是开发阶段身份上下文，不是完整认证系统。Python授予该
+固定只读Workflow所需的内部Tool能力，订单、任务与质检归属最终仍由Java事实重新确认。
 
-每次请求创建独立的一次性Session、用户Message和Run，先提交`RUNNING`再执行Workflow，避免Step
-因看不到父Run而失败。成功响应返回`run_id`、`trace_id`和完整`DiagnosisResult`，同时把结果JSON
+首次请求创建Session，成功响应返回`session_id`；后续请求可只提交该ID和问题，从会话继承当前订单或
+任务。每轮都会追加用户Message并创建Run，先提交`RUNNING`再执行Workflow。继承值仍经过页面Schema与
+Java事实重校验，不能成为业务事实。成功响应返回`run_id`、`session_id`、`trace_id`和完整结果，同时把结果JSON
 快照保存到`SUCCEEDED` Run。标准Tool失败按稳定错误码映射为HTTP 400/403/404/409/502/504，Run
 保存错误码和失败节点；未预期Workflow异常返回安全的`WORKFLOW_EXECUTION_ERROR`且不泄露异常。
-一次性Session只用于M2.8运行归属，不代表M3会话上下文已经实现。
 
 ## 测试与质量
 
@@ -232,6 +244,8 @@ make test-workflow-nodes
 make test-diagnosis-rules
 make test-diagnosis-generation
 make test-diagnosis-api
+make test-page-context
+make test-session-context
 make test-agent-e2e
 ```
 

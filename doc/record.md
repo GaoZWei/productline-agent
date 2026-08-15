@@ -546,3 +546,47 @@
 - 五个固定订单通过真实只读Tool得到计划约定的五种阻塞阶段。
 - 成功诊断保存顺序连续的全部Tool Step和严格Schema结果，黄金场景保留四条字段证据。
 - 不存在订单、真实Java超时和HTTP成功但字段缺失都保存FAILED Run并定位失败Tool节点。
+
+---
+
+## 2026-08-13 — `[T301-T309] M3.1 页面上下文`
+
+### 核心解决的问题
+
+让诊断请求携带当前页面业务对象，同时防止客户端伪造订单、任务、质检问题归属或角色提示影响诊断。
+
+### 实现的核心代码
+
+- `web-console/src/context/pageContext.ts`：订单、任务和质检页面Context Adapter。
+- `agent-service/app/schemas/context.py`：页面类型及严格`PageContext`契约。
+- `agent-service/app/workflows/order_diagnosis.py`：请求一致性和Java事实归属重校验节点。
+- `agent-service/app/api/order_diagnosis.py`：诊断角色门禁及上下文身份一致性检查。
+
+### 实现的核心功能
+
+- 前端从已有业务对象生成明确页面上下文，并随诊断请求传输。
+- 服务端先校验请求订单与身份角色，再用Java Tool事实校验订单、产品、任务和质检问题归属。
+- 伪造上下文在规则裁决前以稳定错误终止并保存失败Run/Step，不把页面参数当成业务事实。
+
+---
+
+## 2026-08-13 — `[T310-T318] M3.2 会话上下文`
+
+### 核心解决的问题
+
+让同一用户的后续请求继承当前订单或任务等最小业务指代，同时以用户所有权、过期策略和Java事实
+重校验防止跨用户、过期或历史上下文直接驱动业务结论。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/session.py`：严格会话上下文、待确认草稿和页面合并契约。
+- `agent-service/app/services/session_context.py`：创建、读取、更新、清除、身份隔离与滑动TTL。
+- `agent-service/migrations/versions/0002_session_context.py`：会话JSON上下文和过期时间迁移。
+- `agent-service/app/services/order_diagnosis.py`：会话复用、消息续号、上下文继承和最近Run更新。
+- `agent-service/app/api/sessions.py`：会话创建、读取和清除HTTP接口。
+
+### 实现的核心功能
+
+- 保存当前订单/任务、上一轮意图、已确认参数、候选对象、最近诊断Run和待确认操作草稿。
+- 首轮诊断返回会话ID，后续请求可继承订单或任务；每轮仍重新加载并校验Java业务事实。
+- 会话按用户隔离并默认30分钟滑动过期，过期会话禁止读取和诊断，所有者仍可显式清除。

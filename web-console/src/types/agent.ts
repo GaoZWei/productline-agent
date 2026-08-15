@@ -7,6 +7,21 @@ export type BlockingStage =
   | "NONE"
   | "INSUFFICIENT_INFORMATION";
 
+// 定义了三个页面类型，分别是订单详情、任务详情和质量问题
+export type PageType = "order-detail" | "task-detail" | "quality-issue";
+// 核心字段
+export interface PageContext {
+  current_system: "production-system";
+  current_page: PageType;
+  order_id: string;
+  task_id: string | null;
+  issue_id: string | null;
+  batch_id: string | null;
+  product_type: string | null;
+  satellite_type: string | null;
+  user_role: string;
+}
+
 export interface RootCause {
   code: string;
   description: string;
@@ -36,12 +51,15 @@ export interface DiagnosisResult {
 }
 
 export interface OrderDiagnosisRequest {
-  order_id: string;
+  session_id?: string | null;
+  order_id?: string;
   user_message: string;
+  page_context?: PageContext;
 }
 
 export interface OrderDiagnosisResponse {
   run_id: string;
+  session_id: string;
   trace_id: string;
   diagnosis: DiagnosisResult;
 }

@@ -1,4 +1,4 @@
-"""M2.5-M2.7 固定订单事实加载、规则裁决与诊断文案生成图。"""
+"""M2.5-M3.1 固定事实加载、页面上下文校验与订单诊断图。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.errors import ToolErrorCode
 from app.models import AgentStepType
+from app.schemas.context import PageContext, PageType
 from app.schemas.tools import (
     DeliveryStatus,
     OrderDetail,
@@ -69,16 +70,28 @@ class OrderDiagnosisWorkflow:
         self._invoked = False
         self.graph = self._build_graph()
 
-    async def ainvoke(self, order_id: str) -> OrderDiagnosisState:
+    async def ainvoke(
+        self,
+        order_id: str,
+        *,
+        page_context: PageContext | None = None,
+    ) -> OrderDiagnosisState:
         """执行一次绑定当前 ToolContext 的固定图, 同一实例不允许重复运行。"""
         # 一个Workflow实例只能执行一次, 避免重复调用
         if self._invoked:
             raise RuntimeError("one workflow instance can only execute once")
         self._invoked = True
+        raw_page_context: object = page_context or {
+            "current_system": "production-system",
+            "current_page": PageType.ORDER_DETAIL,
+            "order_id": order_id,
+            "user_role": self._tool_context.identity.role,
+        }
         result = await self.graph.ainvoke(
             {
                 "run_id": self._tool_context.run_id,
                 "order_id": order_id,
+                "page_context": raw_page_context,
             }
         )
         return cast(OrderDiagnosisState, result)
@@ -95,6 +108,7 @@ class OrderDiagnosisWorkflow:
         builder.add_node("load_quality", self.load_quality)
         builder.add_node("load_review", self.load_review)
         builder.add_node("load_delivery", self.load_delivery)
+        builder.add_node("validate_page_context", self.validate_page_context)
         builder.add_node("diagnose_by_rules", self.diagnose_by_rules)
         builder.add_node("generate_diagnosis", self.generate_diagnosis)
         builder.add_node("refine_diagnosis", self.refine_diagnosis)
@@ -109,6 +123,11 @@ class OrderDiagnosisWorkflow:
             )
         builder.add_conditional_edges(
             "load_delivery",
+            self._route_after_node,
+            {"continue": "validate_page_context", "stop": END},
+        )
+        builder.add_conditional_edges(
+            "validate_page_context",
             self._route_after_node,
             {"continue": "diagnose_by_rules", "stop": END},
         )
@@ -129,6 +148,7 @@ class OrderDiagnosisWorkflow:
         base_state: StateUpdate = {
             "run_id": self._tool_context.run_id,
             "order_id": state.get("order_id", ""),
+            "page_context": None,
             "order": None,
             "tasks": [],
             "progress": {},
@@ -147,6 +167,13 @@ class OrderDiagnosisWorkflow:
             validated_input = OrderIdInput.model_validate(
                 {"order_id": state.get("order_id")}
             )
+            validated_page_context = PageContext.model_validate(
+                state.get("page_context")
+            )
+            if validated_page_context.order_id != validated_input.order_id:
+                raise ValueError("page context order_id does not match request")
+            if validated_page_context.user_role != self._tool_context.identity.role:
+                raise ValueError("page context user_role does not match identity")
         except (ValidationError, ValueError):
             error = StepError(
                 step_name="load_context",
@@ -166,7 +193,11 @@ class OrderDiagnosisWorkflow:
             step_id,
             output_summary=f"order_id={validated_input.order_id}",
         )
-        return {**base_state, "order_id": validated_input.order_id}
+        return {
+            **base_state,
+            "order_id": validated_input.order_id,
+            "page_context": validated_page_context,
+        }
     # 订单节点load_order负责查询订单详情并写入状态通道
     async def load_order(self, state: OrderDiagnosisState) -> StateUpdate:
         """调用 get_order_detail 并写入订单事实。"""
@@ -271,6 +302,73 @@ class OrderDiagnosisWorkflow:
         if isinstance(result, StepError):
             return self._failed_update(state, result)
         return {"delivery": result}
+    
+    # 校验页面资源归属，进行任务、订单、质检问题的归属检查
+    async def validate_page_context(self, state: OrderDiagnosisState) -> StateUpdate:
+        """用 Java Tool 事实重校验页面资源归属, 不信任客户端提示。"""
+
+        context = state["page_context"]
+        step_id = await self._start_step(
+            step_name="validate_page_context",
+            step_type=AgentStepType.CONTEXT,
+            input_summary=(
+                f"order_id={state['order_id']}; "
+                f"current_page={context.current_page.value if context else 'unknown'}"
+            ),
+        )
+        if context is None or not self._page_context_matches_facts(state, context):
+            error = StepError(
+                step_name="validate_page_context",
+                code=ToolErrorCode.PARAM_VALIDATION_ERROR,
+                message="page context does not match business facts",
+                retryable=False,
+                trace_id=self._tool_context.trace_id,
+            )
+            await self._step_recorder.mark_failed(
+                step_id,
+                error_code=error.code.value,
+                output_summary=f"code={error.code.value}",
+            )
+            return self._failed_update(state, error)
+
+        await self._step_recorder.mark_succeeded(
+            step_id,
+            output_summary="business_fact_validation=passed",
+        )
+        return {}
+
+    # 校验页面资源归属，进行任务、订单、质检问题的归属检查
+    @staticmethod
+    def _page_context_matches_facts(
+        state: OrderDiagnosisState,
+        context: PageContext,
+    ) -> bool:
+        """只用已加载的 Java 事实验证订单、任务和质检问题归属。"""
+        # 订单必须真实存在，且 Java 返回的 order_id 与上下文一致
+        order = state["order"]
+        if order is None or order.order_id != context.order_id:
+            return False
+        # 如果传了 product_type，必须和 Java 订单事实一致
+        if context.product_type is not None and context.product_type != order.product_type:
+            return False
+        # 订单详情页到这里即可通过校验，无需继续检查
+        if context.current_page is PageType.ORDER_DETAIL:
+            return True
+        # 任务详情页必须在 Java 返回的订单任务列表中找到 task_id
+        matching_task = next(
+            (task for task in state["tasks"] if task.task_id == context.task_id),
+            None,
+        )
+        # 找到的任务必须真实属于当前订单
+        if matching_task is None or matching_task.order_id != context.order_id:
+            return False
+        if context.current_page is PageType.TASK_DETAIL:
+            return True
+        # 质检页面的 issue_id 必须存在于该任务的 Java 质检问题列表中
+        return any(
+            issue.issue_id == context.issue_id
+            for issue in state["quality_issues"].get(matching_task.task_id, [])
+        )
 
     async def diagnose_by_rules(self, state: OrderDiagnosisState) -> StateUpdate:
         """计算稳定阻塞阶段, 并把规则执行作为独立 Step 记录。"""

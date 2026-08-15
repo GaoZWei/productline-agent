@@ -12,6 +12,15 @@ from app.services.run_lifecycle import (
     RunLifecycleValidationError,
     RunNotFoundError,
 )
+from app.services.session_context import (
+    InvalidStoredSessionContextError,
+    SessionAccessDeniedError,
+    SessionContextError,
+    SessionContextService,
+    SessionExpiredError,
+    SessionNotFoundError,
+    SessionSnapshot,
+)
 from app.services.step_lifecycle import (
     InvalidStepTransitionError,
     StepLifecycleError,
@@ -24,6 +33,7 @@ from app.services.step_lifecycle import (
 __all__ = [
     "InvalidRunTransitionError",
     "InvalidStepTransitionError",
+    "InvalidStoredSessionContextError",
     "OrderDiagnosisExecution",
     "OrderDiagnosisExecutionError",
     "OrderDiagnosisService",
@@ -31,6 +41,12 @@ __all__ = [
     "RunLifecycleService",
     "RunLifecycleValidationError",
     "RunNotFoundError",
+    "SessionAccessDeniedError",
+    "SessionContextError",
+    "SessionContextService",
+    "SessionExpiredError",
+    "SessionNotFoundError",
+    "SessionSnapshot",
     "StepLifecycleError",
     "StepLifecycleService",
     "StepLifecycleValidationError",

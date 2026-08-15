@@ -5,6 +5,14 @@ from app.schemas.agent import (
     OrderDiagnosisRequest,
     OrderDiagnosisResponse,
 )
+from app.schemas.context import PageContext, PageType
+from app.schemas.session import (
+    PendingActionContext,
+    SessionContext,
+    SessionCreateRequest,
+    SessionErrorResponse,
+    SessionResponse,
+)
 from app.schemas.workflow import (
     BlockingStage,
     DiagnosisNarrative,
@@ -27,9 +35,16 @@ __all__ = [
     "OrderDiagnosisRequest",
     "OrderDiagnosisResponse",
     "OrderDiagnosisState",
+    "PageContext",
+    "PageType",
+    "PendingActionContext",
     "ReadToolName",
     "RootCause",
     "RuleDecision",
+    "SessionContext",
+    "SessionCreateRequest",
+    "SessionErrorResponse",
+    "SessionResponse",
     "StepError",
     "Suggestion",
 ]
