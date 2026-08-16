@@ -27,7 +27,8 @@ class RoutingSchema(BaseModel):
         str_strip_whitespace=True,
     )
 
-# 模型允许提取哪些实体 ：是路由阶段提取出来的“业务指代” ，用于后续的业务 Skill 调用。
+
+# 模型允许提取的“业务指代”, 用于后续业务Skill调用。
 class RouterEntities(RoutingSchema):
     """路由阶段允许提取的最小业务实体, 不承载 Java 事实快照。"""
 
@@ -37,6 +38,7 @@ class RouterEntities(RoutingSchema):
     batch_id: BusinessIdentifier | None = None
     product_type: RoutingEntityText | None = None
     satellite_type: RoutingEntityText | None = None
+
     # 判断必填参数有没有值
     def contains(self, parameter: RoutingParameter) -> bool:
         """判断必填参数是否已经获得一个经过格式校验的值。"""
@@ -45,17 +47,19 @@ class RouterEntities(RoutingSchema):
             return self.order_id is not None
         return self.task_id is not None
 
-# 一次结构化路由结果
+
+# 模型必须返回什么内容
 class RouterResult(RoutingSchema):
     """模型或规则路由器必须产出的自洽机器结果。"""
 
     intent: IntentValue  # 选择的意图
-    confidence: Annotated[float, Field(ge=0.0, le=1.0)]  # 置信度范围在 0 到 1 之间, 不包含边界值
-    entities: RouterEntities = Field(default_factory=RouterEntities)  # 模型提取出的有限业务实体   
-    missing_fields: list[RoutingParameterValue] = Field(default_factory=list)  # 模型声称当前缺少哪些必填参数
-    need_clarification: bool  # 表示当前请求是否必须先向用户提问   
-    
-    # 如何防止路由错误 ：确保缺参列表准确, 并阻止 UNKNOWN 被当作可执行意图
+    # 置信度范围包含0和1; 分级策略由M3.6实现。
+    confidence: Annotated[float, Field(ge=0.0, le=1.0)]
+    entities: RouterEntities
+    missing_fields: list[RoutingParameterValue]
+    need_clarification: bool
+
+    # 确保缺参列表准确, 并阻止UNKNOWN被当作可执行意图。
     @model_validator(mode="after")
     def validate_route_contract(self) -> Self:
         """确保缺参列表准确, 并阻止 UNKNOWN 被当作可执行意图。"""
@@ -78,7 +82,7 @@ class RouterResult(RoutingSchema):
         if self.intent is Intent.UNKNOWN and not self.need_clarification:
             raise ValueError("UNKNOWN intent must request clarification")
         return self
-    
+
     # 当前结果是否具备分发条件
     @property
     def can_dispatch(self) -> bool:

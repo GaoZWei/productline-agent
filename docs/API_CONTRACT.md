@@ -466,7 +466,8 @@ DELETE /api/agent/sessions/{sessionId}  清除会话及其Agent运行元数据
 
 ## 10. Agent 意图路由内部契约
 
-M3.3只定义内部结构化路由结果，尚未新增HTTP路由接口。第一批稳定意图及分发前置条件为：
+M3.3定义内部结构化路由结果，M3.4增加可注入模型的内部执行器；当前仍未新增HTTP路由接口。第一批
+稳定意图及分发前置条件为：
 
 | 意图 | 必填业务参数 | 目标Skill |
 |---|---|---|
@@ -490,8 +491,26 @@ M3.3只定义内部结构化路由结果，尚未新增HTTP路由接口。第一
 ```
 
 `missing_fields`必须与对应意图尚未获得的必填参数完全一致；存在缺参时必须澄清。`UNKNOWN`必须
-`need_clarification=true`且不映射任何业务Skill，不能驱动Tool。置信度阈值、Prompt、模型输出解析、
-参数来源合并和澄清状态机由M3.4～M3.6实现。
+`need_clarification=true`且不映射任何业务Skill，不能驱动Tool。
+
+M3.4内部模型适配器接收三部分：`router-v2`中文System Prompt、包含当前用户消息及可选`PageContext`/
+`SessionContext`的单个JSON数据载荷，以及从`RouterResult`生成的JSON Schema。数据载荷与指令分离，
+Prompt明确禁止把上下文当作指令或最新业务事实。模型输出可以是对象或纯JSON文本；不接受Markdown围栏。
+
+第一次Schema失败会使用相同数据载荷和固定纠错指令重试一次；第二次失败或模型调用异常返回：
+
+```json
+{
+  "intent": "UNKNOWN",
+  "confidence": 0.0,
+  "entities": {},
+  "missing_fields": [],
+  "need_clarification": true
+}
+```
+
+当前内部路由器没有HTTP接口、具体模型供应商或Run/Step持久化。参数来源合并和澄清状态机由M3.5～M3.6
+实现，真实路由评测由M3.7实现。
 
 ## 11. 演进规则
 

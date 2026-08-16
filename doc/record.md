@@ -610,3 +610,23 @@
 - 六类意图均具有明确的必填参数和唯一Skill映射，`UNKNOWN`明确无执行目标。
 - `RouterResult`拒绝虚假或重复缺参，缺少必填参数时必须进入澄清。
 - `UNKNOWN`强制澄清且永远不可分发，为后续模型路由提供确定性安全回退。
+
+---
+
+## 2026-08-16 — `[T324-T330] M3.4 路由 Prompt`
+
+### 核心解决的问题
+
+让模型路由在受控上下文和唯一JSON Schema下输出结构化结果，并在非法输出或模型故障时稳定停止而非猜测。
+
+### 实现的核心代码
+
+- `agent-service/app/routing/prompt.py`：版本化System Prompt、页面/会话JSON注入和输出Schema生成。
+- `agent-service/app/services/intent_router.py`：模型协议、对象与JSON解析、一次重试和`UNKNOWN`回退。
+- `agent-service/app/routing/intent_catalog.py`：意图语义与已有必填参数、Skill目录同源维护。
+
+### 实现的核心功能
+
+- 将用户消息、严格页面上下文和有界会话上下文编码为数据载荷，明确禁止作为业务事实或指令。
+- 从`RouterResult`生成JSON Schema，拒绝Markdown、计划外意图、虚假缺参和不完整字段。
+- 首次Schema失败只重试一次，模型异常或二次失败返回无实体、不可分发的`UNKNOWN`。

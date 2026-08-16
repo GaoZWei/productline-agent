@@ -1056,6 +1056,11 @@ UNKNOWN
 
 ## M3.4 路由 Prompt
 
+### 解决的问题
+
+把用户消息、页面上下文和会话上下文编码为受控Prompt数据，并以`RouterResult` JSON Schema约束模型输出；
+首次结构失败只重试一次，仍失败或模型异常时安全回退`UNKNOWN`，不让非法输出进入业务分发。
+
 | ID | 任务 | 工时 |
 |---|---:|
 | T324 | 编写路由 System Prompt | 3h |

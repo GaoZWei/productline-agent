@@ -24,6 +24,7 @@ def test_intent_catalog_defines_every_first_batch_intent() -> None:
         Intent.UNKNOWN,
     )
     assert set(INTENT_DEFINITIONS) == set(Intent)
+    assert all(definition.routing_description for definition in INTENT_DEFINITIONS.values())
 
 
 @pytest.mark.parametrize(

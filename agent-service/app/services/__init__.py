@@ -1,5 +1,12 @@
 """Agent 运行生命周期与后续 Workflow 服务入口。"""
 
+from app.services.intent_router import (
+    IntentRouter,
+    IntentRoutingModel,
+    InvalidRouterOutputError,
+    parse_router_result,
+    unknown_router_result,
+)
 from app.services.order_diagnosis import (
     OrderDiagnosisExecution,
     OrderDiagnosisExecutionError,
@@ -31,6 +38,9 @@ from app.services.step_lifecycle import (
 )
 
 __all__ = [
+    "IntentRouter",
+    "IntentRoutingModel",
+    "InvalidRouterOutputError",
     "InvalidRunTransitionError",
     "InvalidStepTransitionError",
     "InvalidStoredSessionContextError",
@@ -52,4 +62,6 @@ __all__ = [
     "StepLifecycleValidationError",
     "StepNotFoundError",
     "StepRunUnavailableError",
+    "parse_router_result",
+    "unknown_router_result",
 ]

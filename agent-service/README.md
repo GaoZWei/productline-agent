@@ -1,12 +1,12 @@
 # Agent Service
 
-M3.3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M3.4 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
-Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由结果契约、固定LangGraph数据加载节点、
-确定性阻塞阶段规则、诊断文案生成和对外诊断API；模型通过可选结构化接口整理表达，尚未包含路由Prompt、
-具体模型供应商适配或RAG。
+Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由Prompt契约、固定LangGraph数据加载节点、
+确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
+具体模型供应商适配、统一路由HTTP入口或RAG。
 
 ## 本地开发
 
@@ -179,8 +179,13 @@ M3.3定义`ORDER_QUERY/ORDER_DIAGNOSIS/TASK_TRACKING/SPEC_QA/REVIEW_GENERATION/U
 `DiagnosisSkill`、`SpecificationSkill`和`ReviewSkill`，`UNKNOWN`不映射任何Skill。
 
 `RouterResult`严格约束0～1置信度、有界业务实体、准确`missing_fields`和`need_clarification`。
-缺少必填参数时必须澄清；`UNKNOWN`无论是否提取到实体都必须澄清且`can_dispatch=false`。当前仅建立
-内部机器契约，尚未实现路由Prompt、模型调用、置信度分级或动态Skill分发。
+缺少必填参数时必须澄清；`UNKNOWN`无论是否提取到实体都必须澄清且`can_dispatch=false`。
+
+`router-v2`中文System Prompt直接从意图目录生成中文意图语义、必填参数和目标Skill，页面与会话上下文以
+受控JSON数据注入，并明确它们只是提示而非业务事实。模型适配器同时收到由`RouterResult`生成的JSON
+Schema；输出可为对象或纯JSON文本，Markdown围栏和额外说明会被拒绝。首次Schema失败追加固定纠错指令
+重试一次，二次失败或模型异常返回置信度0、无实体、必须澄清的`UNKNOWN`。当前没有具体模型供应商、
+HTTP入口、参数优先级合并、置信度策略或动态Skill分发。
 
 ## 固定 Workflow 节点
 
