@@ -6,6 +6,7 @@ from app.services.intent_router import (
     InvalidRouterOutputError,
     parse_router_result,
     unknown_router_result,
+    validate_user_message_entity_evidence,
 )
 from app.services.order_diagnosis import (
     OrderDiagnosisExecution,
@@ -64,4 +65,5 @@ __all__ = [
     "StepRunUnavailableError",
     "parse_router_result",
     "unknown_router_result",
+    "validate_user_message_entity_evidence",
 ]

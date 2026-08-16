@@ -139,7 +139,7 @@ async def test_router_returns_first_valid_structured_result_without_retry() -> N
     model = StubRoutingModel([_valid_result()])
 
     result = await IntentRouter(model).route(
-        user_message="这个订单为什么没有交付",
+        user_message="ORDER-003 为什么没有交付",
         page_context=_page_context(),
         session_context=_session_context(),
     )
@@ -147,6 +147,21 @@ async def test_router_returns_first_valid_structured_result_without_retry() -> N
     assert result.intent is Intent.ORDER_DIAGNOSIS
     assert result.can_dispatch is True
     assert [prompt.attempt for prompt in model.prompts] == [1]
+
+
+@pytest.mark.asyncio
+async def test_router_rejects_entity_copied_from_context_as_user_extraction() -> None:
+    model = StubRoutingModel([_valid_result(), _valid_result()])
+
+    result = await IntentRouter(model).route(
+        user_message="这个订单为什么没有交付",
+        page_context=_page_context(),
+        session_context=_session_context(),
+    )
+
+    assert [prompt.attempt for prompt in model.prompts] == [1, 2]
+    assert result.intent is Intent.UNKNOWN
+    assert result.entities.model_dump(exclude_none=True) == {}
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable
 from typing import Protocol
 
@@ -37,6 +38,21 @@ def parse_router_result(raw_output: object) -> RouterResult:
         return RouterResult.model_validate(raw_output)
     except ValidationError as error:
         raise InvalidRouterOutputError("router output schema validation failed") from error
+
+# 实体原文证据校验
+def validate_user_message_entity_evidence(
+    user_message: str,
+    result: RouterResult,
+) -> RouterResult:
+    """要求每个模型实体都能在本轮用户原文中找到独立文本证据。"""
+    # 遍历模型返回的实体字段，构造正则
+    for field, value in result.entities.model_dump(exclude_none=True).items():
+        pattern = rf"(?<![A-Za-z0-9]){re.escape(str(value))}(?![A-Za-z0-9])"
+        if re.search(pattern, user_message, flags=re.IGNORECASE) is None:
+            raise InvalidRouterOutputError(
+                f"router entity {field} lacks user-message evidence"
+            )
+    return result
 
 # 降级处理
 def unknown_router_result() -> RouterResult:
@@ -87,7 +103,8 @@ class IntentRouter:
                 return unknown_router_result()
 
             try:
-                return parse_router_result(raw_output)  # 格式校验通过
+                parsed = parse_router_result(raw_output)
+                return validate_user_message_entity_evidence(user_message, parsed)
             except InvalidRouterOutputError:
                 _LOGGER.warning(
                     "intent_router_output_invalid",

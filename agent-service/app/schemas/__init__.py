@@ -8,12 +8,18 @@ from app.schemas.agent import (
 )
 from app.schemas.context import PageContext, PageType
 from app.schemas.routing import (
+    ClarificationReason,
+    ClarificationRequest,
+    ConfidenceLevel,
     EntityConflict,
     EntityExtractionResult,
     EntityMergeResult,
+    EntitySelection,
     EntitySource,
     RouterEntities,
     RouterResult,
+    RoutingDecision,
+    RoutingDecisionStatus,
     RoutingEntityName,
     SourcedEntity,
 )
@@ -40,11 +46,15 @@ from app.schemas.workflow import (
 __all__ = [
     "BlockingStage",
     "BusinessSkill",
+    "ClarificationReason",
+    "ClarificationRequest",
+    "ConfidenceLevel",
     "DiagnosisNarrative",
     "DiagnosisResult",
     "EntityConflict",
     "EntityExtractionResult",
     "EntityMergeResult",
+    "EntitySelection",
     "EntitySource",
     "Evidence",
     "Intent",
@@ -59,6 +69,8 @@ __all__ = [
     "RootCause",
     "RouterEntities",
     "RouterResult",
+    "RoutingDecision",
+    "RoutingDecisionStatus",
     "RoutingEntityName",
     "RoutingParameter",
     "RuleDecision",

@@ -1,6 +1,6 @@
 # Agent Service
 
-M3.5 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M3.6 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
@@ -187,7 +187,13 @@ Schema；输出可为对象或纯JSON文本，Markdown围栏和额外说明会�
 重试一次，二次失败或模型异常返回置信度0、无实体、必须澄清的`UNKNOWN`。`entities`只允许包含本轮消息
 明确给出的实体，页面和会话值由服务端合并器按`USER_MESSAGE > CONFIRMED_SESSION > PAGE_CONTEXT >
 SESSION_CANDIDATE`选择并保留来源。不同值会生成冲突记录；最高优先级仍有多个值时不选择任何值。当前没有
-具体模型供应商、HTTP入口、置信度与澄清状态机或动态Skill分发。
+具体模型供应商、HTTP入口或动态Skill分发。
+
+模型实体还必须能在本轮`user_message`中匹配到独立文本证据，否则按非法输出重试并回退`UNKNOWN`，防止
+页面或会话值被模型升级为`USER_MESSAGE`。`RoutingDecision`按`UNKNOWN`、未解决冲突、必填参数缺失、
+低置信度、中置信度确认和模型主动澄清的顺序生成确定性问题。高置信度且参数完整时为`READY`；中置信度
+需要用户确认，低置信度要求重新描述。候选选择或缺参补充会标记为`USER_MESSAGE`并恢复原意图，无需再次
+调用模型。当前决策和恢复仍是内部组件，尚未接入HTTP或持久化路由Run。
 
 ## 固定 Workflow 节点
 

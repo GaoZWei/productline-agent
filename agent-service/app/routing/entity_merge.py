@@ -18,6 +18,7 @@ from app.schemas.routing import (
     SourcedEntity,
 )
 from app.schemas.session import SessionContext
+
 # 来源到合并优先级, 4 是用户消息, 3 是会话确认, 2 是页面上下文, 1 是会话候选值
 _SOURCE_PRIORITY: Final[dict[EntitySource, int]] = {
     EntitySource.USER_MESSAGE: 4,
@@ -165,7 +166,7 @@ def merge_routing_entities(
     session_context: SessionContext | None = None,  # 已确认实体和上一轮临时候选实体
 ) -> EntityMergeResult:
     """按固定优先级合并实体并保留不同值冲突, 不修改任何输入。"""
-    # 第一步：收集所有候选值 （只是建立候选池）
+    # 第一步: 收集所有候选值 (只是建立候选池)
     candidates: dict[RoutingEntityName, list[SourcedEntity]] = {}
     # 收集用户本轮实体 extraction.entities 中所有非空字段都标记为 USER_MESSAGE
     _append_router_entities(
@@ -191,7 +192,7 @@ def merge_routing_entities(
         field_candidates = candidates.get(field, [])
         if not field_candidates:
             continue
-        # 第一次分组：按照“值”分组  
+        # 第一次分组: 按照“值”分组
         by_value: dict[str, list[SourcedEntity]] = {}
         for candidate in field_candidates:
             by_value.setdefault(candidate.value, []).append(candidate)
@@ -214,14 +215,14 @@ def merge_routing_entities(
             for candidate in distinct_candidates
             if _SOURCE_PRIORITY[candidate.source] == highest_priority
         )
-        # 最高优先级只有一个候选值，直接选择
+        # 最高优先级只有一个候选值, 直接选择
         selected = highest_candidates[0] if len(highest_candidates) == 1 else None
-        # 有多个最高优先级候选值，保留所有
+        # 有多个最高优先级候选值, 保留所有
         if selected is None:
             unresolved_fields.append(field)
         else:
             selected_entities[field] = selected
-        # 记录冲突 存在多个不同值时 (同一优先级，不同值)
+        # 记录冲突 存在多个不同值时 (同一优先级, 不同值)
         if len(distinct_candidates) > 1:
             conflicts.append(
                 EntityConflict(
