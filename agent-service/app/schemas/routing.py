@@ -128,7 +128,7 @@ class ConfidenceLevel(StrEnum):
     MEDIUM = "MEDIUM"
     LOW = "LOW"
 
-# 路由决策状态 （是否可以进入业务分发）
+# 路由决策状态 (是否可以进入业务分发)
 class RoutingDecisionStatus(StrEnum):
     """路由决策是否已经具备进入业务分发的条件。"""
 
@@ -143,7 +143,7 @@ class ClarificationReason(StrEnum):
     ENTITY_CONFLICT = "ENTITY_CONFLICT"  # 同一最高优先级存在多个候选值
     MISSING_PARAMETER = "MISSING_PARAMETER"  # 缺少订单号或任务号
     LOW_CONFIDENCE = "LOW_CONFIDENCE"  # 置信度低于 0.60
-    CONFIRM_INTENT = "CONFIRM_INTENT"  # 中置信度，需要确认意图
+    CONFIRM_INTENT = "CONFIRM_INTENT"  # 中置信度, 需要确认意图
     MODEL_REQUEST = "MODEL_REQUEST"  # 模型在参数完整时仍认为请求有歧义
 
 
@@ -181,7 +181,7 @@ class EntitySelection(RoutingSchema):
     field: RoutingEntityNameValue
     value: RoutingEntityText
 
-# 最终 RoutingDecision （模型路由和可信实体合并后的最终路由决策）
+# 最终 RoutingDecision (模型路由和可信实体合并后的最终路由决策)
 class RoutingDecision(RoutingSchema):
     """合并模型路由和可信实体后的最终内部路由决策。"""
 
@@ -198,7 +198,7 @@ class RoutingDecision(RoutingSchema):
     @model_validator(mode="after")
     def validate_decision_contract(self) -> Self:
         """防止手工构造的决策绕过缺参、冲突和置信度门禁。"""
-        # 不会完全相信 build_routing_decision()，而是再次验证一次决策是否符合合同要求
+        # 不会完全相信 build_routing_decision(), 而是再次验证决策是否符合合同要求
         merged = self.entities.to_router_entities()
         # 从意图目录重新计算缺失字段
         expected_missing = tuple(

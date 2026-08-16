@@ -74,7 +74,7 @@ def confidence_level_for(confidence: float) -> ConfidenceLevel:
         return ConfidenceLevel.MEDIUM
     return ConfidenceLevel.LOW  # 其他情况低置信度等级
 
-# 模型没有返回实体，需要根据合并后的实体重新计算缺失字段
+# 模型没有返回实体, 需要根据合并后的实体重新计算缺失字段
 def _missing_fields(
     intent: Intent,
     merge_result: EntityMergeResult,
@@ -100,8 +100,8 @@ def _conflict_for(
             return conflict
     raise ValueError("unresolved entity field must have a conflict")
 
-# 决策原因的优先顺序（当一次路由同时存在多个问题时，系统这一轮应该先向用户澄清哪一个？）
-# 判断顺序：
+# 决策原因的优先顺序 (一次路由同时存在多个问题时应先澄清哪一个?)
+# 判断顺序:
 # 1. UNKNOWN
 # 2. 未解决实体冲突
 # 3. 必填参数缺失
@@ -277,7 +277,7 @@ def _apply_selection(
         unresolved_fields=unresolved,
     )
 
-# 恢复模型，检查用户提交字段是否匹配当前意图
+# 恢复模型, 检查用户提交字段是否匹配当前意图
 def resume_routing_after_selection(
     pending: RoutingDecision,
     selection: EntitySelection,

@@ -45,7 +45,7 @@ def validate_user_message_entity_evidence(
     result: RouterResult,
 ) -> RouterResult:
     """要求每个模型实体都能在本轮用户原文中找到独立文本证据。"""
-    # 遍历模型返回的实体字段，构造正则
+    # 遍历模型返回的实体字段, 构造正则
     for field, value in result.entities.model_dump(exclude_none=True).items():
         pattern = rf"(?<![A-Za-z0-9]){re.escape(str(value))}(?![A-Za-z0-9])"
         if re.search(pattern, user_message, flags=re.IGNORECASE) is None:

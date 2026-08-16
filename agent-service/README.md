@@ -1,6 +1,6 @@
 # Agent Service
 
-M3.6 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
@@ -194,6 +194,12 @@ SESSION_CANDIDATE`选择并保留来源。不同值会生成冲突记录；最�
 低置信度、中置信度确认和模型主动澄清的顺序生成确定性问题。高置信度且参数完整时为`READY`；中置信度
 需要用户确认，低置信度要求重新描述。候选选择或缺参补充会标记为`USER_MESSAGE`并恢复原意图，无需再次
 调用模型。当前决策和恢复仍是内部组件，尚未接入HTTP或持久化路由Run。
+
+M3.7在`evaluation/router_cases.jsonl`保存60条固定路由期望，严格覆盖明确意图、同义表达、页面和会话
+指代、缺参、多候选、意图混淆及无关请求。`RouterEvaluationSubject`允许注入真实模型、离线回放或测试
+替身；执行器计算意图准确率、参数完整率和六意图混淆矩阵，并可输出不含用户消息及上下文的JSONL失败
+样本。仓库当前只用可控Subject验收评测基础设施，没有具体模型Provider，因此不声明真实模型准确率。
+`make eval-router`可重复验证数据分布、指标和失败输出。
 
 ## 固定 Workflow 节点
 

@@ -97,7 +97,7 @@ def definition_for(intent: Intent) -> IntentDefinition:
 
     return INTENT_DEFINITIONS[intent]
 
-
+# 必填参数
 def required_parameters_for(intent: Intent) -> tuple[RoutingParameter, ...]:
     """返回稳定顺序的必填参数, 供 Schema 和后续参数合并器复用。"""
 
