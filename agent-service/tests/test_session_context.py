@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from app.routing import Intent
 from app.schemas import PageContext, PageType, PendingActionContext, SessionContext
 from app.schemas.session import context_from_page, page_context_from_session
 
@@ -22,7 +23,7 @@ def test_session_context_carries_only_bounded_business_references() -> None:
     context = SessionContext(
         current_order_id="ORDER-003",
         current_task_id="TASK-003",
-        previous_intent="ORDER_DIAGNOSIS",
+        previous_intent=Intent.ORDER_DIAGNOSIS,
         confirmed_entities={"order_id": "ORDER-003", "task_id": "TASK-003"},
         candidate_entities={"task_id": ["TASK-003", "TASK-004"]},
         recent_diagnosis_run_id="run-order-003",

@@ -13,6 +13,7 @@ from app.schemas.tools import (
     TaskIdentifier,
 )
 
+
 # 定义了三个页面类型
 class PageType(StrEnum):
     """当前支持采集业务对象的三类页面。"""

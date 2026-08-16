@@ -70,7 +70,7 @@ async def diagnose_order(
     """创建 Run、执行固定 Workflow 并返回诊断或安全错误。"""
 
     trace_id = get_trace_id()
-    # 先处理身份信息，确保用户已认证
+    # 先处理身份信息, 确保用户已认证
     identity = resolve_business_identity(
         user_id=user_id,
         user_role=user_role,

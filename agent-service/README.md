@@ -1,11 +1,12 @@
 # Agent Service
 
-M3.2 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M3.3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
-Workflow状态/诊断Schema、严格页面与会话上下文、固定LangGraph数据加载节点、确定性阻塞阶段规则、诊断
-文案生成和对外诊断API；模型通过可选结构化接口整理表达，尚未包含具体模型供应商适配或RAG。
+Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由结果契约、固定LangGraph数据加载节点、
+确定性阻塞阶段规则、诊断文案生成和对外诊断API；模型通过可选结构化接口整理表达，尚未包含路由Prompt、
+具体模型供应商适配或RAG。
 
 ## 本地开发
 
@@ -169,6 +170,17 @@ Schema在读写边界重新校验；`expires_at`实现默认30分钟滑动TTL。
 `POST /api/agent/sessions`创建会话，`GET /api/agent/sessions/{session_id}`读取未过期上下文，
 `DELETE`清除会话及级联的Message、Run和Step。所有操作校验用户归属；跨用户返回403，过期读取或
 诊断返回410。所有者可以删除过期会话。服务端上下文更新会延长TTL，只读GET不会延长。
+
+## 意图路由契约
+
+M3.3定义`ORDER_QUERY/ORDER_DIAGNOSIS/TASK_TRACKING/SPEC_QA/REVIEW_GENERATION/UNKNOWN`六类
+稳定意图。只读意图目录统一声明进入业务Skill前的必填参数：订单查询和诊断需要`order_id`，任务跟踪和
+复核草稿需要`task_id`，规范问答不强制业务ID；意图分别映射到规划中的`OrderStatusSkill`、
+`DiagnosisSkill`、`SpecificationSkill`和`ReviewSkill`，`UNKNOWN`不映射任何Skill。
+
+`RouterResult`严格约束0～1置信度、有界业务实体、准确`missing_fields`和`need_clarification`。
+缺少必填参数时必须澄清；`UNKNOWN`无论是否提取到实体都必须澄清且`can_dispatch=false`。当前仅建立
+内部机器契约，尚未实现路由Prompt、模型调用、置信度分级或动态Skill分发。
 
 ## 固定 Workflow 节点
 

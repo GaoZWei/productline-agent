@@ -302,8 +302,8 @@ class OrderDiagnosisWorkflow:
         if isinstance(result, StepError):
             return self._failed_update(state, result)
         return {"delivery": result}
-    
-    # 校验页面资源归属，进行任务、订单、质检问题的归属检查
+
+    # 校验页面资源归属, 进行任务、订单、质检问题的归属检查
     async def validate_page_context(self, state: OrderDiagnosisState) -> StateUpdate:
         """用 Java Tool 事实重校验页面资源归属, 不信任客户端提示。"""
 
@@ -337,21 +337,21 @@ class OrderDiagnosisWorkflow:
         )
         return {}
 
-    # 校验页面资源归属，进行任务、订单、质检问题的归属检查
+    # 校验页面资源归属, 进行任务、订单、质检问题的归属检查
     @staticmethod
     def _page_context_matches_facts(
         state: OrderDiagnosisState,
         context: PageContext,
     ) -> bool:
         """只用已加载的 Java 事实验证订单、任务和质检问题归属。"""
-        # 订单必须真实存在，且 Java 返回的 order_id 与上下文一致
+        # 订单必须真实存在, 且 Java 返回的 order_id 与上下文一致
         order = state["order"]
         if order is None or order.order_id != context.order_id:
             return False
-        # 如果传了 product_type，必须和 Java 订单事实一致
+        # 如果传了 product_type, 必须和 Java 订单事实一致
         if context.product_type is not None and context.product_type != order.product_type:
             return False
-        # 订单详情页到这里即可通过校验，无需继续检查
+        # 订单详情页到这里即可通过校验, 无需继续检查
         if context.current_page is PageType.ORDER_DETAIL:
             return True
         # 任务详情页必须在 Java 返回的订单任务列表中找到 task_id

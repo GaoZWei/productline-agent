@@ -464,7 +464,36 @@ DELETE /api/agent/sessions/{sessionId}  清除会话及其Agent运行元数据
 仍可删除过期会话。`confirmed_entities`和`candidate_entities`只保存有界标量引用，不复制Java业务
 响应；`pending_action`只是草稿，不代表Approval或执行授权。
 
-## 10. 演进规则
+## 10. Agent 意图路由内部契约
+
+M3.3只定义内部结构化路由结果，尚未新增HTTP路由接口。第一批稳定意图及分发前置条件为：
+
+| 意图 | 必填业务参数 | 目标Skill |
+|---|---|---|
+| `ORDER_QUERY` | `order_id` | `OrderStatusSkill` |
+| `ORDER_DIAGNOSIS` | `order_id` | `DiagnosisSkill` |
+| `TASK_TRACKING` | `task_id` | `OrderStatusSkill` |
+| `SPEC_QA` | 无 | `SpecificationSkill` |
+| `REVIEW_GENERATION` | `task_id` | `ReviewSkill` |
+| `UNKNOWN` | 无 | 无 |
+
+`RouterResult`示例：
+
+```json
+{
+  "intent": "ORDER_DIAGNOSIS",
+  "confidence": 0.93,
+  "entities": {"order_id": "ORDER-003"},
+  "missing_fields": [],
+  "need_clarification": false
+}
+```
+
+`missing_fields`必须与对应意图尚未获得的必填参数完全一致；存在缺参时必须澄清。`UNKNOWN`必须
+`need_clarification=true`且不映射任何业务Skill，不能驱动Tool。置信度阈值、Prompt、模型输出解析、
+参数来源合并和澄清状态机由M3.4～M3.6实现。
+
+## 11. 演进规则
 
 状态契约变化必须：
 

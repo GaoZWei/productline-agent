@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -66,6 +66,9 @@ test-page-context: ## 验证 M3.1 页面上下文Schema、事实重校验和伪�
 test-session-context: ## 验证 M3.2 会话Schema、过期、清除和上下文继承
 	cd agent-service && uv run --frozen pytest -q tests/test_session_context.py
 	./scripts/test-agent-persistence.sh -k session
+
+test-intent-routing: ## 验证 M3.3 意图、必填参数、Skill映射和UNKNOWN门禁
+	cd agent-service && uv run --frozen pytest -q tests/test_intent_routing.py
 
 test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证 M2.10 完整诊断链路
 	./scripts/test-agent-e2e.sh

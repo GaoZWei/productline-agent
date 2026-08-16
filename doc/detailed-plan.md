@@ -1028,6 +1028,11 @@ pytest tests/e2e/test_order_diagnosis.py -q
 
 ## M3.3 意图定义
 
+### 解决的问题
+
+用稳定枚举、必填参数和业务Skill映射统一自然语言路由的机器契约，并让缺参或`UNKNOWN`结果在进入
+Prompt和动态执行前就具备可验证的安全停止条件。
+
 第一批意图：
 
 ```text

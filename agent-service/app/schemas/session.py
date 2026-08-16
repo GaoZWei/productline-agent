@@ -5,6 +5,7 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.routing import Intent
 from app.schemas.context import PageContext, PageType
 from app.schemas.tools import OrderIdentifier, TaskIdentifier
 
@@ -25,6 +26,7 @@ IntentCode = Annotated[
     str,
     Field(min_length=1, max_length=64, pattern=r"^[A-Z][A-Z0-9_]*$"),
 ]
+IntentValue = Annotated[Intent, Field(strict=False)]
 ActionType = IntentCode
 type ContextValue = ContextText | int | float | bool | None
 
@@ -55,13 +57,13 @@ class PendingActionContext(SessionSchema):
             raise ValueError("pending action parameters must contain at most 32 items")
         return self
 
-# 会话上下文保存的是“用户现在在谈什么”，不是“业务现在是什么状态” （防止会话过大）
+# 会话上下文保存的是“用户现在在谈什么”, 不是“业务现在是什么状态” (防止会话过大)
 class SessionContext(SessionSchema):
     """跨轮次保存最小业务指代, 不复制Java业务事实。"""
 
     current_order_id: OrderIdentifier | None = None
     current_task_id: TaskIdentifier | None = None
-    previous_intent: IntentCode | None = None
+    previous_intent: IntentValue | None = None
     confirmed_entities: dict[ContextKey, ContextValue] = Field(default_factory=dict)
     candidate_entities: dict[ContextKey, list[ContextText]] = Field(default_factory=dict)
     recent_diagnosis_run_id: RunIdentifier | None = None
@@ -118,7 +120,7 @@ def context_from_page(
     current = base or SessionContext()
     confirmed = dict(current.confirmed_entities)
     confirmed["order_id"] = page_context.order_id
-    # 清除旧的下级引用实体 （例如：用户回到订单页，合并函数会主动删除旧的下级引用）
+    # 清除旧的下级引用实体 (例如: 用户回到订单页, 合并函数会主动删除旧的下级引用)
     if page_context.task_id is None:
         confirmed.pop("task_id", None)
         confirmed.pop("issue_id", None)

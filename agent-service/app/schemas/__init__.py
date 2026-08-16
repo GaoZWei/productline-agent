@@ -1,11 +1,13 @@
 """Agent 服务负责管理的Pydantic与Workflow状态契约。"""
 
+from app.routing import BusinessSkill, Intent, RoutingParameter
 from app.schemas.agent import (
     OrderDiagnosisErrorResponse,
     OrderDiagnosisRequest,
     OrderDiagnosisResponse,
 )
 from app.schemas.context import PageContext, PageType
+from app.schemas.routing import RouterEntities, RouterResult
 from app.schemas.session import (
     PendingActionContext,
     SessionContext,
@@ -28,9 +30,11 @@ from app.schemas.workflow import (
 
 __all__ = [
     "BlockingStage",
+    "BusinessSkill",
     "DiagnosisNarrative",
     "DiagnosisResult",
     "Evidence",
+    "Intent",
     "OrderDiagnosisErrorResponse",
     "OrderDiagnosisRequest",
     "OrderDiagnosisResponse",
@@ -40,6 +44,9 @@ __all__ = [
     "PendingActionContext",
     "ReadToolName",
     "RootCause",
+    "RouterEntities",
+    "RouterResult",
+    "RoutingParameter",
     "RuleDecision",
     "SessionContext",
     "SessionCreateRequest",

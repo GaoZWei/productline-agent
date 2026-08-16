@@ -14,6 +14,7 @@ from app.repositories import (
     AgentRunRepository,
     AgentSessionRepository,
 )
+from app.routing import Intent
 from app.schemas.business import BusinessIdentity
 from app.schemas.context import PageContext
 from app.schemas.session import (
@@ -267,7 +268,7 @@ class OrderDiagnosisService:
 
             stored_context = stored_context.model_copy(
                 update={
-                    "previous_intent": "ORDER_DIAGNOSIS",
+                    "previous_intent": Intent.ORDER_DIAGNOSIS,
                     "recent_diagnosis_run_id": run_id,
                 }
             )

@@ -1,4 +1,4 @@
-"""M2.8-M3.1 诊断API、页面上下文防伪和Run持久化集成测试。"""
+"""M2.8-M3.3 诊断API、上下文防伪和Run持久化集成测试。"""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from app.clients.business import BusinessHttpClient
 from app.main import create_app
 from app.models import AgentMessage, AgentRunStatus, AgentSession, AgentStepStatus
 from app.repositories import AgentRunRepository, AgentSessionRepository, AgentStepRepository
+from app.routing import Intent
 from app.schemas import (
     OrderDiagnosisRequest,
     PendingActionContext,
@@ -387,7 +388,7 @@ async def test_session_service_saves_routing_fields_and_enforces_expiration(
     context = SessionContext(
         current_order_id="ORDER-003",
         current_task_id="TASK-003",
-        previous_intent="TASK_TRACKING",
+        previous_intent=Intent.TASK_TRACKING,
         confirmed_entities={"order_id": "ORDER-003", "task_id": "TASK-003"},
         candidate_entities={"task_id": ["TASK-003", "TASK-004"]},
         recent_diagnosis_run_id="run-order-003",
