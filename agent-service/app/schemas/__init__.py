@@ -7,7 +7,16 @@ from app.schemas.agent import (
     OrderDiagnosisResponse,
 )
 from app.schemas.context import PageContext, PageType
-from app.schemas.routing import RouterEntities, RouterResult
+from app.schemas.routing import (
+    EntityConflict,
+    EntityExtractionResult,
+    EntityMergeResult,
+    EntitySource,
+    RouterEntities,
+    RouterResult,
+    RoutingEntityName,
+    SourcedEntity,
+)
 from app.schemas.session import (
     PendingActionContext,
     SessionContext,
@@ -33,6 +42,10 @@ __all__ = [
     "BusinessSkill",
     "DiagnosisNarrative",
     "DiagnosisResult",
+    "EntityConflict",
+    "EntityExtractionResult",
+    "EntityMergeResult",
+    "EntitySource",
     "Evidence",
     "Intent",
     "OrderDiagnosisErrorResponse",
@@ -46,12 +59,14 @@ __all__ = [
     "RootCause",
     "RouterEntities",
     "RouterResult",
+    "RoutingEntityName",
     "RoutingParameter",
     "RuleDecision",
     "SessionContext",
     "SessionCreateRequest",
     "SessionErrorResponse",
     "SessionResponse",
+    "SourcedEntity",
     "StepError",
     "Suggestion",
 ]

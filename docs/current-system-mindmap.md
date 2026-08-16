@@ -1,7 +1,7 @@
 # 当前系统情况与架构思维导图
 
 > 基线日期：2026-08-16。当前开发进度以 `docs/STATUS.md` 为准；本图只把已经实现的能力描述为现状，
-> M3.4 已完成；M3.5 及后续内容均标记为待建设。
+> M3.5 已完成；M3.6 及后续内容均标记为待建设。
 
 ## 系统全景
 
@@ -31,7 +31,8 @@ mindmap
         已完成 M3.2 会话上下文
         已完成 M3.3 意图定义
         已完成 M3.4 路由 Prompt
-        下一步 M3.5 参数合并优先级
+        已完成 M3.5 参数合并优先级
+        下一步 M3.6 置信度和澄清
       当前没有阻塞
     三层系统架构
       Web Console
@@ -74,11 +75,14 @@ mindmap
           四类业务 Skill 映射
           UNKNOWN 无 Skill
           缺参和 UNKNOWN 强制澄清
-          router-v2 中文 System Prompt
+          router-v3 中文 System Prompt
           页面与会话 JSON 注入
           RouterResult JSON Schema
           Schema 失败重试一次
           失败回退 UNKNOWN
+          四级实体来源
+          固定参数优先级
+          冲突记录与同级多值不猜测
           尚无具体模型和 HTTP 入口
         Tool 层
           七个只读业务 Tool
@@ -202,7 +206,7 @@ mindmap
       Java 在确认时重新校验权限 状态 版本
     当前测试与验收
       Python
-        270 passed
+        280 passed
         31 个外部环境用例由专用门禁覆盖
         Ruff 通过
         mypy strict 通过
@@ -220,7 +224,7 @@ mindmap
     当前明确未实现
       具体路由模型 HTTP入口与动态分发
       自然语言补参与澄清
-      参数合并 置信度 澄清
+      置信度和澄清状态机
       RAG 与规范引用
       动态 Agent 决策
       Agent 侧写操作 Approval
@@ -244,7 +248,7 @@ mindmap
    Python负责编排和解释，Java负责可信业务事实、权限和最终写入。
 3. Java已经具备复核与返工写接口，但Python Agent尚未建设Approval链路，因此当前诊断建议只能展示，
    不会自动执行。
-4. 当前下一最小任务是M3.5参数合并优先级；具体模型接入、RAG、动态分发、人工确认回写和SSE仍属于
+4. 当前下一最小任务是M3.6置信度和澄清；具体模型接入、RAG、动态分发、人工确认回写和SSE仍属于
    后续里程碑。
 
 ## 相关文档

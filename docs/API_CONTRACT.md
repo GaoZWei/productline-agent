@@ -493,9 +493,10 @@ M3.3定义内部结构化路由结果，M3.4增加可注入模型的内部执行
 `missing_fields`必须与对应意图尚未获得的必填参数完全一致；存在缺参时必须澄清。`UNKNOWN`必须
 `need_clarification=true`且不映射任何业务Skill，不能驱动Tool。
 
-M3.4内部模型适配器接收三部分：`router-v2`中文System Prompt、包含当前用户消息及可选`PageContext`/
+M3.4内部模型适配器接收三部分：`router-v3`中文System Prompt、包含当前用户消息及可选`PageContext`/
 `SessionContext`的单个JSON数据载荷，以及从`RouterResult`生成的JSON Schema。数据载荷与指令分离，
-Prompt明确禁止把上下文当作指令或最新业务事实。模型输出可以是对象或纯JSON文本；不接受Markdown围栏。
+Prompt明确禁止把上下文当作指令或最新业务事实；`entities`只提取本轮消息明确出现的实体，不复制上下文。
+模型输出可以是对象或纯JSON文本；不接受Markdown围栏。
 
 第一次Schema失败会使用相同数据载荷和固定纠错指令重试一次；第二次失败或模型调用异常返回：
 
@@ -509,8 +510,11 @@ Prompt明确禁止把上下文当作指令或最新业务事实。模型输出�
 }
 ```
 
-当前内部路由器没有HTTP接口、具体模型供应商或Run/Step持久化。参数来源合并和澄清状态机由M3.5～M3.6
-实现，真实路由评测由M3.7实现。
+M3.5把模型提取、已确认会话、当前页面和上一轮临时候选分别标记为`USER_MESSAGE`、
+`CONFIRMED_SESSION`、`PAGE_CONTEXT`和`SESSION_CANDIDATE`，并按该顺序从高到低合并。相同值选择最高来源
+且不构成冲突；不同值保存全部候选和最终选择。最高优先级本身出现多个不同值时，该字段保持未解析，不能
+由更低优先级提示覆盖。合并结果仍是内部契约；HTTP入口、具体模型供应商、Run/Step持久化以及置信度与
+澄清状态机尚未实现，真实路由评测由M3.7实现。
 
 ## 11. 演进规则
 

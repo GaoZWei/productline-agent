@@ -1,4 +1,4 @@
-"""意图路由的稳定定义; 模型 Prompt 和动态执行由后续阶段实现。"""
+"""意图目录的稳定定义; 具体模型供应商和动态执行由后续阶段实现。"""
 
 from app.routing.intent_catalog import (
     INTENT_DEFINITIONS,

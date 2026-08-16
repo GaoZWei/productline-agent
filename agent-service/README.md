@@ -1,6 +1,6 @@
 # Agent Service
 
-M3.4 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
+M3.5 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
 调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
@@ -181,11 +181,13 @@ M3.3定义`ORDER_QUERY/ORDER_DIAGNOSIS/TASK_TRACKING/SPEC_QA/REVIEW_GENERATION/U
 `RouterResult`严格约束0～1置信度、有界业务实体、准确`missing_fields`和`need_clarification`。
 缺少必填参数时必须澄清；`UNKNOWN`无论是否提取到实体都必须澄清且`can_dispatch=false`。
 
-`router-v2`中文System Prompt直接从意图目录生成中文意图语义、必填参数和目标Skill，页面与会话上下文以
+`router-v3`中文System Prompt直接从意图目录生成中文意图语义、必填参数和目标Skill，页面与会话上下文以
 受控JSON数据注入，并明确它们只是提示而非业务事实。模型适配器同时收到由`RouterResult`生成的JSON
 Schema；输出可为对象或纯JSON文本，Markdown围栏和额外说明会被拒绝。首次Schema失败追加固定纠错指令
-重试一次，二次失败或模型异常返回置信度0、无实体、必须澄清的`UNKNOWN`。当前没有具体模型供应商、
-HTTP入口、参数优先级合并、置信度策略或动态Skill分发。
+重试一次，二次失败或模型异常返回置信度0、无实体、必须澄清的`UNKNOWN`。`entities`只允许包含本轮消息
+明确给出的实体，页面和会话值由服务端合并器按`USER_MESSAGE > CONFIRMED_SESSION > PAGE_CONTEXT >
+SESSION_CANDIDATE`选择并保留来源。不同值会生成冲突记录；最高优先级仍有多个值时不选择任何值。当前没有
+具体模型供应商、HTTP入口、置信度与澄清状态机或动态Skill分发。
 
 ## 固定 Workflow 节点
 

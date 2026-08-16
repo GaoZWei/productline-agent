@@ -19,7 +19,7 @@ _LOGGER = logging.getLogger("agent-service.intent-router")
 # 模型边界定义
 class IntentRoutingModel(Protocol):
     """模型适配器契约; 供应商实现必须返回待校验的结构化对象。"""
-    # 不依赖某个具体模型 SDK，只要求调用方实现一个异步 generate() 方法
+    # 不依赖某个具体模型 SDK, 只要求调用方实现一个异步 generate() 方法
     def generate(self, prompt: RoutingPrompt) -> Awaitable[object]:
         """根据受控Prompt和JSON Schema生成一次路由候选。"""
 
@@ -75,7 +75,7 @@ class IntentRouter:
             )
             try:
                 raw_output = await self._model.generate(prompt)
-            except Exception as error:  # 模型异常，直接回退UNKNOWN
+            except Exception as error:  # 模型异常, 直接回退UNKNOWN
                 _LOGGER.error(
                     "intent_router_model_call_failed",
                     extra={

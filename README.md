@@ -2,11 +2,11 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M3.4 路由 Prompt**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
+当前进度为 **M3.5 参数合并优先级**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
 可追溯根因、字段证据和建议；Web订单页已经接入严格PageContext。诊断现在可以复用持久化Session继承
 当前订单或任务，并继续通过Java事实重校验。内部路由器已具备六类意图、上下文Prompt注入、严格结构化
-解析、一次Schema重试和`UNKNOWN`回退；具体模型供应商、统一路由入口、参数合并、实际Skill分发、
-RAG、动态Agent、Approval和SSE尚未实现。
+解析、一次Schema重试、`UNKNOWN`回退，以及带来源、固定优先级和冲突记录的实体合并；具体模型供应商、
+统一路由入口、置信度澄清、实际Skill分发、RAG、动态Agent、Approval和SSE尚未实现。
 
 ## 环境要求
 
