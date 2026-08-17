@@ -19,8 +19,9 @@ knowledge-base/
     └── delivery/
 ```
 
-Markdown只保存标题化正文，`catalog.json`是唯一元数据来源。后续Loader必须先校验目录条目，再加载对应
-文件；不得根据文件名猜测版本、适用范围或有效状态。
+当前目录只保存标题化Markdown正文，`catalog.json`是唯一元数据来源。M4.3 Loader会先校验目录条目，
+再按扩展名显式选择Markdown或纯文本读取器；不得根据文件名猜测版本、适用范围或有效状态。纯文本契约已
+支持`.txt`，但当前16份固定演示规范仍全部使用Markdown。
 
 ## 元数据约定
 
@@ -30,4 +31,3 @@ Markdown只保存标题化正文，`catalog.json`是唯一元数据来源。后�
 
 `ACTIVE`文档的`expiry_date`和`replaced_by`必须为`null`；`HISTORICAL`文档必须具有失效日期，并指向
 同类型的当前有效替代版本。默认检索只能使用`ACTIVE`文档，历史版本必须由调用方明确请求。
-

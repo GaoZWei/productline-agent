@@ -41,7 +41,7 @@ def _enum_column(enum_type: type[StrEnum], constraint_name: str, length: int) ->
         length=length,
     )
 
-# 保存文档级信息，不保存切分后的正文内容
+# 保存文档级信息, 不保存切分后的正文内容
 class KnowledgeDocument(Base):
     """一份已登记规范的身份、来源哈希、过滤元数据和版本状态。"""
 
@@ -88,7 +88,7 @@ class KnowledgeDocument(Base):
     document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     file_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    # 保存文档正文的SHA-256值，长度固定为64
+    # 保存文档正文的SHA-256值, 长度固定为64
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     lifecycle: Mapped[DocumentLifecycle] = mapped_column(
         _enum_column(DocumentLifecycle, "ck_knowledge_documents_lifecycle", 16),
@@ -130,7 +130,7 @@ class KnowledgeDocument(Base):
         passive_deletes=True,
     )
 
-# 一份文档会被拆成多个分块的信息，每个分块都有一个唯一的索引和路径标识
+# 一份文档会被拆成多个分块的信息, 每个分块都有一个唯一的索引和路径标识
 class KnowledgeChunk(Base):
     """文档中的稳定分块、全文检索字段和待填充Embedding。"""
 
@@ -175,7 +175,7 @@ class KnowledgeChunk(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 保存Embedding结果，用于后续的相似度计算  VECTOR()暂时不固定维度
+    # 保存Embedding结果, 用于后续的相似度计算  VECTOR()暂时不固定维度
     embedding: Mapped[list[float] | None] = mapped_column(VECTOR(), nullable=True)
     # 全文检索字段 用于后续的全文检索
     search_vector: Mapped[str] = mapped_column(
@@ -188,4 +188,3 @@ class KnowledgeChunk(Base):
     )
 
     document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
-

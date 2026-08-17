@@ -7,7 +7,7 @@ M3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库
 Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由Prompt契约、固定LangGraph数据加载节点、
 确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
 具体模型供应商适配或统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
-全文检索字段，但尚未加载文档或提供RAG查询。
+全文检索字段；M4.3已实现确定性文档加载和分块，但尚未执行数据库入库、Embedding或RAG查询。
 
 ## 本地开发
 
@@ -217,6 +217,12 @@ M4.2通过`knowledge_documents`保存文档身份、内容哈希、八个过滤�
 PostgreSQL生成列维护`to_tsvector('simple', content)`；向量维度需等M4.4选定Embedding模型后才能固定，
 检索索引和查询门禁属于后续阶段。`make test-knowledge-models`会同时验证Schema/ORM和隔离PostgreSQL迁移。
 
+M4.3的`DocumentLoaderRegistry`只按显式`.md`/`.txt`扩展名选择Loader，统一要求UTF-8并在哈希前规范化BOM和
+换行符。Markdown一级标题必须与目录标题一致；`HeadingDocumentChunker`忽略代码围栏内的伪标题，保存完整
+章节路径，并对超长章节先按段落、再按句末或字符上限切分。Chunk ID由文档ID、章节路径和内容哈希生成，
+不依赖全局顺序；`DocumentProcessingPipeline`在任何数据库或模型调用前拦截规范化后正文相同的不同文档。
+`make test-knowledge-loading`验证当前16份目录、两种Loader、超长切分、稳定ID和重复检测。
+
 ## 固定 Workflow 节点
 
 `OrderDiagnosisWorkflow`使用LangGraph `StateGraph`固定串联：
@@ -295,6 +301,7 @@ make test-page-context
 make test-session-context
 make test-knowledge-docs
 make test-knowledge-models
+make test-knowledge-loading
 make test-agent-e2e
 ```
 

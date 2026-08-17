@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -82,6 +82,9 @@ test-knowledge-docs: ## 验证 M4.1 规范目录、元数据、版本关系和�
 test-knowledge-models: ## 验证 M4.2 知识Schema、ORM模型和PostgreSQL迁移
 	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_models.py tests/knowledge/test_knowledge_documents.py tests/test_alembic.py
 	./scripts/test-agent-persistence.sh -k knowledge
+
+test-knowledge-loading: ## 验证 M4.3 文档加载、分块、稳定ID和重复检测
+	cd agent-service && uv run --frozen pytest -q tests/knowledge
 
 test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证 M2.10 完整诊断链路
 	./scripts/test-agent-e2e.sh

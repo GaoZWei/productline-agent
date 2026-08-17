@@ -712,3 +712,24 @@
 - 严格校验文档路径、有效期、生命周期、唯一身份和历史版本替代关系。
 - 将文档过滤元数据与分块正文分离，并通过外键、唯一键和Check Constraint保护一致性。
 - 预留Embedding向量列，并由PostgreSQL根据正文自动维护全文检索向量。
+
+---
+
+## 2026-08-17 — `[T414-T422] M4.3 文档解析和分块`
+
+### 核心解决的问题
+
+将受控Markdown和纯文本规范转换为可重复生成的结构化分块，并在任何数据库或模型调用前拦截路径、标题、
+编码和重复正文问题。
+
+### 实现的核心代码
+
+- `agent-service/app/knowledge/loaders.py`：统一Loader协议、格式注册表、UTF-8读取和内容规范化。
+- `agent-service/app/knowledge/chunking.py`：标题路径、超长切分、词元近似和稳定Chunk ID。
+- `agent-service/app/knowledge/pipeline.py`：目录安全解析、处理编排及内容哈希重复检测。
+
+### 实现的核心功能
+
+- 显式支持Markdown和纯文本，拒绝未知格式、空文档、非法UTF-8及Markdown标题不一致。
+- Markdown按标题层级保存章节路径，超长内容优先按段落和句末确定性切分。
+- Chunk ID不依赖全局顺序，换行规范化后的SHA-256用于批内及既有内容重复检测。
