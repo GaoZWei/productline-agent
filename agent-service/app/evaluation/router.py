@@ -23,6 +23,7 @@ from app.schemas.routing import (
 )
 from app.schemas.session import SessionContext
 
+
 # 数据集固定覆盖八类情况
 class RouterEvaluationCategory(StrEnum):
     """M3.7 固定数据集覆盖的八类路由场景。"""
@@ -81,27 +82,29 @@ class RouterEvaluationCase(EvaluationSchema):
     expected_entities: RouterEntities
     expected_status: DecisionStatusValue
     expected_clarification_reason: ClarificationReasonValue | None = None
-    
+
     # 标准答案还需要校验决策原因
     @model_validator(mode="after")
     def validate_expected_decision(self) -> Self:
         """保证固定期望本身不违反现有意图和分发门禁。"""
 
         if self.expected_status is RoutingDecisionStatus.READY:
-            if self.expected_clarification_reason is not None: # 不能又要求澄清：
+            # READY不能同时要求澄清.
+            if self.expected_clarification_reason is not None:
                 raise ValueError("ready evaluation case cannot expect clarification")
-            if skill_for_intent(self.expected_intent) is None: # 必须有映射的业务Skill：
+            # READY意图必须有映射的业务Skill.
+            if skill_for_intent(self.expected_intent) is None:
                 raise ValueError("ready evaluation case requires a mapped intent")
-            # 必填参数必须完整：
+            # READY的必填参数必须完整.
             if any(
                 not self.expected_entities.contains(parameter)
                 for parameter in required_parameters_for(self.expected_intent)
             ):
                 raise ValueError("ready evaluation case requires complete parameters")
-        # 如果不是 READY，必须提供澄清原因：
+        # 如果不是READY, 必须提供澄清原因.
         elif self.expected_clarification_reason is None:
             raise ValueError("pending evaluation case requires clarification reason")
-        # 如果意图是 UNKNOWN，澄清原因必须是 UNKNOWN_INTENT：
+        # 如果意图是UNKNOWN, 澄清原因必须是UNKNOWN_INTENT.
         if (
             self.expected_intent is Intent.UNKNOWN
             and self.expected_clarification_reason
@@ -110,7 +113,7 @@ class RouterEvaluationCase(EvaluationSchema):
             raise ValueError("UNKNOWN evaluation case requires UNKNOWN clarification")
         return self
 
-# 预测结果契约 表示整个路由链路的最终输出，而不只是模型的原始输出
+# 预测结果契约表示整个路由链路的最终输出, 而不只是模型的原始输出.
 class RouterEvaluationPrediction(EvaluationSchema):
     """被测路由器对一条固定用例产出的最终预测。"""
 
@@ -181,10 +184,11 @@ def load_router_evaluation_cases(
     enforce_planned_distribution: bool = True,
 ) -> tuple[RouterEvaluationCase, ...]:
     """逐行加载JSONL数据, 错误信息只暴露行号或重复ID。"""
-    # 1. 读取文件 
+    # 1. 读取文件
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc: # 文件读取无法读取时，统一转换成RouterEvaluationDataError
+    # 文件读取失败时, 统一转换成RouterEvaluationDataError.
+    except OSError as exc:
         raise RouterEvaluationDataError("router evaluation dataset is unavailable") from exc
 
     cases: list[RouterEvaluationCase] = []

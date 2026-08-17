@@ -201,6 +201,16 @@ M3.7在`evaluation/router_cases.jsonl`保存60条固定路由期望，严格覆�
 样本。仓库当前只用可控Subject验收评测基础设施，没有具体模型Provider，因此不声明真实模型准确率。
 `make eval-router`可重复验证数据分布、指标和失败输出。
 
+## 演示规范文档
+
+M4.1在仓库根目录`knowledge-base/`准备14份当前有效规范和2份历史失效规范，覆盖DOM生产、质量、坐标系、
+复核与交付。Markdown只保存标题化演示正文，`catalog.json`集中保存稳定文档ID、相对路径、计划要求的八个
+检索元数据字段、生命周期和历史替代关系。全部正文明确标记为演示数据，不能解释为真实行业标准。
+
+`ACTIVE`文档没有失效日期，`HISTORICAL`文档必须具有失效日期并指向同类型有效版本；后续Loader不得根据
+文件名猜测元数据。`make test-knowledge-docs`验证16份文档的固定分布、路径闭包、元数据完整性、日期顺序和
+替代关系。当前尚未实现知识库表、文档Loader、分块、向量化或检索。
+
 ## 固定 Workflow 节点
 
 `OrderDiagnosisWorkflow`使用LangGraph `StateGraph`固定串联：
