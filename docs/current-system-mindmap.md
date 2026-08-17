@@ -1,7 +1,7 @@
 # 当前系统情况与架构思维导图
 
 > 基线日期：2026-08-17。当前开发进度以 `docs/STATUS.md` 为准；本图只把已经实现的能力描述为现状，
-> M3和M4.1已完成；M4.2及后续内容均标记为待建设。
+> M3、M4.1和M4.2已完成；M4.3及后续内容均标记为待建设。
 
 ## 系统全景
 
@@ -39,7 +39,13 @@ mindmap
           14份当前有效演示规范
           2份历史失效演示规范
           JSON元数据与替代关系
-        下一步 M4.2 知识库数据模型
+        已完成 M4.2 知识库数据模型
+          严格DocumentCatalog元数据契约
+          knowledge_documents文档表
+          knowledge_chunks分块表
+          pgvector向量字段
+          数据库生成全文检索字段
+        下一步 M4.3 文档解析和分块
       当前没有阻塞
     三层系统架构
       Web Console
@@ -135,6 +141,13 @@ mindmap
           Step
           成功结果快照
           失败错误码与失败节点
+        知识持久化基础
+          文档身份与内容哈希
+          八个检索元数据字段
+          生命周期与替代关系
+          稳定分块身份和章节路径
+          可空向量字段待Embedding入库
+          simple配置全文检索生成列
       Business Service
         技术栈
           Java 21
@@ -162,9 +175,9 @@ mindmap
       PostgreSQL
         PostgreSQL 16 与 pgvector 镜像
         Java 管理业务事实表
-        Python 管理 Agent 运行元数据表
+        Python 管理 Agent 运行与知识元数据表
         当前数据库角色尚未隔离
-        pgvector 能力尚未用于 RAG
+        vector扩展已由Alembic启用
     页面上下文安全边界
       PageContext 只是客户端提示
         current_system
@@ -221,12 +234,13 @@ mindmap
       Java 在确认时重新校验权限 状态 版本
     当前测试与验收
       Python
-        305 passed
-        31 个外部环境用例由专用门禁覆盖
+        316 passed
+        32 个外部环境用例由专用门禁覆盖
         Ruff 通过
         mypy strict 通过
       PostgreSQL 持久化与 API
-        30 passed
+        31 passed
+        知识模型定向集成2 passed
       Web
         7 个测试文件
         16 passed
@@ -240,7 +254,8 @@ mindmap
       具体路由模型 HTTP入口与动态分发
       自然语言澄清HTTP交互
       真实路由模型评测
-      RAG 与规范引用
+      文档加载 分块与Embedding入库
+      RAG检索与规范引用
       动态 Agent 决策
       Agent 侧写操作 Approval
       SSE 流式输出
@@ -263,7 +278,7 @@ mindmap
    Python负责编排和解释，Java负责可信业务事实、权限和最终写入。
 3. Java已经具备复核与返工写接口，但Python Agent尚未建设Approval链路，因此当前诊断建议只能展示，
    不会自动执行。
-4. 当前下一最小任务是M4.2知识库数据模型；文档Loader、检索、具体模型接入、动态分发、人工确认回写和SSE仍属于
+4. 当前下一最小任务是M4.3文档解析和分块；检索、具体模型接入、动态分发、人工确认回写和SSE仍属于
    后续里程碑。
 
 ## 相关文档

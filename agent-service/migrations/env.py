@@ -12,7 +12,7 @@ from app.models import AgentSession
 from app.settings import get_settings
 
 config = context.config
-# 导入一个映射类会加载模型包, 并让 Alembic 看见四张 Agent 自有表。
+# 导入一个映射类会加载模型包, 并让Alembic看见全部Agent自有表。
 target_metadata = AgentSession.metadata
 
 

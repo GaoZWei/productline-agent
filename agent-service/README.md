@@ -6,7 +6,8 @@ M3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
 Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由Prompt契约、固定LangGraph数据加载节点、
 确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
-具体模型供应商适配、统一路由HTTP入口或RAG。
+具体模型供应商适配或统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
+全文检索字段，但尚未加载文档或提供RAG查询。
 
 ## 本地开发
 
@@ -207,9 +208,14 @@ M4.1在仓库根目录`knowledge-base/`准备14份当前有效规范和2份历�
 复核与交付。Markdown只保存标题化演示正文，`catalog.json`集中保存稳定文档ID、相对路径、计划要求的八个
 检索元数据字段、生命周期和历史替代关系。全部正文明确标记为演示数据，不能解释为真实行业标准。
 
-`ACTIVE`文档没有失效日期，`HISTORICAL`文档必须具有失效日期并指向同类型有效版本；后续Loader不得根据
-文件名猜测元数据。`make test-knowledge-docs`验证16份文档的固定分布、路径闭包、元数据完整性、日期顺序和
-替代关系。当前尚未实现知识库表、文档Loader、分块、向量化或检索。
+`DocumentCatalog`会严格解析目录，拒绝额外字段、重复ID/路径、不安全Markdown路径、生命周期与目录位置不一致、
+日期倒置及无效替代关系。`ACTIVE`文档没有失效日期，`HISTORICAL`文档必须具有失效日期并指向同类型有效版本；
+后续Loader不得根据文件名猜测元数据。
+
+M4.2通过`knowledge_documents`保存文档身份、内容哈希、八个过滤元数据字段、生命周期和替代关系，通过
+`knowledge_chunks`保存所属文档、顺序、章节路径、正文哈希和token数。分块表预留可空`VECTOR`列，并使用
+PostgreSQL生成列维护`to_tsvector('simple', content)`；向量维度需等M4.4选定Embedding模型后才能固定，
+检索索引和查询门禁属于后续阶段。`make test-knowledge-models`会同时验证Schema/ORM和隔离PostgreSQL迁移。
 
 ## 固定 Workflow 节点
 
@@ -287,6 +293,8 @@ make test-diagnosis-generation
 make test-diagnosis-api
 make test-page-context
 make test-session-context
+make test-knowledge-docs
+make test-knowledge-models
 make test-agent-e2e
 ```
 
@@ -301,8 +309,8 @@ make test-agent-e2e
 
 ## 数据边界
 
-`app.database.Base` 当前只映射 Agent Session、Message、Run、Step，并可继续承载 Approval 和
-RAG 元数据。Python 服务
+`app.database.Base` 当前只映射 Agent Session、Message、Run、Step及知识文档/分块，并可继续承载Approval。
+知识表只保存规范及检索数据，不复制业务事实。Python服务
 不得为 Java 的订单、生产、质检、复核或交付表建立 ORM 映射，也不得绕过 Java API
 读取或修改业务事实。
 

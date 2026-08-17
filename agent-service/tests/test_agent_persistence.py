@@ -2,14 +2,14 @@ import asyncio
 import os
 import subprocess
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import asyncpg  # type: ignore[import-untyped]
 import pytest
 import pytest_asyncio
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -23,8 +23,11 @@ from app.models import (
     AgentStep,
     AgentStepStatus,
     AgentStepType,
+    KnowledgeChunk,
+    KnowledgeDocument,
 )
 from app.repositories import AgentRunRepository, AgentStepRepository
+from app.schemas.knowledge import DocumentLifecycle, DocumentType, PermissionScope
 from app.services import (
     InvalidRunTransitionError,
     InvalidStepTransitionError,
@@ -108,12 +111,14 @@ async def migrated_database_url() -> AsyncIterator[str]:
 
 
 @pytest.mark.unit
-def test_agent_metadata_contains_only_agent_runtime_tables() -> None:
+def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
     assert set(Base.metadata.tables) == {
         "agent_messages",
         "agent_runs",
         "agent_sessions",
         "agent_steps",
+        "knowledge_chunks",
+        "knowledge_documents",
     }
 
     assert set(Base.metadata.tables["agent_sessions"].columns.keys()) == {
@@ -179,6 +184,8 @@ async def test_alembic_creates_agent_tables_and_repository_crud(
             "agent_runs",
             "agent_sessions",
             "agent_steps",
+            "knowledge_chunks",
+            "knowledge_documents",
         } <= table_names
         _, alembic_url = _database_urls(
             migrated_database_url, _database_name(migrated_database_url)
@@ -246,6 +253,88 @@ async def test_alembic_creates_agent_tables_and_repository_crud(
             assert await step_repository.get("step-001") is None
             assert await step_repository.get("step-002") is None
             assert await run_repository.get("run-001") is None
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_knowledge_models_persist_vector_and_generated_search_text(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.engine.connect() as connection:
+            extension = await connection.scalar(
+                text("SELECT extname FROM pg_extension WHERE extname = 'vector'")
+            )
+        assert extension == "vector"
+
+        async with database.session() as session:
+            document = KnowledgeDocument(
+                document_id="COORDINATE-EXCEPTION-002",
+                title="坐标系异常处理规范",
+                file_path="active/coordinate-system/coordinate-exception-v2.md",
+                content_hash="a" * 64,
+                lifecycle=DocumentLifecycle.ACTIVE,
+                replaced_by=None,
+                document_type=DocumentType.COORDINATE_SYSTEM_SPEC,
+                satellite_type="GF-2",
+                product_type="DOM",
+                processing_level="L2",
+                specification_version="2.0",
+                effective_date=date(2025, 1, 1),
+                expiry_date=None,
+                permission_scope=PermissionScope.INTERNAL_REVIEWER,
+            )
+            chunk = KnowledgeChunk(
+                chunk_id="chunk-coordinate-exception-001",
+                document=document,
+                chunk_index=0,
+                section_path=["坐标系异常处理规范", "复核门禁"],
+                content="问题处理完成后必须重新提交复核",
+                content_hash="b" * 64,
+                token_count=16,
+                embedding=[0.1, 0.2, 0.3],
+            )
+            session.add(document)
+            await session.commit()
+            await session.refresh(chunk)
+
+            stored = await session.scalar(
+                select(KnowledgeChunk).where(
+                    KnowledgeChunk.chunk_id == "chunk-coordinate-exception-001"
+                )
+            )
+            assert stored is not None
+            assert stored.document_id == document.document_id
+            assert stored.section_path == ["坐标系异常处理规范", "复核门禁"]
+            assert stored.embedding is not None
+            assert len(stored.embedding) == 3
+            assert stored.search_vector is not None
+
+        async with database.session() as invalid_session:
+            invalid_session.add(
+                KnowledgeDocument(
+                    document_id="INVALID-ACTIVE-001",
+                    title="错误有效期示例",
+                    file_path="active/invalid.md",
+                    content_hash="c" * 64,
+                    lifecycle=DocumentLifecycle.ACTIVE,
+                    replaced_by=None,
+                    document_type=DocumentType.DOM_PRODUCT_SPEC,
+                    satellite_type="GF-2",
+                    product_type="DOM",
+                    processing_level="L2",
+                    specification_version="1.0",
+                    effective_date=date(2025, 1, 1),
+                    expiry_date=date(2025, 12, 31),
+                    permission_scope=PermissionScope.INTERNAL_REVIEWER,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                await invalid_session.commit()
+            await invalid_session.rollback()
     finally:
         await database.dispose()
 

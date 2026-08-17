@@ -2,13 +2,13 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M4.1 规范文档准备已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
+当前进度为 **M4.2 知识库数据模型已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
 可追溯根因、字段证据和建议；Web订单页已经接入严格PageContext。诊断现在可以复用持久化Session继承
 当前订单或任务，并继续通过Java事实重校验。内部路由器已具备六类意图、上下文Prompt注入、严格结构化
 解析、一次Schema重试、`UNKNOWN`回退、来源化实体合并，以及固定置信度、缺参/冲突澄清和补参恢复；
 60条固定样本、可注入评测执行器、指标、混淆矩阵和脱敏失败样本已经建立。首批14份有效演示规范和2份
-历史失效版本已按统一目录及JSON元数据清单准备；知识库数据库、Loader、检索、具体模型供应商、统一路由
-入口、动态Agent、Approval和SSE尚未实现。
+历史失效版本已登记为严格元数据契约；Agent数据库已经具备知识文档、分块、pgvector和全文检索字段。
+Loader、Embedding入库、检索、具体模型供应商、统一路由入口、动态Agent、Approval和SSE尚未实现。
 
 ## 环境要求
 
@@ -69,6 +69,7 @@ make test-session-context # 验证 M3.2 会话过期、清除和继承
 make test-intent-routing # 验证 M3.3 意图契约、Skill映射和UNKNOWN门禁
 make test-router-prompt # 验证 M3.4 Prompt、结构化解析、一次重试和UNKNOWN回退
 make test-knowledge-docs # 验证 M4.1 规范目录、元数据和版本关系
+make test-knowledge-models # 验证 M4.2 知识Schema、数据库模型和迁移
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试

@@ -16,7 +16,7 @@ from app.settings import Settings
 
 # 异步数据库
 class Base(DeclarativeBase):
-    """Agent Session、Message、Run、Step 和后续 Approval 表的元数据根类。"""
+    """Agent运行记录、知识库和后续Approval表的元数据根类。"""
 
 
 class Database:

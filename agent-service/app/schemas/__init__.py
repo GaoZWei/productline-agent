@@ -7,6 +7,13 @@ from app.schemas.agent import (
     OrderDiagnosisResponse,
 )
 from app.schemas.context import PageContext, PageType
+from app.schemas.knowledge import (
+    DocumentCatalog,
+    DocumentLifecycle,
+    DocumentMetadata,
+    DocumentType,
+    PermissionScope,
+)
 from app.schemas.routing import (
     ClarificationReason,
     ClarificationRequest,
@@ -51,6 +58,10 @@ __all__ = [
     "ConfidenceLevel",
     "DiagnosisNarrative",
     "DiagnosisResult",
+    "DocumentCatalog",
+    "DocumentLifecycle",
+    "DocumentMetadata",
+    "DocumentType",
     "EntityConflict",
     "EntityExtractionResult",
     "EntityMergeResult",
@@ -65,6 +76,7 @@ __all__ = [
     "PageContext",
     "PageType",
     "PendingActionContext",
+    "PermissionScope",
     "ReadToolName",
     "RootCause",
     "RouterEntities",

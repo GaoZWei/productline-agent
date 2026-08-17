@@ -1,4 +1,4 @@
-"""Agent 自有会话、消息和执行记录模型。"""
+"""Agent自有运行记录与知识库持久化模型。"""
 
 from app.models.agent_runtime import (
     AgentMessage,
@@ -10,6 +10,7 @@ from app.models.agent_runtime import (
     AgentStepStatus,
     AgentStepType,
 )
+from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
 
 __all__ = [
     "AgentMessage",
@@ -20,4 +21,6 @@ __all__ = [
     "AgentStep",
     "AgentStepStatus",
     "AgentStepType",
+    "KnowledgeChunk",
+    "KnowledgeDocument",
 ]

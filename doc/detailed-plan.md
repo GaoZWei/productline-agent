@@ -1258,6 +1258,11 @@ pytest tests/evaluation/test_router_eval.py -q
 
 ## M4.2 知识库数据模型
 
+### 解决的问题
+
+为规范文档和可检索分块建立严格元数据契约及Agent自有持久化结构，并预留向量与全文检索字段；后续Loader、
+Embedding入库和混合检索均以此稳定数据边界为基础。
+
 | ID | 任务 | 工时 |
 |---|---:|
 | T408 | 创建 `knowledge_documents` 表 | 2h |
