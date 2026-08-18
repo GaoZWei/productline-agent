@@ -25,7 +25,12 @@ from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.schemas.knowledge import DocumentLifecycle, DocumentType, PermissionScope
+from app.schemas.knowledge import (
+    EMBEDDING_DIMENSION,
+    DocumentLifecycle,
+    DocumentType,
+    PermissionScope,
+)
 
 
 def _enum_column(enum_type: type[StrEnum], constraint_name: str, length: int) -> Enum:
@@ -73,6 +78,15 @@ class KnowledgeDocument(Base):
             "AND replaced_by IS NOT NULL)",
             name="ck_knowledge_documents_lifecycle_fields",
         ),
+        CheckConstraint(
+            "(index_version IS NULL AND embedding_provider IS NULL "
+            "AND embedding_model IS NULL AND embedding_dimension IS NULL "
+            "AND indexed_at IS NULL) OR "
+            "(index_version IS NOT NULL AND embedding_provider IS NOT NULL "
+            "AND embedding_model IS NOT NULL AND embedding_dimension = 1536 "
+            "AND indexed_at IS NOT NULL)",
+            name="ck_knowledge_documents_embedding_index_fields",
+        ),
         UniqueConstraint("file_path", name="uq_knowledge_documents_file_path"),
         UniqueConstraint("content_hash", name="uq_knowledge_documents_content_hash"),
         Index(
@@ -113,6 +127,11 @@ class KnowledgeDocument(Base):
         _enum_column(PermissionScope, "ck_knowledge_documents_permission", 32),
         nullable=False,
     )
+    embedding_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    index_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -132,7 +151,7 @@ class KnowledgeDocument(Base):
 
 # 一份文档会被拆成多个分块的信息, 每个分块都有一个唯一的索引和路径标识
 class KnowledgeChunk(Base):
-    """文档中的稳定分块、全文检索字段和待填充Embedding。"""
+    """文档中的稳定分块、全文检索字段和可空Embedding。"""
 
     __tablename__ = "knowledge_chunks"
     __table_args__ = (
@@ -175,8 +194,10 @@ class KnowledgeChunk(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 保存Embedding结果, 用于后续的相似度计算  VECTOR()暂时不固定维度
-    embedding: Mapped[list[float] | None] = mapped_column(VECTOR(), nullable=True)
+    # 向量维度与M4.4选定的索引契约一致, 防止不同模型结果混写。
+    embedding: Mapped[list[float] | None] = mapped_column(
+        VECTOR(EMBEDDING_DIMENSION), nullable=True
+    )
     # 全文检索字段 用于后续的全文检索
     search_vector: Mapped[str] = mapped_column(
         TSVECTOR,

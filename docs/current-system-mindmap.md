@@ -1,7 +1,7 @@
 # 当前系统情况与架构思维导图
 
 > 基线日期：2026-08-17。当前开发进度以 `docs/STATUS.md` 为准；本图只把已经实现的能力描述为现状，
-> M3及M4.1～M4.3已完成；M4.4及后续内容均标记为待建设。
+> M3及M4.1～M4.4已完成；M4.5及后续内容均标记为待建设。
 
 ## 系统全景
 
@@ -52,7 +52,13 @@ mindmap
           超长章节确定性二次切分
           稳定Chunk ID
           规范化内容哈希重复检测
-        下一步 M4.4 Embedding入库
+        已完成 M4.4 Embedding入库
+          OpenAI兼容Provider契约
+          固定1536维批量向量
+          瞬时错误有限退避
+          pgvector重新索引
+          Provider模型与索引版本记录
+        下一步 M4.5 关键词检索
       当前没有阻塞
     三层系统架构
       Web Console
@@ -153,7 +159,8 @@ mindmap
           八个检索元数据字段
           生命周期与替代关系
           稳定分块身份和章节路径
-          可空向量字段待Embedding入库
+          固定1536维向量字段
+          当前Provider模型和索引版本
           simple配置全文检索生成列
         知识解析基础
           显式格式Loader注册表
@@ -253,8 +260,8 @@ mindmap
         Ruff 通过
         mypy strict 通过
       PostgreSQL 持久化与 API
-        31 passed
-        知识模型定向集成2 passed
+        32 passed
+        知识索引定向集成3 passed
       Web
         7 个测试文件
         16 passed
@@ -268,8 +275,8 @@ mindmap
       具体路由模型 HTTP入口与动态分发
       自然语言澄清HTTP交互
       真实路由模型评测
-      文档与分块数据库写入
-      Embedding生成和向量写入
+      全目录入库CLI定时任务或HTTP入口
+      真实Provider语义质量评测
       RAG检索与规范引用
       动态 Agent 决策
       Agent 侧写操作 Approval
@@ -293,8 +300,8 @@ mindmap
    Python负责编排和解释，Java负责可信业务事实、权限和最终写入。
 3. Java已经具备复核与返工写接口，但Python Agent尚未建设Approval链路，因此当前诊断建议只能展示，
    不会自动执行。
-4. 当前下一最小任务是M4.4 Embedding入库；数据库写入、检索、具体模型接入、动态分发、人工确认回写和SSE仍属于
-   后续里程碑。
+4. 当前下一最小任务是M4.5关键词检索；全目录入库入口、真实Provider评测、检索查询、动态分发、人工确认
+   回写和SSE仍属于后续里程碑。
 
 ## 相关文档
 

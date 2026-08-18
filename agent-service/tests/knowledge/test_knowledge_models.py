@@ -120,6 +120,11 @@ def test_sqlalchemy_metadata_contains_knowledge_tables_and_search_columns() -> N
         "effective_date",
         "expiry_date",
         "permission_scope",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_dimension",
+        "index_version",
+        "indexed_at",
         "created_at",
         "updated_at",
     }
@@ -136,6 +141,6 @@ def test_sqlalchemy_metadata_contains_knowledge_tables_and_search_columns() -> N
         "search_vector",
         "created_at",
     }
-    assert str(chunk_table.c.embedding.type) == "VECTOR"
+    assert str(chunk_table.c.embedding.type) == "VECTOR(1536)"
     assert str(chunk_table.c.search_vector.type) == "TSVECTOR"
     assert chunk_table.c.search_vector.computed is not None

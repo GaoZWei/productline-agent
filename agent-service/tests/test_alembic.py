@@ -17,3 +17,4 @@ def test_alembic_configuration_points_to_migrations() -> None:
     assert (project_root / "migrations" / "versions" / "0001_agent_runtime_base.py").is_file()
     assert (project_root / "migrations" / "versions" / "0002_session_context.py").is_file()
     assert (project_root / "migrations" / "versions" / "0003_knowledge_base.py").is_file()
+    assert (project_root / "migrations" / "versions" / "0004_embedding_index.py").is_file()

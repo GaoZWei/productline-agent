@@ -733,3 +733,24 @@
 - 显式支持Markdown和纯文本，拒绝未知格式、空文档、非法UTF-8及Markdown标题不一致。
 - Markdown按标题层级保存章节路径，超长内容优先按段落和句末确定性切分。
 - Chunk ID不依赖全局顺序，换行规范化后的SHA-256用于批内及既有内容重复检测。
+
+---
+
+## 2026-08-17 — `[T423-T430] M4.4 Embedding入库`
+
+### 核心解决的问题
+
+把确定性分块转换为可验证、可追踪版本的固定维向量，并防止瞬时Provider故障、异常响应或部分批次成功
+造成重试失控、向量空间混写和数据库半成品。
+
+### 实现的核心代码
+
+- `agent-service/app/knowledge/embeddings.py`：Provider协议、OpenAI兼容适配器、配置、批处理和有限重试。
+- `agent-service/app/repositories/knowledge.py`：文档与Chunk重新索引、向量校验和索引身份持久化。
+- `agent-service/app/models/knowledge.py`、`agent-service/migrations/versions/0004_embedding_index.py`：固定维度与索引版本字段。
+
+### 实现的核心功能
+
+- 批量请求固定1536维float向量，按响应索引恢复输入顺序，并拒绝数量、维度或有限性异常。
+- 仅对超时、网络、限流和服务端故障执行有界指数退避，认证、请求和响应结构错误立即失败。
+- 全部向量生成成功后，在调用方事务中替换目标文档全部Chunk并记录Provider、模型、版本和入库时间。

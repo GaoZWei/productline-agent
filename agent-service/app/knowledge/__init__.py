@@ -1,6 +1,17 @@
-"""知识文档加载、确定性分块和重复检测能力。"""
+"""知识文档加载、确定性分块、重复检测和Embedding生成能力。"""
 
 from app.knowledge.chunking import DocumentChunk, HeadingDocumentChunker
+from app.knowledge.embeddings import (
+    ChunkEmbedding,
+    EmbeddingBatchGenerator,
+    EmbeddingConfig,
+    EmbeddingErrorCode,
+    EmbeddingGeneration,
+    EmbeddingIndexDescriptor,
+    EmbeddingProvider,
+    EmbeddingProviderError,
+    OpenAICompatibleEmbeddingProvider,
+)
 from app.knowledge.loaders import (
     DocumentFormat,
     DocumentLoader,
@@ -18,8 +29,11 @@ from app.knowledge.pipeline import (
     DuplicateDocumentError,
     ProcessedDocument,
 )
+from app.schemas.knowledge import EMBEDDING_DIMENSION
 
 __all__ = [
+    "EMBEDDING_DIMENSION",
+    "ChunkEmbedding",
     "DocumentChunk",
     "DocumentFormat",
     "DocumentLoadError",
@@ -28,9 +42,17 @@ __all__ = [
     "DocumentProcessingPipeline",
     "DuplicateDocumentDetector",
     "DuplicateDocumentError",
+    "EmbeddingBatchGenerator",
+    "EmbeddingConfig",
+    "EmbeddingErrorCode",
+    "EmbeddingGeneration",
+    "EmbeddingIndexDescriptor",
+    "EmbeddingProvider",
+    "EmbeddingProviderError",
     "HeadingDocumentChunker",
     "LoadedDocument",
     "MarkdownDocumentLoader",
+    "OpenAICompatibleEmbeddingProvider",
     "PlainTextDocumentLoader",
     "ProcessedDocument",
     "UnsupportedDocumentFormatError",

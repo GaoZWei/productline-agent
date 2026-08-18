@@ -30,6 +30,10 @@ _LOG_EXTRA_FIELDS = (
     "tool_name",
     "run_id",
     "error_code",
+    "embedding_provider",
+    "embedding_model",
+    "index_version",
+    "batch_number",
     "retry_number",
     "retry_delay_ms",
 )

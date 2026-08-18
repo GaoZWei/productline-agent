@@ -7,7 +7,8 @@ M3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库
 Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由Prompt契约、固定LangGraph数据加载节点、
 确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
 具体模型供应商适配或统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
-全文检索字段；M4.3已实现确定性文档加载和分块，但尚未执行数据库入库、Embedding或RAG查询。
+全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
+固定1536维pgvector入库和索引版本记录，但尚无全目录执行入口或RAG查询。
 
 ## 本地开发
 
@@ -20,8 +21,9 @@ uv run python -m app.main
 ```
 
 默认健康检查为 <http://localhost:8000/health>。可使用 `PORT`、`ENVIRONMENT`、
-`LOG_LEVEL`、`DATABASE_URL`、`BUSINESS_SERVICE_URL` 和四项
-`BUSINESS_*_TIMEOUT_SECONDS`和`SESSION_TTL_SECONDS`覆盖配置。
+`LOG_LEVEL`、`DATABASE_URL`、`BUSINESS_SERVICE_URL`、四项`BUSINESS_*_TIMEOUT_SECONDS`和
+`SESSION_TTL_SECONDS`覆盖基础配置。启用Embedding生成时还需设置`EMBEDDING_API_KEY`；Provider、模型、
+Base URL、1536维度、批大小、超时、重试和索引版本均可通过对应`EMBEDDING_*`变量配置。
 
 ## Java HTTP Client
 
@@ -213,15 +215,23 @@ M4.1在仓库根目录`knowledge-base/`准备14份当前有效规范和2份历�
 后续Loader不得根据文件名猜测元数据。
 
 M4.2通过`knowledge_documents`保存文档身份、内容哈希、八个过滤元数据字段、生命周期和替代关系，通过
-`knowledge_chunks`保存所属文档、顺序、章节路径、正文哈希和token数。分块表预留可空`VECTOR`列，并使用
-PostgreSQL生成列维护`to_tsvector('simple', content)`；向量维度需等M4.4选定Embedding模型后才能固定，
-检索索引和查询门禁属于后续阶段。`make test-knowledge-models`会同时验证Schema/ORM和隔离PostgreSQL迁移。
+`knowledge_chunks`保存所属文档、顺序、章节路径、正文哈希和token数。分块表使用固定`VECTOR(1536)`列，并用
+PostgreSQL生成列维护`to_tsvector('simple', content)`；文档表记录当前Embedding Provider、模型、维度、
+索引版本和入库时间。检索索引和查询门禁属于后续阶段。`make test-knowledge-models`会同时验证Schema/ORM和
+隔离PostgreSQL迁移。
 
 M4.3的`DocumentLoaderRegistry`只按显式`.md`/`.txt`扩展名选择Loader，统一要求UTF-8并在哈希前规范化BOM和
 换行符。Markdown一级标题必须与目录标题一致；`HeadingDocumentChunker`忽略代码围栏内的伪标题，保存完整
 章节路径，并对超长章节先按段落、再按句末或字符上限切分。Chunk ID由文档ID、章节路径和内容哈希生成，
 不依赖全局顺序；`DocumentProcessingPipeline`在任何数据库或模型调用前拦截规范化后正文相同的不同文档。
 `make test-knowledge-loading`验证当前16份目录、两种Loader、超长切分、稳定ID和重复检测。
+
+M4.4的`EmbeddingProvider`协议隔离具体供应商；首个适配器使用OpenAI兼容`POST /embeddings`契约，显式发送
+批量输入、模型、float编码和1536维度，并按响应`index`恢复输入顺序。响应数量、索引、维度和数值有限性均需
+通过校验。`EmbeddingBatchGenerator`仅对超时、网络、429和5xx执行有界指数退避，认证、请求和响应结构错误
+不会重试；全部批次先在内存成功，随后`KnowledgeIndexRepository`在调用方事务中替换文档Chunk并记录同一
+索引版本，避免部分批次落库。`make test-knowledge-embedding`使用MockTransport与隔离PostgreSQL验收，不调用
+真实外部Provider。
 
 ## 固定 Workflow 节点
 
@@ -302,6 +312,7 @@ make test-session-context
 make test-knowledge-docs
 make test-knowledge-models
 make test-knowledge-loading
+make test-knowledge-embedding
 make test-agent-e2e
 ```
 

@@ -35,7 +35,7 @@ def normalize_document_content(content: str) -> str:
         raise DocumentLoadError("knowledge document is empty")
     return normalized
 
-# 已经读入，但还没有分块 的文档
+# 已经读入, 但还没有分块的文档
 @dataclass(frozen=True, slots=True)
 class LoadedDocument:
     """已读取但尚未分块的规范正文及其稳定内容哈希。"""
@@ -43,7 +43,7 @@ class LoadedDocument:
     metadata: DocumentMetadata  # 目录中的文档类型、版本、有效期、权限等信息
     document_format: DocumentFormat  # Markdown或纯文本格式
     content: str  # 规范化后的完整正文
-    content_hash: str  # 稳定的内容哈希，用于后续的相似度计算和检索
+    content_hash: str  # 稳定的内容哈希, 用于后续的相似度计算和检索
 
     @classmethod
     def from_content(
@@ -63,8 +63,8 @@ class LoadedDocument:
             content_hash=sha256(normalized.encode("utf-8")).hexdigest(),
         )
 
-# 统一DocumentLoader协议 
-# 所有Loader都必须提供两个能力：声明自己支持的文件扩展名 根据文件路径和已校验元数据返回LoadedDocument
+# 统一DocumentLoader协议
+# 所有Loader都必须声明支持的扩展名, 并按文件路径和已校验元数据返回LoadedDocument。
 class DocumentLoader(Protocol):
     """不同文本格式必须实现的统一同步读取协议。"""
 
@@ -127,7 +127,7 @@ class MarkdownDocumentLoader(_Utf8DocumentLoader):
     supported_suffixes = frozenset({".md"})
 
     def _validate_content(self, document: LoadedDocument) -> None:
-        # 读取完成后，它会取得第一个非空行作为标题行
+        # 读取完成后, 它会取得第一个非空行作为标题行
         first_line = next(
             (line.strip() for line in document.content.splitlines() if line.strip()),
             "",
@@ -174,7 +174,7 @@ class DocumentLoaderRegistry:
 
         suffix = source_path.suffix.lower()
         loader = self._loaders_by_suffix.get(suffix)
-        # 如果是.pdf、.docx或没有扩展名，会抛出异常
+        # 如果是.pdf、.docx或没有扩展名, 会抛出异常
         if loader is None:
             raise UnsupportedDocumentFormatError(
                 f"unsupported knowledge document format: {suffix or '<none>'}"

@@ -1312,6 +1312,11 @@ permission_scope
 
 ## M4.4 Embedding 入库
 
+### 解决的问题
+
+将确定性分块通过固定维度、可替换的Provider契约批量生成Embedding，并以同一索引身份原子写入pgvector；
+后续关键词、向量和混合检索可以判断文档当前使用的模型与索引版本，避免不同向量空间静默混写。
+
 | ID | 任务 | 工时 |
 |---|---:|
 | T423 | 定义 Embedding Provider 接口 | 2h |

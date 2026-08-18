@@ -74,7 +74,7 @@ class DocumentProcessingPipeline:
     ) -> None:
         self._loader_registry = loader_registry or DocumentLoaderRegistry.default()
         self._chunker = chunker or HeadingDocumentChunker()
-    # Pipeline如何串联全部步骤！！！
+    # Pipeline串联全部步骤
     def process_catalog(
         self,
         knowledge_root: Path,
@@ -92,27 +92,27 @@ class DocumentProcessingPipeline:
         processed: list[ProcessedDocument] = []
         for metadata in catalog.documents:
             source_path = resolved_root.joinpath(*PurePosixPath(metadata.file_path).parts)
-            try:  
-                # 第一步：确保文件真实存在
+            try:
+                # 第一步: 确保文件真实存在
                 resolved_source = source_path.resolve(strict=True)
-                # 第二步：确保解析后的真实路径仍位于知识库根目录
+                # 第二步: 确保解析后的真实路径仍位于知识库根目录
                 resolved_source.relative_to(resolved_root)
             except (OSError, ValueError) as exc:
                 raise DocumentLoadError(
                     "knowledge document escapes or is missing from root"
                 ) from exc
-            # 第三步：加载文档内容
+            # 第三步: 加载文档内容
             loaded = self._loader_registry.load(resolved_source, metadata)
-            # 第四步：登记内容哈希
+            # 第四步: 登记内容哈希
             detector.register(
                 document_id=metadata.document_id,
                 content_hash=loaded.content_hash,
             )
-            # 第五步：分块文档内容
+            # 第五步: 分块文档内容
             chunks = self._chunker.split(loaded)
             if not chunks:
                 raise DocumentLoadError("knowledge document produced no chunks")
-            # 第六步：收集处理结果文档  
+            # 第六步: 收集处理结果文档
             processed.append(
                 ProcessedDocument(
                     metadata=metadata,
@@ -121,5 +121,5 @@ class DocumentProcessingPipeline:
                     chunks=chunks,
                 )
             )
-            # 第七步：返回处理结果文档
+            # 第七步: 返回处理结果文档
         return tuple(processed)

@@ -14,6 +14,15 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.database import Base, Database
+from app.knowledge import (
+    EMBEDDING_DIMENSION,
+    ChunkEmbedding,
+    DocumentChunk,
+    DocumentFormat,
+    EmbeddingGeneration,
+    EmbeddingIndexDescriptor,
+    ProcessedDocument,
+)
 from app.models import (
     AgentMessage,
     AgentMessageRole,
@@ -26,8 +35,17 @@ from app.models import (
     KnowledgeChunk,
     KnowledgeDocument,
 )
-from app.repositories import AgentRunRepository, AgentStepRepository
-from app.schemas.knowledge import DocumentLifecycle, DocumentType, PermissionScope
+from app.repositories import (
+    AgentRunRepository,
+    AgentStepRepository,
+    KnowledgeIndexRepository,
+)
+from app.schemas.knowledge import (
+    DocumentLifecycle,
+    DocumentMetadata,
+    DocumentType,
+    PermissionScope,
+)
 from app.services import (
     InvalidRunTransitionError,
     InvalidStepTransitionError,
@@ -295,7 +313,7 @@ async def test_knowledge_models_persist_vector_and_generated_search_text(
                 content="问题处理完成后必须重新提交复核",
                 content_hash="b" * 64,
                 token_count=16,
-                embedding=[0.1, 0.2, 0.3],
+                embedding=[0.1, *([0.0] * 1535)],
             )
             session.add(document)
             await session.commit()
@@ -310,7 +328,7 @@ async def test_knowledge_models_persist_vector_and_generated_search_text(
             assert stored.document_id == document.document_id
             assert stored.section_path == ["坐标系异常处理规范", "复核门禁"]
             assert stored.embedding is not None
-            assert len(stored.embedding) == 3
+            assert len(stored.embedding) == 1536
             assert stored.search_vector is not None
 
         async with database.session() as invalid_session:
@@ -335,6 +353,110 @@ async def test_knowledge_models_persist_vector_and_generated_search_text(
             with pytest.raises(IntegrityError):
                 await invalid_session.commit()
             await invalid_session.rollback()
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_knowledge_repository_reindexes_chunks_and_records_version(
+    migrated_database_url: str,
+) -> None:
+    metadata = DocumentMetadata(
+        document_id="QUALITY-REINDEX-001",
+        title="质量重新索引规范",
+        file_path="active/quality/reindex.md",
+        lifecycle=DocumentLifecycle.ACTIVE,
+        replaced_by=None,
+        document_type=DocumentType.QUALITY_SPEC,
+        satellite_type="GF-2",
+        product_type="DOM",
+        processing_level="L2",
+        specification_version="1.0",
+        effective_date=date(2025, 1, 1),
+        expiry_date=None,
+        permission_scope=PermissionScope.INTERNAL_REVIEWER,
+    )
+    chunk = DocumentChunk(
+        chunk_id="KCH-REINDEX-0000000000000000000000000001",
+        document_id=metadata.document_id,
+        chunk_index=0,
+        section_path=(metadata.title, "处理要求"),
+        content="问题处理完成后重新提交复核。",
+        content_hash="d" * 64,
+        token_count=15,
+    )
+    processed = ProcessedDocument(
+        metadata=metadata,
+        document_format=DocumentFormat.MARKDOWN,
+        content_hash="e" * 64,
+        chunks=(chunk,),
+    )
+
+    def generation(version: str, value: float, indexed_at: datetime) -> EmbeddingGeneration:
+        return EmbeddingGeneration(
+            descriptor=EmbeddingIndexDescriptor(
+                provider="openai_compatible",
+                model="text-embedding-3-small",
+                dimension=EMBEDDING_DIMENSION,
+                index_version=version,
+            ),
+            generated_at=indexed_at,
+            embeddings=(
+                ChunkEmbedding(
+                    chunk_id=chunk.chunk_id,
+                    vector=(value, *([0.0] * (EMBEDDING_DIMENSION - 1))),
+                ),
+            ),
+        )
+
+    database = Database(migrated_database_url)
+    first_indexed_at = datetime(2026, 8, 17, 10, 0, tzinfo=UTC)
+    second_indexed_at = datetime(2026, 8, 17, 11, 0, tzinfo=UTC)
+    try:
+        async with database.session() as session:
+            await KnowledgeIndexRepository(session).reindex_documents(
+                (processed,), generation("embedding-v1", 0.1, first_indexed_at)
+            )
+            await session.commit()
+
+        async with database.session() as session:
+            stored_document = await session.get(KnowledgeDocument, metadata.document_id)
+            stored_chunk = await session.get(KnowledgeChunk, chunk.chunk_id)
+            assert stored_document is not None
+            assert stored_document.embedding_provider == "openai_compatible"
+            assert stored_document.embedding_model == "text-embedding-3-small"
+            assert stored_document.embedding_dimension == EMBEDDING_DIMENSION
+            assert stored_document.index_version == "embedding-v1"
+            assert stored_document.indexed_at == first_indexed_at
+            assert stored_chunk is not None
+            assert stored_chunk.embedding is not None
+            assert len(stored_chunk.embedding) == EMBEDDING_DIMENSION
+            assert stored_chunk.embedding[0] == pytest.approx(0.1)
+
+        async with database.session() as session:
+            await KnowledgeIndexRepository(session).reindex_documents(
+                (processed,), generation("embedding-v2", 0.2, second_indexed_at)
+            )
+            await session.commit()
+
+        async with database.session() as session:
+            stored_document = await session.get(KnowledgeDocument, metadata.document_id)
+            stored_chunks = list(
+                (
+                    await session.scalars(
+                        select(KnowledgeChunk).where(
+                            KnowledgeChunk.document_id == metadata.document_id
+                        )
+                    )
+                ).all()
+            )
+            assert stored_document is not None
+            assert stored_document.index_version == "embedding-v2"
+            assert stored_document.indexed_at == second_indexed_at
+            assert len(stored_chunks) == 1
+            assert stored_chunks[0].embedding is not None
+            assert stored_chunks[0].embedding[0] == pytest.approx(0.2)
     finally:
         await database.dispose()
 

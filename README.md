@@ -2,14 +2,15 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M4.3 文档解析和分块已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
+当前进度为 **M4.4 Embedding入库已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
 可追溯根因、字段证据和建议；Web订单页已经接入严格PageContext。诊断现在可以复用持久化Session继承
 当前订单或任务，并继续通过Java事实重校验。内部路由器已具备六类意图、上下文Prompt注入、严格结构化
 解析、一次Schema重试、`UNKNOWN`回退、来源化实体合并，以及固定置信度、缺参/冲突澄清和补参恢复；
 60条固定样本、可注入评测执行器、指标、混淆矩阵和脱敏失败样本已经建立。首批14份有效演示规范和2份
 历史失效版本已登记为严格元数据契约；Agent数据库已经具备知识文档、分块、pgvector和全文检索字段。
-统一Loader现在可安全读取Markdown/纯文本、按标题和长度确定性分块、生成稳定ID并拦截重复正文；Embedding
-入库、检索、具体模型供应商、统一路由入口、动态Agent、Approval和SSE尚未实现。
+统一Loader现在可安全读取Markdown/纯文本、按标题和长度确定性分块、生成稳定ID并拦截重复正文；OpenAI兼容
+Provider可按批生成固定1536维向量、有限重试瞬时错误，并将Chunk与索引版本写入pgvector。检索、全目录入库
+入口、统一路由入口、动态Agent、Approval和SSE尚未实现。
 
 ## 环境要求
 
@@ -72,6 +73,7 @@ make test-router-prompt # 验证 M3.4 Prompt、结构化解析、一次重试和
 make test-knowledge-docs # 验证 M4.1 规范目录、元数据和版本关系
 make test-knowledge-models # 验证 M4.2 知识Schema、数据库模型和迁移
 make test-knowledge-loading # 验证 M4.3 文档加载、分块和重复检测
+make test-knowledge-embedding # 验证 M4.4 Embedding生成、重试和pgvector重新索引
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试

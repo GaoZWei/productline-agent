@@ -89,3 +89,33 @@ def test_json_formatter_includes_tool_retry_fields() -> None:
     assert payload["error_code"] == "TOOL_TIMEOUT"
     assert payload["retry_number"] == 1
     assert payload["retry_delay_ms"] == 100.0
+
+
+@pytest.mark.unit
+def test_json_formatter_includes_embedding_retry_fields() -> None:
+    record = logging.LogRecord(
+        name="app.knowledge.embeddings",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=96,
+        msg="embedding_retry_scheduled",
+        args=(),
+        exc_info=None,
+    )
+    record.embedding_provider = "openai_compatible"
+    record.embedding_model = "text-embedding-3-small"
+    record.index_version = "text-embedding-3-small-1536-v1"
+    record.batch_number = 2
+    record.retry_number = 1
+    record.retry_delay_ms = 200.0
+    record.error_code = "EMBEDDING_RATE_LIMITED"
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["embedding_provider"] == "openai_compatible"
+    assert payload["embedding_model"] == "text-embedding-3-small"
+    assert payload["index_version"] == "text-embedding-3-small-1536-v1"
+    assert payload["batch_number"] == 2
+    assert payload["retry_number"] == 1
+    assert payload["retry_delay_ms"] == 200.0
+    assert payload["error_code"] == "EMBEDDING_RATE_LIMITED"

@@ -53,7 +53,7 @@ class HeadingDocumentChunker:
             # Markdown文档按标题分节
             # 每个标题层级和引用位置都对应一个分块
             # 分块内容是该标题以下的所有文本
-            # 类似：("测试规范", "第一章", "子节")
+            # 类似: ("测试规范", "第一章", "子节")
             sections = _markdown_sections(document)
         else:
             sections = (((document.metadata.title,), document.content),)
@@ -138,7 +138,7 @@ def _markdown_sections(
         flush()
         level = len(heading_match.group(1))
         heading_title = re.sub(r"[ \t]+#+[ \t]*$", "", heading_match.group(2)).strip()
-        # 遇到同级或更高级标题时：
+        # 遇到同级或更高级标题时:
         while headings and headings[-1][0] >= level:
             headings.pop()
         headings.append((level, heading_title))
@@ -149,12 +149,12 @@ def _markdown_sections(
     return tuple(sections)
 
 # 超长章节二次切分
-# 第一层：优先保持完整章节
-# 如果整个章节不超过上限，直接作为一个Chunk
-# 第二层：按空行识别段落
-# 多个短段落会尽量合并，直到接近长度上限
-# 第三层：单个段落仍然超长
-# 如果一个段落自身超过上限，会寻找后半段中的句末符号
+# 第一层: 优先保持完整章节
+# 如果整个章节不超过上限, 直接作为一个Chunk
+# 第二层: 按空行识别段落
+# 多个短段落会尽量合并, 直到接近长度上限
+# 第三层: 单个段落仍然超长
+# 如果一个段落自身超过上限, 会寻找后半段中的句末符号
 def _split_oversized_text(text: str, *, max_characters: int) -> tuple[str, ...]:
     """优先按空行组合段落, 单段超长时优先在句末切断。"""
 
@@ -223,15 +223,16 @@ def _stable_chunk_id(
             "document_id": document_id,
             "section_path": section_path,
             "content_hash": content_hash,
-            "occurrence": occurrence,  # 为了避免两个Chunk生成相同ID，代码会记录该签名已经出现的次数，解决同一文档内完全相同分块的身份冲突
+            # 记录同签名出现次数, 避免同一文档内完全相同分块发生身份冲突。
+            "occurrence": occurrence,
         },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     )
-    # 序列化后计算SHA-256哈希值
-    return f"KCH-{sha256(payload.encode('utf-8')).hexdigest()[:40].upper()}"
-    # 不使用chunk_index 是因为会导致：
+    # 不使用chunk_index, 否则会导致:
     # 已生成的Embedding无法复用。
     # 历史引用找不到原Chunk。
+    # 序列化后计算SHA-256哈希值
+    return f"KCH-{sha256(payload.encode('utf-8')).hexdigest()[:40].upper()}"
     # 增量更新退化成全量重建

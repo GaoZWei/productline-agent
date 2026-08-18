@@ -9,6 +9,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+EMBEDDING_DIMENSION: Literal[1536] = 1536
+
 
 # 限制文档类型
 class DocumentType(StrEnum):
