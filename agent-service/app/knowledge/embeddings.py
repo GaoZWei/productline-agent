@@ -299,7 +299,7 @@ class EmbeddingGeneration:
     generated_at: datetime
     embeddings: tuple[ChunkEmbedding, ...]
 
-# 不是单独保存一个向量，而是 查询向量和生成它的索引身份
+# 不是单独保存一个向量, 而是查询向量和生成它的索引身份
 @dataclass(frozen=True, slots=True)
 class QueryEmbedding:
     """与文档索引身份一致的一次查询向量。"""

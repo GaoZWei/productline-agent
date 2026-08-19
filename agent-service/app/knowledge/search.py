@@ -52,7 +52,7 @@ class VectorSearchHit:
 # 中文预处理
 def preprocess_keyword_query(query: str) -> KeywordQuery:
     """将中文连续文本转成双字词元, 并保留安全的英文与业务标识。"""
-    # NFKC用于统一视觉相近但Unicode编码不同的字符 ＧＦ－２ => GF-2
+    # NFKC用于统一视觉相近但Unicode编码不同的字符, 例如全角GF-2和半角GF-2
     normalized = unicodedata.normalize("NFKC", query).strip()
     # 查询长度限制为256个字符
     if not normalized or len(normalized) > _MAX_QUERY_CHARACTERS:
@@ -60,7 +60,8 @@ def preprocess_keyword_query(query: str) -> KeywordQuery:
 
     # 提取所有允许的词元
     terms: list[str] = []
-    for match in _SEARCH_TOKEN_PATTERN.finditer(normalized):  # _SEARCH_TOKEN_PATTERN是对应正则表达式的模式
+    # _SEARCH_TOKEN_PATTERN是对应正则表达式的模式
+    for match in _SEARCH_TOKEN_PATTERN.finditer(normalized):
         token = match.group(0)
         if _CJK_PATTERN.fullmatch(token):
             if len(token) < 2:
@@ -77,7 +78,7 @@ def preprocess_keyword_query(query: str) -> KeywordQuery:
         raise KeywordQueryError("keyword query produced no usable terms or too many terms")
     return KeywordQuery(terms=unique_terms, search_text=" ".join(unique_terms))
 
-# 文本文档预处理，不是用户的查询（保留原始内容和辅助检索的词元）
+# 文本文档预处理, 不是用户查询(保留原始内容和辅助检索词元)
 def build_search_document(*, content: str, section_path: tuple[str, ...]) -> str:
     """保留可审查原文与章节标题, 并追加中文双字检索词元。"""
 

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 
 import pytest
-from pydantic import AnyHttpUrl, SecretStr
+from pydantic import AnyHttpUrl, SecretStr, ValidationError
 
 from app.knowledge import (
     EMBEDDING_DIMENSION,
@@ -13,9 +14,11 @@ from app.knowledge import (
     EmbeddingConfig,
     EmbeddingIndexDescriptor,
     KeywordQueryError,
+    KnowledgeSearchFilter,
     build_search_document,
     preprocess_keyword_query,
 )
+from app.schemas.knowledge import DocumentType, PermissionScope
 
 
 def _config() -> EmbeddingConfig:
@@ -87,3 +90,30 @@ async def test_query_embedding_uses_same_provider_descriptor_and_validates_vecto
     assert query_embedding.descriptor == provider.descriptor
     assert len(query_embedding.vector) == EMBEDDING_DIMENSION
     assert query_embedding.vector[0] == 1.0
+
+
+@pytest.mark.unit
+def test_search_filter_requires_effective_time_and_permission_scope() -> None:
+    filters = KnowledgeSearchFilter(
+        product_type="DOM",
+        satellite_type="GF-2",
+        document_type=DocumentType.QUALITY_SPEC,
+        specification_version="2.1",
+        effective_at=date(2026, 8, 19),
+        permission_scope=PermissionScope.INTERNAL_REVIEWER,
+    )
+
+    assert filters.product_type == "DOM"
+    assert filters.document_type is DocumentType.QUALITY_SPEC
+    with pytest.raises(ValidationError):
+        KnowledgeSearchFilter.model_validate(
+            {
+                "effective_at": "2026-08-19",
+                "permission_scope": "INTERNAL_REVIEWER",
+                "unexpected": True,
+            }
+        )
+    with pytest.raises(ValidationError):
+        KnowledgeSearchFilter(
+            effective_at=date(2026, 8, 19)
+        )  # type: ignore[call-arg]

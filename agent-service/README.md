@@ -8,8 +8,8 @@ Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与�
 确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
 具体模型供应商适配或统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
 全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
-固定1536维pgvector入库和索引版本记录，M4.5/M4.6已实现中文关键词与同版本余弦检索，但尚无全目录执行
-入口、元数据过滤、混合排序或引用生成。
+固定1536维pgvector入库和索引版本记录，M4.5～M4.7已实现中文关键词、同版本余弦检索和统一元数据门禁，
+但尚无全目录执行入口、混合排序或引用生成。
 
 ## 本地开发
 
@@ -219,7 +219,8 @@ M4.2通过`knowledge_documents`保存文档身份、内容哈希、八个过滤�
 `knowledge_chunks`保存所属文档、顺序、章节路径、正文哈希和token数。分块表使用固定`VECTOR(1536)`列，并用
 PostgreSQL生成列维护基于`search_document`的`to_tsvector('simple', ...)`；文档表记录当前Embedding
 Provider、模型、维度、索引版本和入库时间。`search_vector`使用GIN索引，Embedding使用余弦HNSW索引；
-元数据查询门禁属于M4.7。`make test-knowledge-models`会同时验证Schema/ORM和隔离PostgreSQL迁移。
+检索时的元数据查询门禁由M4.7 Repository统一执行。`make test-knowledge-models`会同时验证Schema/ORM和
+隔离PostgreSQL迁移。
 
 M4.3的`DocumentLoaderRegistry`只按显式`.md`/`.txt`扩展名选择Loader，统一要求UTF-8并在哈希前规范化BOM和
 换行符。Markdown一级标题必须与目录标题一致；`HeadingDocumentChunker`忽略代码围栏内的伪标题，保存完整
@@ -243,6 +244,11 @@ M4.6复用`EmbeddingBatchGenerator`的Provider、错误分类和有限重试生�
 只比较Provider、模型、1536维度和`index_version`完全相同的文档，使用余弦距离升序命中HNSW索引，并向上层
 返回`1 - distance`相似度。TopK限制为1～100，相似度阈值限制为-1～1，错误维度、非有限值和零向量会被
 拒绝。`make test-knowledge-vector`验证索引版本隔离、顺序、分数、TopK和阈值。
+
+M4.7用严格`KnowledgeSearchFilter`统一关键词与向量检索范围；`effective_at`和`permission_scope`是必填的
+安全边界，产品类型、卫星类型、文档类型和规范版本按需精确匹配。Repository只允许`ACTIVE`且已生效、
+未过期的文档参与候选排序，并在`ORDER BY`与`LIMIT`前应用全部条件，避免不相关Chunk占据TopK。
+`make test-knowledge-filters`验证跨产品、元数据差异、历史失效和未来规范不会误召回。
 
 ## 固定 Workflow 节点
 

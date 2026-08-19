@@ -189,8 +189,9 @@ class KnowledgeChunk(Base):
             "ix_knowledge_chunks_embedding_cosine",
             "embedding",
             postgresql_using="hnsw",  # 近似最近邻索引类型
-            postgresql_with={"m": 16, "ef_construction": 64},  # 图中每个节点的连接数量， 构建索引时使用的候选集合规模
-            postgresql_ops={"embedding": "vector_cosine_ops"}, # 按余弦距离组织索引
+            # m控制图中每个节点的连接数量, ef_construction控制构建时的候选集合规模
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},  # 按余弦距离组织索引
         ),
     )
 

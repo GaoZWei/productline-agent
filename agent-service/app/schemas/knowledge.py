@@ -61,6 +61,20 @@ class KnowledgeSchema(BaseModel):
     )
 
 
+class KnowledgeSearchFilter(KnowledgeSchema):
+    """关键词与向量检索共享的必选安全边界和可选业务范围。"""
+
+    product_type: MetadataText | None = None  # # 产品类型
+    satellite_type: MetadataText | None = None  # 卫星类型
+    document_type: DocumentTypeValue | None = None  # 规范类型
+    specification_version: Annotated[
+        str,
+        Field(min_length=1, max_length=64, pattern=r"^[0-9]+(?:\.[0-9]+)*$"),
+    ] | None = None  # 明确指定规范版本
+    effective_at: date  # 以哪个日期判断规范是否生效
+    permission_scope: PermissionScopeValue  # 当前用户允许读取什么范围的规范
+
+
 # 文档元数据Schema(完整规范文档)
 class DocumentMetadata(KnowledgeSchema):
     """一份规范正文的身份、适用范围、版本和权限元数据。"""

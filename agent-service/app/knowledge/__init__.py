@@ -38,7 +38,7 @@ from app.knowledge.search import (
     build_search_document,
     preprocess_keyword_query,
 )
-from app.schemas.knowledge import EMBEDDING_DIMENSION
+from app.schemas.knowledge import EMBEDDING_DIMENSION, KnowledgeSearchFilter
 
 __all__ = [
     "EMBEDDING_DIMENSION",
@@ -62,6 +62,7 @@ __all__ = [
     "KeywordQuery",
     "KeywordQueryError",
     "KeywordSearchHit",
+    "KnowledgeSearchFilter",
     "LoadedDocument",
     "MarkdownDocumentLoader",
     "OpenAICompatibleEmbeddingProvider",

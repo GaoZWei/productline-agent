@@ -22,6 +22,7 @@ from app.knowledge import (
     DocumentFormat,
     EmbeddingGeneration,
     EmbeddingIndexDescriptor,
+    KnowledgeSearchFilter,
     ProcessedDocument,
     QueryEmbedding,
     build_search_document,
@@ -474,21 +475,30 @@ def _search_processed_document(
     *,
     suffix: str,
     content: str,
+    product_type: str = "DOM",
+    satellite_type: str = "GF-2",
+    document_type: DocumentType = DocumentType.QUALITY_SPEC,
+    specification_version: str = "1.0",
+    effective_date: date = date(2025, 1, 1),
+    lifecycle: DocumentLifecycle = DocumentLifecycle.ACTIVE,
+    expiry_date: date | None = None,
+    replaced_by: str | None = None,
 ) -> ProcessedDocument:
     document_id = f"SEARCH-DEMO-{suffix}"
+    parent_directory = "active" if lifecycle is DocumentLifecycle.ACTIVE else "historical"
     metadata = DocumentMetadata(
         document_id=document_id,
         title=f"检索测试规范{suffix}",
-        file_path=f"active/quality/search-{suffix.lower()}.md",
-        lifecycle=DocumentLifecycle.ACTIVE,
-        replaced_by=None,
-        document_type=DocumentType.QUALITY_SPEC,
-        satellite_type="GF-2",
-        product_type="DOM",
+        file_path=f"{parent_directory}/quality/search-{suffix.lower()}.md",
+        lifecycle=lifecycle,
+        replaced_by=replaced_by,
+        document_type=document_type,
+        satellite_type=satellite_type,
+        product_type=product_type,
         processing_level="L2",
-        specification_version="1.0",
-        effective_date=date(2025, 1, 1),
-        expiry_date=None,
+        specification_version=specification_version,
+        effective_date=effective_date,
+        expiry_date=expiry_date,
         permission_scope=PermissionScope.INTERNAL_REVIEWER,
     )
     content_hash = sha256(content.encode("utf-8")).hexdigest()
@@ -530,6 +540,15 @@ def _search_generation(
     )
 
 
+def _search_filters(**updates: object) -> KnowledgeSearchFilter:
+    values: dict[str, object] = {
+        "effective_at": date(2026, 8, 19),
+        "permission_scope": PermissionScope.INTERNAL_REVIEWER,
+    }
+    values.update(updates)
+    return KnowledgeSearchFilter.model_validate(values)
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_keyword_search_matches_chinese_bigrams_and_returns_rank(
@@ -557,6 +576,7 @@ async def test_keyword_search_matches_chinese_bigrams_and_returns_rank(
         async with database.session() as session:
             hits = await KnowledgeSearchRepository(session).search_keywords(
                 "坐标系问题 + !!!",
+                filters=_search_filters(),
                 top_k=5,
             )
             index_names = set(
@@ -626,10 +646,15 @@ async def test_vector_search_filters_index_version_top_k_and_similarity_threshol
             repository = KnowledgeSearchRepository(session)
             hits = await repository.search_vectors(
                 query_embedding,
+                filters=_search_filters(),
                 top_k=5,
                 min_similarity=0.5,
             )
-            top_hit = await repository.search_vectors(query_embedding, top_k=1)
+            top_hit = await repository.search_vectors(
+                query_embedding,
+                filters=_search_filters(),
+                top_k=1,
+            )
 
         assert [hit.chunk_id for hit in hits] == [
             exact.chunks[0].chunk_id,
@@ -649,9 +674,147 @@ async def test_vector_search_filters_index_version_top_k_and_similarity_threshol
         )
         async with database.session() as session:
             with pytest.raises(KnowledgeSearchValidationError):
-                await KnowledgeSearchRepository(session).search_vectors(invalid_query)
+                await KnowledgeSearchRepository(session).search_vectors(
+                    invalid_query,
+                    filters=_search_filters(),
+                )
             with pytest.raises(KnowledgeSearchValidationError):
-                await KnowledgeSearchRepository(session).search_vectors(zero_query)
+                await KnowledgeSearchRepository(session).search_vectors(
+                    zero_query,
+                    filters=_search_filters(),
+                )
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_search_filters_prevent_cross_product_and_metadata_recall(
+    migrated_database_url: str,
+) -> None:
+    relevant = _search_processed_document(
+        suffix="FILTER-A",
+        content="统一检索规则适用于DOM产品坐标处理。",
+        specification_version="2.1",
+    )
+    wrong_product = _search_processed_document(
+        suffix="FILTER-B",
+        content="统一检索规则适用于DSM产品坐标处理。",
+        product_type="DSM",
+        specification_version="2.1",
+    )
+    wrong_satellite = _search_processed_document(
+        suffix="FILTER-C",
+        content="统一检索规则适用于GF-1产品坐标处理。",
+        satellite_type="GF-1",
+        specification_version="2.1",
+    )
+    wrong_type = _search_processed_document(
+        suffix="FILTER-D",
+        content="统一检索规则属于DOM生产类型。",
+        document_type=DocumentType.DOM_PRODUCT_SPEC,
+        specification_version="2.1",
+    )
+    wrong_version = _search_processed_document(
+        suffix="FILTER-E",
+        content="统一检索规则来自旧规范版本。",
+        specification_version="1.0",
+    )
+    documents = (relevant, wrong_product, wrong_satellite, wrong_type, wrong_version)
+    vector = (1.0, *([0.0] * (EMBEDDING_DIMENSION - 1)))
+    generation = _search_generation(
+        documents,
+        tuple(vector for _ in documents),
+        index_version="filter-v1",
+    )
+    filters = _search_filters(
+        product_type="DOM",
+        satellite_type="GF-2",
+        document_type=DocumentType.QUALITY_SPEC,
+        specification_version="2.1",
+    )
+    query_embedding = QueryEmbedding(descriptor=generation.descriptor, vector=vector)
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            await KnowledgeIndexRepository(session).reindex_documents(documents, generation)
+            await session.commit()
+
+        async with database.session() as session:
+            repository = KnowledgeSearchRepository(session)
+            keyword_hits = await repository.search_keywords(
+                "统一检索规则",
+                filters=filters,
+                top_k=10,
+            )
+            vector_hits = await repository.search_vectors(
+                query_embedding,
+                filters=filters,
+                top_k=10,
+            )
+
+        assert [hit.document_id for hit in keyword_hits] == [relevant.metadata.document_id]
+        assert [hit.document_id for hit in vector_hits] == [relevant.metadata.document_id]
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_search_filters_exclude_historical_expired_and_future_documents(
+    migrated_database_url: str,
+) -> None:
+    active = _search_processed_document(
+        suffix="LIFECYCLE-A",
+        content="版本过滤规则使用当前有效规范。",
+        specification_version="2.0",
+        effective_date=date(2025, 1, 1),
+    )
+    historical = _search_processed_document(
+        suffix="LIFECYCLE-H",
+        content="版本过滤规则来自已经失效的历史规范。",
+        specification_version="1.0",
+        effective_date=date(2022, 1, 1),
+        lifecycle=DocumentLifecycle.HISTORICAL,
+        expiry_date=date(2024, 12, 31),
+        replaced_by=active.metadata.document_id,
+    )
+    future = _search_processed_document(
+        suffix="LIFECYCLE-F",
+        content="版本过滤规则来自尚未生效的未来规范。",
+        specification_version="3.0",
+        effective_date=date(2027, 1, 1),
+    )
+    documents = (active, historical, future)
+    vector = (1.0, *([0.0] * (EMBEDDING_DIMENSION - 1)))
+    generation = _search_generation(
+        documents,
+        (vector, vector, vector),
+        index_version="lifecycle-v1",
+    )
+    filters = _search_filters(effective_at=date(2026, 8, 19))
+    query_embedding = QueryEmbedding(descriptor=generation.descriptor, vector=vector)
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            await KnowledgeIndexRepository(session).reindex_documents(documents, generation)
+            await session.commit()
+
+        async with database.session() as session:
+            repository = KnowledgeSearchRepository(session)
+            keyword_hits = await repository.search_keywords(
+                "版本过滤规则",
+                filters=filters,
+                top_k=10,
+            )
+            vector_hits = await repository.search_vectors(
+                query_embedding,
+                filters=filters,
+                top_k=10,
+            )
+
+        assert [hit.document_id for hit in keyword_hits] == [active.metadata.document_id]
+        assert [hit.document_id for hit in vector_hits] == [active.metadata.document_id]
     finally:
         await database.dispose()
 
