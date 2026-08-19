@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -89,6 +89,14 @@ test-knowledge-loading: ## 验证 M4.3 文档加载、分块、稳定ID和重复
 test-knowledge-embedding: ## 验证 M4.4 Provider、批处理、重试、pgvector入库和重新索引
 	cd agent-service && uv run --frozen pytest -q tests/knowledge
 	./scripts/test-agent-persistence.sh -k knowledge
+
+test-knowledge-keyword: ## 验证 M4.5 中文预处理、GIN全文检索和关键词分数
+	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_search.py tests/knowledge/test_knowledge_models.py tests/test_alembic.py
+	./scripts/test-agent-persistence.sh -k keyword
+
+test-knowledge-vector: ## 验证 M4.6 Query Embedding、HNSW余弦检索、TopK和阈值
+	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_search.py tests/knowledge/test_embedding_batching.py tests/knowledge/test_knowledge_models.py tests/test_alembic.py
+	./scripts/test-agent-persistence.sh -k vector
 
 test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证 M2.10 完整诊断链路
 	./scripts/test-agent-e2e.sh

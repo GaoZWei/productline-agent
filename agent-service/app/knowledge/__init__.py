@@ -11,6 +11,7 @@ from app.knowledge.embeddings import (
     EmbeddingProvider,
     EmbeddingProviderError,
     OpenAICompatibleEmbeddingProvider,
+    QueryEmbedding,
 )
 from app.knowledge.loaders import (
     DocumentFormat,
@@ -28,6 +29,14 @@ from app.knowledge.pipeline import (
     DuplicateDocumentDetector,
     DuplicateDocumentError,
     ProcessedDocument,
+)
+from app.knowledge.search import (
+    KeywordQuery,
+    KeywordQueryError,
+    KeywordSearchHit,
+    VectorSearchHit,
+    build_search_document,
+    preprocess_keyword_query,
 )
 from app.schemas.knowledge import EMBEDDING_DIMENSION
 
@@ -50,11 +59,18 @@ __all__ = [
     "EmbeddingProvider",
     "EmbeddingProviderError",
     "HeadingDocumentChunker",
+    "KeywordQuery",
+    "KeywordQueryError",
+    "KeywordSearchHit",
     "LoadedDocument",
     "MarkdownDocumentLoader",
     "OpenAICompatibleEmbeddingProvider",
     "PlainTextDocumentLoader",
     "ProcessedDocument",
+    "QueryEmbedding",
     "UnsupportedDocumentFormatError",
+    "VectorSearchHit",
+    "build_search_document",
     "normalize_document_content",
+    "preprocess_keyword_query",
 ]

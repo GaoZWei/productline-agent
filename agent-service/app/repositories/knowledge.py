@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.knowledge import EmbeddingGeneration, ProcessedDocument
+from app.knowledge import EmbeddingGeneration, ProcessedDocument, build_search_document
 from app.models import KnowledgeChunk, KnowledgeDocument
 from app.schemas.knowledge import EMBEDDING_DIMENSION, DocumentLifecycle
 
@@ -16,7 +16,7 @@ from app.schemas.knowledge import EMBEDDING_DIMENSION, DocumentLifecycle
 class KnowledgeIndexValidationError(ValueError):
     """处理结果、向量或索引身份不满足原子入库契约。"""
 
-# 把“本次处理得到的文档、Chunk和Embedding”完整同步到数据库，旧索引存在时进行整体替换
+# 把“本次处理得到的文档、Chunk和Embedding”完整同步到数据库, 旧索引存在时进行整体替换
 class KnowledgeIndexRepository:
     """不隐式提交事务的知识索引查询和全量文档替换。"""
 
@@ -40,9 +40,9 @@ class KnowledgeIndexRepository:
         """替换目标文档全部Chunk并保存同一索引版本, 事务由调用方提交。"""
 
         normalized_documents = tuple(documents)
-        # 第一步：完整校验输入参数
+        # 第一步: 完整校验输入参数
         embeddings_by_id = self._validate_reindex_input(normalized_documents, generation)
-        # 第二步：先保存ACTIVE文档
+        # 第二步: 先保存ACTIVE文档
         documents_by_lifecycle = sorted(
             normalized_documents,
             key=lambda item: item.metadata.lifecycle is DocumentLifecycle.HISTORICAL,
@@ -56,14 +56,14 @@ class KnowledgeIndexRepository:
             if stored is None:
                 stored = KnowledgeDocument(document_id=processed.metadata.document_id)
                 self._session.add(stored)
-            # 第三步：写文档信息和索引身份
+            # 第三步: 写文档信息和索引身份
             self._apply_document_fields(stored, processed, generation)
             stored_by_id[stored.document_id] = stored
             if processed.metadata.lifecycle is DocumentLifecycle.ACTIVE:
                 await self._session.flush()
 
-        document_ids = tuple(stored_by_id.values())
-        # 第四步：删除目标文档的全部旧Chunk
+        document_ids = tuple(stored_by_id)
+        # 第四步: 删除目标文档的全部旧Chunk
         await self._session.execute(
             delete(KnowledgeChunk).where(KnowledgeChunk.document_id.in_(document_ids))
         )
@@ -71,7 +71,7 @@ class KnowledgeIndexRepository:
         for processed in normalized_documents:
             for chunk in processed.chunks:
                 self._session.add(
-                    # 第五步：插入新Chunk和向量
+                    # 第五步: 插入新Chunk和向量
                     KnowledgeChunk(
                         chunk_id=chunk.chunk_id,
                         document_id=chunk.document_id,
@@ -80,10 +80,14 @@ class KnowledgeIndexRepository:
                         content=chunk.content,
                         content_hash=chunk.content_hash,
                         token_count=chunk.token_count,
+                        search_document=build_search_document(
+                            content=chunk.content,
+                            section_path=chunk.section_path,
+                        ),
                         embedding=list(embeddings_by_id[chunk.chunk_id]),
                     )
                 )
-        # 第六步：由调用方提交事务
+        # 第六步: 由调用方提交事务
         await self._session.flush()
         return tuple(stored_by_id[item.metadata.document_id] for item in normalized_documents)
 
@@ -151,6 +155,7 @@ class KnowledgeIndexRepository:
         if any(
             len(vector) != EMBEDDING_DIMENSION
             or any(not math.isfinite(value) for value in vector)
+            or not any(value != 0.0 for value in vector)
             for vector in embeddings_by_id.values()
         ):
             raise KnowledgeIndexValidationError("embedding vector is invalid")

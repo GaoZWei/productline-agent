@@ -8,7 +8,8 @@ Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与�
 确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
 具体模型供应商适配或统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
 全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
-固定1536维pgvector入库和索引版本记录，但尚无全目录执行入口或RAG查询。
+固定1536维pgvector入库和索引版本记录，M4.5/M4.6已实现中文关键词与同版本余弦检索，但尚无全目录执行
+入口、元数据过滤、混合排序或引用生成。
 
 ## 本地开发
 
@@ -216,9 +217,9 @@ M4.1在仓库根目录`knowledge-base/`准备14份当前有效规范和2份历�
 
 M4.2通过`knowledge_documents`保存文档身份、内容哈希、八个过滤元数据字段、生命周期和替代关系，通过
 `knowledge_chunks`保存所属文档、顺序、章节路径、正文哈希和token数。分块表使用固定`VECTOR(1536)`列，并用
-PostgreSQL生成列维护`to_tsvector('simple', content)`；文档表记录当前Embedding Provider、模型、维度、
-索引版本和入库时间。检索索引和查询门禁属于后续阶段。`make test-knowledge-models`会同时验证Schema/ORM和
-隔离PostgreSQL迁移。
+PostgreSQL生成列维护基于`search_document`的`to_tsvector('simple', ...)`；文档表记录当前Embedding
+Provider、模型、维度、索引版本和入库时间。`search_vector`使用GIN索引，Embedding使用余弦HNSW索引；
+元数据查询门禁属于M4.7。`make test-knowledge-models`会同时验证Schema/ORM和隔离PostgreSQL迁移。
 
 M4.3的`DocumentLoaderRegistry`只按显式`.md`/`.txt`扩展名选择Loader，统一要求UTF-8并在哈希前规范化BOM和
 换行符。Markdown一级标题必须与目录标题一致；`HeadingDocumentChunker`忽略代码围栏内的伪标题，保存完整
@@ -232,6 +233,16 @@ M4.4的`EmbeddingProvider`协议隔离具体供应商；首个适配器使用Ope
 不会重试；全部批次先在内存成功，随后`KnowledgeIndexRepository`在调用方事务中替换文档Chunk并记录同一
 索引版本，避免部分批次落库。`make test-knowledge-embedding`使用MockTransport与隔离PostgreSQL验收，不调用
 真实外部Provider。
+
+M4.5在入库时把章节标题、原文和中文连续文本的双字词元写入`search_document`，查询侧使用同一NFKC和双字
+规则生成安全词元，再由`plainto_tsquery('simple', ...)`匹配GIN索引并以`ts_rank_cd`返回归一化关键词分数。
+空查询、单个中文字符、超长输入和过多词元会在进入SQL前被拒绝。双字词元是无额外分词依赖的确定性第一版，
+不等同于完整中文语义分词。`make test-knowledge-keyword`验证查询契约和真实PostgreSQL结果。
+
+M4.6复用`EmbeddingBatchGenerator`的Provider、错误分类和有限重试生成单条Query Embedding；检索Repository
+只比较Provider、模型、1536维度和`index_version`完全相同的文档，使用余弦距离升序命中HNSW索引，并向上层
+返回`1 - distance`相似度。TopK限制为1～100，相似度阈值限制为-1～1，错误维度、非有限值和零向量会被
+拒绝。`make test-knowledge-vector`验证索引版本隔离、顺序、分数、TopK和阈值。
 
 ## 固定 Workflow 节点
 
@@ -313,6 +324,8 @@ make test-knowledge-docs
 make test-knowledge-models
 make test-knowledge-loading
 make test-knowledge-embedding
+make test-knowledge-keyword
+make test-knowledge-vector
 make test-agent-e2e
 ```
 

@@ -180,6 +180,18 @@ class KnowledgeChunk(Base):
             "chunk_index",
             name="uq_knowledge_chunks_document_index",
         ),
+        Index(
+            "ix_knowledge_chunks_search_vector",
+            "search_vector",
+            postgresql_using="gin",
+        ),
+        Index(
+            "ix_knowledge_chunks_embedding_cosine",
+            "embedding",
+            postgresql_using="hnsw",  # 近似最近邻索引类型
+            postgresql_with={"m": 16, "ef_construction": 64},  # 图中每个节点的连接数量， 构建索引时使用的候选集合规模
+            postgresql_ops={"embedding": "vector_cosine_ops"}, # 按余弦距离组织索引
+        ),
     )
 
     chunk_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -194,6 +206,7 @@ class KnowledgeChunk(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    search_document: Mapped[str] = mapped_column(Text, nullable=False)
     # 向量维度与M4.4选定的索引契约一致, 防止不同模型结果混写。
     embedding: Mapped[list[float] | None] = mapped_column(
         VECTOR(EMBEDDING_DIMENSION), nullable=True
@@ -201,7 +214,7 @@ class KnowledgeChunk(Base):
     # 全文检索字段 用于后续的全文检索
     search_vector: Mapped[str] = mapped_column(
         TSVECTOR,
-        Computed("to_tsvector('simple', content)", persisted=True),
+        Computed("to_tsvector('simple', search_document)", persisted=True),
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(

@@ -137,6 +137,7 @@ def test_sqlalchemy_metadata_contains_knowledge_tables_and_search_columns() -> N
         "content",
         "content_hash",
         "token_count",
+        "search_document",
         "embedding",
         "search_vector",
         "created_at",
@@ -144,3 +145,19 @@ def test_sqlalchemy_metadata_contains_knowledge_tables_and_search_columns() -> N
     assert str(chunk_table.c.embedding.type) == "VECTOR(1536)"
     assert str(chunk_table.c.search_vector.type) == "TSVECTOR"
     assert chunk_table.c.search_vector.computed is not None
+    search_index = next(
+        index
+        for index in chunk_table.indexes
+        if index.name == "ix_knowledge_chunks_search_vector"
+    )
+    embedding_index = next(
+        index
+        for index in chunk_table.indexes
+        if index.name == "ix_knowledge_chunks_embedding_cosine"
+    )
+    assert (
+        search_index.dialect_options["postgresql"]["using"] == "gin"
+    )
+    assert (
+        embedding_index.dialect_options["postgresql"]["using"] == "hnsw"
+    )

@@ -7,6 +7,10 @@ from app.repositories.agent_runtime import (
     AgentStepRepository,
 )
 from app.repositories.knowledge import KnowledgeIndexRepository, KnowledgeIndexValidationError
+from app.repositories.knowledge_search import (
+    KnowledgeSearchRepository,
+    KnowledgeSearchValidationError,
+)
 
 __all__ = [
     "AgentMessageRepository",
@@ -15,4 +19,6 @@ __all__ = [
     "AgentStepRepository",
     "KnowledgeIndexRepository",
     "KnowledgeIndexValidationError",
+    "KnowledgeSearchRepository",
+    "KnowledgeSearchValidationError",
 ]

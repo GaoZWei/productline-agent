@@ -3,6 +3,7 @@ import os
 import subprocess
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -22,6 +23,8 @@ from app.knowledge import (
     EmbeddingGeneration,
     EmbeddingIndexDescriptor,
     ProcessedDocument,
+    QueryEmbedding,
+    build_search_document,
 )
 from app.models import (
     AgentMessage,
@@ -39,6 +42,8 @@ from app.repositories import (
     AgentRunRepository,
     AgentStepRepository,
     KnowledgeIndexRepository,
+    KnowledgeSearchRepository,
+    KnowledgeSearchValidationError,
 )
 from app.schemas.knowledge import (
     DocumentLifecycle,
@@ -313,6 +318,10 @@ async def test_knowledge_models_persist_vector_and_generated_search_text(
                 content="问题处理完成后必须重新提交复核",
                 content_hash="b" * 64,
                 token_count=16,
+                search_document=build_search_document(
+                    content="问题处理完成后必须重新提交复核",
+                    section_path=("坐标系异常处理规范", "复核门禁"),
+                ),
                 embedding=[0.1, *([0.0] * 1535)],
             )
             session.add(document)
@@ -457,6 +466,192 @@ async def test_knowledge_repository_reindexes_chunks_and_records_version(
             assert len(stored_chunks) == 1
             assert stored_chunks[0].embedding is not None
             assert stored_chunks[0].embedding[0] == pytest.approx(0.2)
+    finally:
+        await database.dispose()
+
+
+def _search_processed_document(
+    *,
+    suffix: str,
+    content: str,
+) -> ProcessedDocument:
+    document_id = f"SEARCH-DEMO-{suffix}"
+    metadata = DocumentMetadata(
+        document_id=document_id,
+        title=f"检索测试规范{suffix}",
+        file_path=f"active/quality/search-{suffix.lower()}.md",
+        lifecycle=DocumentLifecycle.ACTIVE,
+        replaced_by=None,
+        document_type=DocumentType.QUALITY_SPEC,
+        satellite_type="GF-2",
+        product_type="DOM",
+        processing_level="L2",
+        specification_version="1.0",
+        effective_date=date(2025, 1, 1),
+        expiry_date=None,
+        permission_scope=PermissionScope.INTERNAL_REVIEWER,
+    )
+    content_hash = sha256(content.encode("utf-8")).hexdigest()
+    chunk = DocumentChunk(
+        chunk_id=f"KCH-SEARCH-{suffix}-000000000000000000000000",
+        document_id=document_id,
+        chunk_index=0,
+        section_path=(metadata.title, "处理要求"),
+        content=content,
+        content_hash=content_hash,
+        token_count=len(content),
+    )
+    return ProcessedDocument(
+        metadata=metadata,
+        document_format=DocumentFormat.MARKDOWN,
+        content_hash=content_hash,
+        chunks=(chunk,),
+    )
+
+
+def _search_generation(
+    documents: tuple[ProcessedDocument, ...],
+    vectors: tuple[tuple[float, ...], ...],
+    *,
+    index_version: str,
+) -> EmbeddingGeneration:
+    return EmbeddingGeneration(
+        descriptor=EmbeddingIndexDescriptor(
+            provider="openai_compatible",
+            model="text-embedding-3-small",
+            dimension=EMBEDDING_DIMENSION,
+            index_version=index_version,
+        ),
+        generated_at=datetime(2026, 8, 18, 8, 0, tzinfo=UTC),
+        embeddings=tuple(
+            ChunkEmbedding(chunk_id=document.chunks[0].chunk_id, vector=vector)
+            for document, vector in zip(documents, vectors, strict=True)
+        ),
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_keyword_search_matches_chinese_bigrams_and_returns_rank(
+    migrated_database_url: str,
+) -> None:
+    relevant = _search_processed_document(
+        suffix="KEYWORD-A",
+        content="坐标系问题必须完成返工处理, 处理后重新提交复核。",
+    )
+    unrelated = _search_processed_document(
+        suffix="KEYWORD-B",
+        content="影像云量检查通过后可以进入交付准备。",
+    )
+    documents = (relevant, unrelated)
+    vector = (1.0, *([0.0] * (EMBEDDING_DIMENSION - 1)))
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            await KnowledgeIndexRepository(session).reindex_documents(
+                documents,
+                _search_generation(documents, (vector, vector), index_version="search-v1"),
+            )
+            await session.commit()
+
+        async with database.session() as session:
+            hits = await KnowledgeSearchRepository(session).search_keywords(
+                "坐标系问题 + !!!",
+                top_k=5,
+            )
+            index_names = set(
+                (
+                    await session.scalars(
+                        text(
+                            "SELECT indexname FROM pg_indexes "
+                            "WHERE tablename = 'knowledge_chunks'"
+                        )
+                    )
+                ).all()
+            )
+
+        assert [hit.chunk_id for hit in hits] == [relevant.chunks[0].chunk_id]
+        assert hits[0].document_id == relevant.metadata.document_id
+        assert hits[0].keyword_score > 0
+        assert "ix_knowledge_chunks_search_vector" in index_names
+        assert "ix_knowledge_chunks_embedding_cosine" in index_names
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_vector_search_filters_index_version_top_k_and_similarity_threshold(
+    migrated_database_url: str,
+) -> None:
+    exact = _search_processed_document(suffix="VECTOR-A", content="完全相关的坐标处理要求。")
+    partial = _search_processed_document(suffix="VECTOR-B", content="部分相关的复核处理要求。")
+    other_version = _search_processed_document(
+        suffix="VECTOR-C",
+        content="来自另一索引版本的处理要求。",
+    )
+    first_axis = (1.0, *([0.0] * (EMBEDDING_DIMENSION - 1)))
+    partial_vector = (0.8, 0.6, *([0.0] * (EMBEDDING_DIMENSION - 2)))
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            await KnowledgeIndexRepository(session).reindex_documents(
+                (exact, partial),
+                _search_generation(
+                    (exact, partial),
+                    (first_axis, partial_vector),
+                    index_version="vector-v1",
+                ),
+            )
+            await KnowledgeIndexRepository(session).reindex_documents(
+                (other_version,),
+                _search_generation(
+                    (other_version,),
+                    (first_axis,),
+                    index_version="vector-v2",
+                ),
+            )
+            await session.commit()
+
+        query_embedding = QueryEmbedding(
+            descriptor=EmbeddingIndexDescriptor(
+                provider="openai_compatible",
+                model="text-embedding-3-small",
+                dimension=EMBEDDING_DIMENSION,
+                index_version="vector-v1",
+            ),
+            vector=first_axis,
+        )
+        async with database.session() as session:
+            repository = KnowledgeSearchRepository(session)
+            hits = await repository.search_vectors(
+                query_embedding,
+                top_k=5,
+                min_similarity=0.5,
+            )
+            top_hit = await repository.search_vectors(query_embedding, top_k=1)
+
+        assert [hit.chunk_id for hit in hits] == [
+            exact.chunks[0].chunk_id,
+            partial.chunks[0].chunk_id,
+        ]
+        assert hits[0].vector_score == pytest.approx(1.0)
+        assert hits[1].vector_score == pytest.approx(0.8)
+        assert [hit.chunk_id for hit in top_hit] == [exact.chunks[0].chunk_id]
+
+        invalid_query = QueryEmbedding(
+            descriptor=query_embedding.descriptor,
+            vector=(1.0, 0.0),
+        )
+        zero_query = QueryEmbedding(
+            descriptor=query_embedding.descriptor,
+            vector=tuple(0.0 for _ in range(EMBEDDING_DIMENSION)),
+        )
+        async with database.session() as session:
+            with pytest.raises(KnowledgeSearchValidationError):
+                await KnowledgeSearchRepository(session).search_vectors(invalid_query)
+            with pytest.raises(KnowledgeSearchValidationError):
+                await KnowledgeSearchRepository(session).search_vectors(zero_query)
     finally:
         await database.dispose()
 

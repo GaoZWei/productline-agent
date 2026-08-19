@@ -68,7 +68,8 @@ class EmbeddingConfig(BaseModel):
     provider: Literal["openai_compatible"]
     model: Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:/-]+$")]
     base_url: AnyHttpUrl
-    api_key: Annotated[SecretStr, Field(min_length=1)]  # SecretStr 用于包装API Key，使日志和对象打印结果不会直接暴露密钥
+    # SecretStr用于包装API Key, 使日志和对象打印结果不会直接暴露密钥。
+    api_key: Annotated[SecretStr, Field(min_length=1)]
     dimension: Literal[1536] = EMBEDDING_DIMENSION  # 表示当前系统只允许1536维向量
     batch_size: Annotated[int, Field(ge=1, le=128)] = 32
     max_retries: Annotated[int, Field(ge=0, le=3)] = 2
@@ -130,7 +131,7 @@ class EmbeddingIndexDescriptor:
             index_version=config.index_version,
         )
 
-# 隔离具体供应商的实现细节，只暴露必要的接口
+# 隔离具体供应商的实现细节, 只暴露必要的接口
 class EmbeddingProvider(Protocol):
     """批量Embedding生成器依赖的最小异步Provider协议。"""
 
@@ -177,7 +178,7 @@ class OpenAICompatibleEmbeddingProvider:
     ) -> None:
         self.descriptor = EmbeddingIndexDescriptor.from_config(config)
         self._config = config
-        # 创建共享HTTP客户端 客户端应该复用，而不是每个批次创建一次
+        # 创建共享HTTP客户端 客户端应该复用, 而不是每个批次创建一次
         self._client = httpx.AsyncClient(
             base_url=f"{str(config.base_url).rstrip('/')}/",
             headers={
@@ -267,7 +268,7 @@ class OpenAICompatibleEmbeddingProvider:
             retryable=retryable,
             status_code=status_code,
         )
-    # 根据index重新排序向量，确保与输入顺序一致
+    # 根据index重新排序向量, 确保与输入顺序一致
     def _ordered_vectors(
         self,
         payload: _EmbeddingResponse,
@@ -297,6 +298,15 @@ class EmbeddingGeneration:
     descriptor: EmbeddingIndexDescriptor
     generated_at: datetime
     embeddings: tuple[ChunkEmbedding, ...]
+
+# 不是单独保存一个向量，而是 查询向量和生成它的索引身份
+@dataclass(frozen=True, slots=True)
+class QueryEmbedding:
+    """与文档索引身份一致的一次查询向量。"""
+
+    descriptor: EmbeddingIndexDescriptor
+    vector: tuple[float, ...]
+
 
 # 批处理和有限重试机制
 class EmbeddingBatchGenerator:
@@ -329,7 +339,7 @@ class EmbeddingBatchGenerator:
             raise ValueError("embedding chunks contain duplicate chunk_id")
 
         embeddings: list[ChunkEmbedding] = []
-        # 分批处理，每个批次大小为_batch_size
+        # 分批处理, 每个批次大小为_batch_size
         for batch_number, start in enumerate(
             range(0, len(normalized_chunks), self._config.batch_size),
             start=1,
@@ -344,7 +354,7 @@ class EmbeddingBatchGenerator:
                 dimension=self._config.dimension,
                 expected_count=len(batch),
             )
-            # 返回结果不是单纯的向量列表，Chunk和向量绑定起来
+            # 返回结果不是单纯的向量列表, Chunk和向量绑定起来
             embeddings.extend(
                 ChunkEmbedding(chunk_id=chunk.chunk_id, vector=vector)
                 for chunk, vector in zip(batch, vectors, strict=True)
@@ -353,11 +363,27 @@ class EmbeddingBatchGenerator:
         generated_at = self._now()
         if generated_at.tzinfo is None or generated_at.utcoffset() is None:
             raise ValueError("embedding generation time must be timezone-aware")
-        # 先把全部结果收集到内存，确保全部向量生成完成后才返回结果
+        # 先把全部结果收集到内存, 确保全部向量生成完成后才返回结果
         return EmbeddingGeneration(
             descriptor=self._provider.descriptor,
             generated_at=generated_at,
             embeddings=tuple(embeddings),
+        )
+
+    async def generate_query(self, query: str) -> QueryEmbedding:
+        """复用同一Provider和重试策略生成单条检索Query向量。"""
+        # 1.清理和限制输入长度
+        normalized_query = query.strip()
+        if not normalized_query or len(normalized_query) > 8000:
+            raise ValueError("embedding query must contain 1 to 8000 characters")
+        # 2.复用文档Embedding策略生成查询向量
+        vectors = await self._embed_with_retry((normalized_query,), batch_number=1)
+        # 3. 校验结果
+        _validate_vectors(vectors, dimension=self._config.dimension, expected_count=1)
+        # 4. 返回完整索引身份
+        return QueryEmbedding(
+            descriptor=self._provider.descriptor,
+            vector=vectors[0],
         )
 
     async def _embed_with_retry(
@@ -406,5 +432,11 @@ def _validate_vectors(
     if len(vectors) != expected_count:
         raise ValueError("embedding vector count does not match inputs")
     for vector in vectors:
-        if len(vector) != dimension or any(not math.isfinite(value) for value in vector):
-            raise ValueError("embedding vector has invalid dimension or non-finite value")
+        if (
+            len(vector) != dimension
+            or any(not math.isfinite(value) for value in vector)
+            or not any(value != 0.0 for value in vector)
+        ):
+            raise ValueError(
+                "embedding vector has invalid dimension, non-finite value, or zero norm"
+            )

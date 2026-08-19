@@ -754,3 +754,45 @@
 - 批量请求固定1536维float向量，按响应索引恢复输入顺序，并拒绝数量、维度或有限性异常。
 - 仅对超时、网络、限流和服务端故障执行有界指数退避，认证、请求和响应结构错误立即失败。
 - 全部向量生成成功后，在调用方事务中替换目标文档全部Chunk并记录Provider、模型、版本和入库时间。
+
+---
+
+## 2026-08-18 — `[T431-T435] M4.5 关键词检索`
+
+### 核心解决的问题
+
+让未安装专用中文分词扩展的PostgreSQL仍可确定性检索中文章节和规范正文，并为后续混合检索提供独立、
+可排序的关键词分数。
+
+### 实现的核心代码
+
+- `agent-service/app/knowledge/search.py`：NFKC规范化、中文双字词元、检索文档和结果契约。
+- `agent-service/app/repositories/knowledge_search.py`：安全tsquery、GIN匹配和关键词排名。
+- `agent-service/migrations/versions/0005_keyword_search.py`：检索文本回填、生成tsvector和GIN索引。
+
+### 实现的核心功能
+
+- 入库时把章节标题、原文和去重中文双字词元写入可审查检索文档。
+- 查询输入在进入SQL前执行长度、词元数量和有效性门禁，并通过`plainto_tsquery`消除操作符注入语义。
+- 使用GIN匹配和归一化`ts_rank_cd`分数返回稳定Chunk结果。
+
+---
+
+## 2026-08-18 — `[T436-T441] M4.6 向量检索`
+
+### 核心解决的问题
+
+把自然语言查询转换成与文档相同向量空间的Query Embedding，并用一致的相似度方向、TopK和阈值控制语义
+召回，避免跨模型版本比较或直接暴露方向相反的距离。
+
+### 实现的核心代码
+
+- `agent-service/app/knowledge/embeddings.py`：单条Query Embedding和零向量校验。
+- `agent-service/app/repositories/knowledge_search.py`：索引身份过滤、余弦距离查询和相似度结果。
+- `agent-service/migrations/versions/0006_vector_search.py`：1536维向量余弦HNSW索引。
+
+### 实现的核心功能
+
+- Query复用文档Provider、模型、维度、索引版本和有限重试策略。
+- 只在索引身份完全一致且向量有效的文档中，按余弦距离升序执行HNSW近邻查询。
+- 对上层返回`1 - distance`相似度，并强制TopK为1～100、阈值为-1～1。
