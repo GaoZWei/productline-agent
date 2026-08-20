@@ -71,6 +71,7 @@ class KnowledgeSearchRepository:
             KeywordSearchHit(
                 chunk_id=chunk.chunk_id,
                 document_id=chunk.document_id,
+                chunk_index=chunk.chunk_index,
                 section_path=tuple(chunk.section_path),
                 content=chunk.content,
                 content_hash=chunk.content_hash,
@@ -125,6 +126,7 @@ class KnowledgeSearchRepository:
             VectorSearchHit(
                 chunk_id=chunk.chunk_id,
                 document_id=chunk.document_id,
+                chunk_index=chunk.chunk_index,
                 section_path=tuple(chunk.section_path),
                 content=chunk.content,
                 content_hash=chunk.content_hash,
@@ -140,13 +142,16 @@ class KnowledgeSearchRepository:
         """生成两种检索共同使用的当前版本、时间、权限和业务范围条件。"""
         # 1. 固定安全条件
         clauses: list[ColumnElement[bool]] = [
-            KnowledgeDocument.lifecycle == DocumentLifecycle.ACTIVE,  # 历史文档默认不能作为当前规范依据
-            KnowledgeDocument.effective_date <= filters.effective_at,  # 查询日期必须晚于或等于规范生效日期
+            # 历史文档默认不能作为当前规范依据
+            KnowledgeDocument.lifecycle == DocumentLifecycle.ACTIVE,
+            # 查询日期必须晚于或等于规范生效日期
+            KnowledgeDocument.effective_date <= filters.effective_at,
             or_(
                 KnowledgeDocument.expiry_date.is_(None),
                 KnowledgeDocument.expiry_date >= filters.effective_at,  # 规范不能在查询日期之前失效
             ),
-            KnowledgeDocument.permission_scope == filters.permission_scope,  # 只允许读取当前权限范围的规范
+            # 只允许读取当前权限范围的规范
+            KnowledgeDocument.permission_scope == filters.permission_scope,
         ]
         # 2. 可选业务条件
         optional_filters = (

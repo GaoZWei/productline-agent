@@ -30,8 +30,9 @@ class KeywordQuery:
 class KeywordSearchHit:
     """一个带PostgreSQL全文相关度的知识分块。"""
 
-    chunk_id: str
+    chunk_id: str  # chunk_id 不能表示顺序, 用于唯一标识一个Chunk
     document_id: str
+    chunk_index: int  # chunk_index：当前文档内顺序
     section_path: tuple[str, ...]
     content: str
     content_hash: str
@@ -44,10 +45,12 @@ class VectorSearchHit:
 
     chunk_id: str
     document_id: str
+    chunk_index: int
     section_path: tuple[str, ...]
     content: str
     content_hash: str
     vector_score: float
+
 
 # 中文预处理
 def preprocess_keyword_query(query: str) -> KeywordQuery:
@@ -70,13 +73,14 @@ def preprocess_keyword_query(query: str) -> KeywordQuery:
             terms.extend(token[index : index + 2] for index in range(len(token) - 1))
         else:
             terms.append(token.lower())
-        
+
     # 去重且保持顺序
     unique_terms = tuple(dict.fromkeys(terms))
     # 单独限制词元数为64个
     if not unique_terms or len(unique_terms) > _MAX_QUERY_TERMS:
         raise KeywordQueryError("keyword query produced no usable terms or too many terms")
     return KeywordQuery(terms=unique_terms, search_text=" ".join(unique_terms))
+
 
 # 文本文档预处理, 不是用户查询(保留原始内容和辅助检索词元)
 def build_search_document(*, content: str, section_path: tuple[str, ...]) -> str:

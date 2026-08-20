@@ -26,6 +26,7 @@ from app.knowledge import (
     ProcessedDocument,
     QueryEmbedding,
     build_search_document,
+    fuse_hybrid_results,
 )
 from app.models import (
     AgentMessage,
@@ -683,6 +684,60 @@ async def test_vector_search_filters_index_version_top_k_and_similarity_threshol
                     zero_query,
                     filters=_search_filters(),
                 )
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_hybrid_search_fuses_real_keyword_and_vector_candidates(
+    migrated_database_url: str,
+) -> None:
+    shared = _search_processed_document(
+        suffix="HYBRID-A",
+        content="混合检索坐标规则要求问题处理完成后重新复核。",
+    )
+    vector_only = _search_processed_document(
+        suffix="HYBRID-B",
+        content="交付归档需要保存审核记录。",
+    )
+    first_axis = (1.0, *([0.0] * (EMBEDDING_DIMENSION - 1)))
+    second_axis = (0.0, 1.0, *([0.0] * (EMBEDDING_DIMENSION - 2)))
+    documents = (shared, vector_only)
+    generation = _search_generation(
+        documents,
+        (first_axis, second_axis),
+        index_version="hybrid-v1",
+    )
+    query_embedding = QueryEmbedding(descriptor=generation.descriptor, vector=first_axis)
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            await KnowledgeIndexRepository(session).reindex_documents(documents, generation)
+            await session.commit()
+
+        async with database.session() as session:
+            repository = KnowledgeSearchRepository(session)
+            keyword_hits = await repository.search_keywords(
+                "混合检索坐标规则",
+                filters=_search_filters(),
+                top_k=10,
+            )
+            vector_hits = await repository.search_vectors(
+                query_embedding,
+                filters=_search_filters(),
+                top_k=10,
+            )
+        results = fuse_hybrid_results(keyword_hits, vector_hits, top_k=2)
+
+        assert [result.document_id for result in results] == [
+            shared.metadata.document_id,
+            vector_only.metadata.document_id,
+        ]
+        assert results[0].chunk_ids == (shared.chunks[0].chunk_id,)
+        assert results[0].keyword_rank == 1
+        assert results[0].vector_rank == 1
+        assert results[0].rrf_score == pytest.approx(2 / 61)
     finally:
         await database.dispose()
 

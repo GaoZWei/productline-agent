@@ -13,6 +13,11 @@ from app.knowledge.embeddings import (
     OpenAICompatibleEmbeddingProvider,
     QueryEmbedding,
 )
+from app.knowledge.hybrid import (
+    HybridSearchValidationError,
+    RetrievalResult,
+    fuse_hybrid_results,
+)
 from app.knowledge.loaders import (
     DocumentFormat,
     DocumentLoader,
@@ -29,6 +34,19 @@ from app.knowledge.pipeline import (
     DuplicateDocumentDetector,
     DuplicateDocumentError,
     ProcessedDocument,
+)
+from app.knowledge.reranking import (
+    RerankCandidate,
+    RerankDegradationReason,
+    RerankedResult,
+    Reranker,
+    RerankExecutionError,
+    RerankOutcome,
+    RerankRequest,
+    RerankResponse,
+    RerankScore,
+    RerankValidationError,
+    rerank_retrieval_results,
 )
 from app.knowledge.search import (
     KeywordQuery,
@@ -59,6 +77,7 @@ __all__ = [
     "EmbeddingProvider",
     "EmbeddingProviderError",
     "HeadingDocumentChunker",
+    "HybridSearchValidationError",
     "KeywordQuery",
     "KeywordQueryError",
     "KeywordSearchHit",
@@ -69,9 +88,22 @@ __all__ = [
     "PlainTextDocumentLoader",
     "ProcessedDocument",
     "QueryEmbedding",
+    "RerankCandidate",
+    "RerankDegradationReason",
+    "RerankExecutionError",
+    "RerankOutcome",
+    "RerankRequest",
+    "RerankResponse",
+    "RerankScore",
+    "RerankValidationError",
+    "RerankedResult",
+    "Reranker",
+    "RetrievalResult",
     "UnsupportedDocumentFormatError",
     "VectorSearchHit",
     "build_search_document",
+    "fuse_hybrid_results",
     "normalize_document_content",
     "preprocess_keyword_query",
+    "rerank_retrieval_results",
 ]

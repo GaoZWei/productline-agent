@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-knowledge-hybrid test-knowledge-rerank test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -101,6 +101,13 @@ test-knowledge-vector: ## 验证 M4.6 Query Embedding、HNSW余弦检索、TopK�
 test-knowledge-filters: ## 验证 M4.7 检索元数据、有效期、权限和误召回门禁
 	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_search.py tests/knowledge/test_knowledge_models.py
 	./scripts/test-agent-persistence.sh -k search_filters
+
+test-knowledge-hybrid: ## 验证 M4.8 RRF融合、去重、片段合并和混合TopK
+	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_hybrid_search.py tests/knowledge/test_knowledge_search.py
+	./scripts/test-agent-persistence.sh -k hybrid_search
+
+test-knowledge-rerank: ## 验证 M4.9 模型重排、超时降级和低相关片段拦截
+	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_reranking.py tests/knowledge/test_hybrid_search.py
 
 test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证 M2.10 完整诊断链路
 	./scripts/test-agent-e2e.sh

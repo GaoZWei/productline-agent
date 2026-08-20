@@ -2,7 +2,7 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M4.7元数据过滤已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
+当前进度为 **M4.9 Rerank已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
 可追溯根因、字段证据和建议；Web订单页已经接入严格PageContext。诊断现在可以复用持久化Session继承
 当前订单或任务，并继续通过Java事实重校验。内部路由器已具备六类意图、上下文Prompt注入、严格结构化
 解析、一次Schema重试、`UNKNOWN`回退、来源化实体合并，以及固定置信度、缺参/冲突澄清和补参恢复；
@@ -11,8 +11,10 @@
 统一Loader现在可安全读取Markdown/纯文本、按标题和长度确定性分块、生成稳定ID并拦截重复正文；OpenAI兼容
 Provider可按批生成固定1536维向量、有限重试瞬时错误，并将Chunk与索引版本写入pgvector。当前支持中文双字
 预处理和GIN关键词排名，也支持同索引身份下的HNSW余弦检索、TopK和相似度阈值。两条检索路径在排名前
-共享产品、卫星、文档类型、规范版本、当前生效时间和权限过滤；混合检索、
-全目录入库入口、统一路由入口、动态Agent、Approval和SSE尚未实现。
+共享产品、卫星、文档类型、规范版本、当前生效时间和权限过滤；两路候选现在通过RRF融合、Chunk去重和
+同章节相邻片段合并形成稳定混合TopK；可注入Reranker现在会严格校验候选分数、按相关性稳定重排、拦截
+低相关片段，并在超时时显式回退原RRF顺序。具体模型供应商适配、引用组装、全目录入库入口、统一路由
+入口、动态Agent、Approval和SSE尚未实现。
 
 ## 环境要求
 
@@ -79,6 +81,8 @@ make test-knowledge-embedding # 验证 M4.4 Embedding生成、重试和pgvector�
 make test-knowledge-keyword # 验证 M4.5 中文关键词预处理、GIN检索和分数
 make test-knowledge-vector # 验证 M4.6 Query Embedding、余弦检索、TopK和阈值
 make test-knowledge-filters # 验证 M4.7 元数据、有效期、权限和误召回门禁
+make test-knowledge-hybrid # 验证 M4.8 RRF融合、去重、相邻片段和混合TopK
+make test-knowledge-rerank # 验证 M4.9 模型重排、超时降级和低相关片段拦截
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试
