@@ -7,9 +7,12 @@ from pydantic import ValidationError
 
 from app.errors import ToolErrorCode
 from app.schemas import (
+    AgentObservation,
+    AgentTerminationReason,
     BlockingStage,
     DiagnosisResult,
     Evidence,
+    InformationGap,
     OrderDiagnosisState,
     PageContext,
     ReadToolName,
@@ -230,6 +233,10 @@ def test_order_diagnosis_state_exposes_required_workflow_channels() -> None:
         "rule_decision": RuleDecision | None,
         "diagnosis": DiagnosisResult | None,
         "errors": list[StepError],
+        "tool_history": list[AgentObservation],
+        "information_gaps": list[InformationGap],
+        "iteration_count": int,
+        "termination_reason": AgentTerminationReason | None,
     }
     assert OrderDiagnosisState.__required_keys__ == frozenset(hints)
 

@@ -50,6 +50,7 @@
   - [x] M4.10 引用结构（T462～T468）
   - [x] M4.11 规范问答 Workflow（T469～T476）
   - [x] M4.12 RAG 评测（T477～T487）
-- [ ] M5 动态 Agent
+- [ ] M5 动态 Agent（进行中）
+  - [x] M5.1 Agent State 扩展（T501～T507）
 - [ ] M6 人工确认回写
 - [ ] M7 Run/Step、SSE 与评测

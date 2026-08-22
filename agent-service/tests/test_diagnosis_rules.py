@@ -101,6 +101,10 @@ def _state(
         "rule_decision": None,
         "diagnosis": None,
         "errors": [],
+        "tool_history": [],
+        "information_gaps": [],
+        "iteration_count": 0,
+        "termination_reason": None,
     }
 
 

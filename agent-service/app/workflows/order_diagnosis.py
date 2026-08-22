@@ -158,6 +158,10 @@ class OrderDiagnosisWorkflow:
             "rule_decision": None,
             "diagnosis": None,
             "errors": [],
+            "tool_history": [],
+            "information_gaps": [],
+            "iteration_count": 0,
+            "termination_reason": None,
         }
         # Run一致性: 避免Workflow状态说自己属于run-A, ToolContext却使用run-B的身份和调用账本
         try:

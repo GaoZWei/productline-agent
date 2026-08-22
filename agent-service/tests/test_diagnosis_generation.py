@@ -105,6 +105,10 @@ def _state(
         "rule_decision": RuleDecision(order_id=order_id, blocking_stage=stage),
         "diagnosis": None,
         "errors": [],
+        "tool_history": [],
+        "information_gaps": [],
+        "iteration_count": 0,
+        "termination_reason": None,
     }
 
 

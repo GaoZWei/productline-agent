@@ -44,10 +44,14 @@ from app.schemas.specification import (
     SpecificationQaStatus,
 )
 from app.schemas.workflow import (
+    AgentAction,
+    AgentObservation,
+    AgentTerminationReason,
     BlockingStage,
     DiagnosisNarrative,
     DiagnosisResult,
     Evidence,
+    InformationGap,
     OrderDiagnosisState,
     ReadToolName,
     RootCause,
@@ -57,6 +61,9 @@ from app.schemas.workflow import (
 )
 
 __all__ = [
+    "AgentAction",
+    "AgentObservation",
+    "AgentTerminationReason",
     "BlockingStage",
     "BusinessSkill",
     "Citation",
@@ -75,6 +82,7 @@ __all__ = [
     "EntitySelection",
     "EntitySource",
     "Evidence",
+    "InformationGap",
     "Intent",
     "OrderDiagnosisErrorResponse",
     "OrderDiagnosisRequest",

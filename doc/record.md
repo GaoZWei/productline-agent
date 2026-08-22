@@ -918,3 +918,23 @@
 - 用文档ID和完整章节路径同时命中定义相关片段，并计算Hit@5、MRR和无关片段占比。
 - 在相同过滤契约下执行纯向量、关键词、混合及混合加重排四种策略，Rerank降级时拒绝冒充重排质量。
 - 失败样本区分无结果、文档未命中和章节未命中，只输出稳定身份和章节，不记录问题或正文。
+
+---
+
+## 2026-08-22 — `[T501-T507] M5.1 Agent State 扩展`
+
+### 核心解决的问题
+
+让订单诊断状态能够稳定描述动态Agent的动作观察、剩余信息缺口、迭代进度和终止原因，避免后续循环只能
+依赖模型临时文本判断历史与停止条件。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/workflow.py`：`AgentAction`、`AgentObservation`、`InformationGap`、`AgentTerminationReason`和扩展后的`OrderDiagnosisState`。
+- `agent-service/tests/test_agent_state.py`：动作边界、观察一致性和完整状态JSON往返测试。
+
+### 实现的核心功能
+
+- 固化七种只读动作和显式`FINISH`动作，以及正常完成和四类安全预算终止原因。
+- Tool历史只保存动作、参数指纹、安全摘要、新信息标记和结构化错误，不复制原始业务载荷。
+- 固定Workflow为新增通道提供中性初始值，保持既有确定性诊断路径和黄金结果不变。
