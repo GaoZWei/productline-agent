@@ -276,7 +276,8 @@ class SpecificationSkill:
             page_context=page_context,
         )
 
-# 查询改写函数 （暂时没有模型改写，而是确定性规范化处理）
+
+# 查询改写函数 (暂时没有模型改写, 而是确定性规范化处理)
 def rewrite_specification_query(question: str) -> str:
     """保留原问题语义, 仅统一Unicode、首尾和连续空白。"""
 

@@ -88,11 +88,15 @@ class Citation(KnowledgeSchema):
         str,
         Field(min_length=1, max_length=64, pattern=r"^[0-9]+(?:\.[0-9]+)*$"),  # 规范版本号
     ]
-    section: Annotated[tuple[MetadataText, ...], Field(min_length=1, max_length=16)]  # 章节路径
-    chunk_id: CitationChunkIdentifier  #  简洁的主引用身份，方便模型和前端引用。
-    chunk_ids: Annotated[tuple[CitationChunkIdentifier, ...], Field(min_length=1)]  # 保存完整来源，避免合并后丢失第二个Chunk的内容
+    section: Annotated[
+        tuple[MetadataText, ...], Field(min_length=1, max_length=16)
+    ]  # 章节路径
+    chunk_id: CitationChunkIdentifier  # 简洁的主引用身份, 方便模型和前端引用.
+    chunk_ids: Annotated[
+        tuple[CitationChunkIdentifier, ...], Field(min_length=1)
+    ]  # 保存完整来源, 避免合并后丢失第二个Chunk的内容
     content: Annotated[str, Field(min_length=1, max_length=20000)]  # 引用原文内容
-    relevance_score: Annotated[float, Field(ge=0.0, le=1.0)] | None # 相关性
+    relevance_score: Annotated[float, Field(ge=0.0, le=1.0)] | None  # 相关性
 
     @model_validator(mode="after")
     def validate_primary_chunk(self) -> Self:

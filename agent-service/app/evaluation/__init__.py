@@ -1,5 +1,22 @@
 """可重复运行的Agent评测基础设施。"""
 
+from app.evaluation.rag import (
+    EXPECTED_RAG_CASE_COUNT,
+    KnowledgeRagEvaluationSubject,
+    RagEvaluationCase,
+    RagEvaluationDataError,
+    RagEvaluationExecutionError,
+    RagEvaluationFailure,
+    RagEvaluationPrediction,
+    RagEvaluationReport,
+    RagEvaluationStrategy,
+    RagEvaluationSubject,
+    RagFailureReason,
+    RagRetrievedFragment,
+    RagStrategyMetrics,
+    evaluate_rag,
+    load_rag_evaluation_cases,
+)
 from app.evaluation.router import (
     EXPECTED_CATEGORY_COUNTS,
     EvaluationFailureType,
@@ -15,13 +32,28 @@ from app.evaluation.router import (
 
 __all__ = [
     "EXPECTED_CATEGORY_COUNTS",
+    "EXPECTED_RAG_CASE_COUNT",
     "EvaluationFailureType",
+    "KnowledgeRagEvaluationSubject",
+    "RagEvaluationCase",
+    "RagEvaluationDataError",
+    "RagEvaluationExecutionError",
+    "RagEvaluationFailure",
+    "RagEvaluationPrediction",
+    "RagEvaluationReport",
+    "RagEvaluationStrategy",
+    "RagEvaluationSubject",
+    "RagFailureReason",
+    "RagRetrievedFragment",
+    "RagStrategyMetrics",
     "RouterEvaluationCase",
     "RouterEvaluationDataError",
     "RouterEvaluationFailure",
     "RouterEvaluationPrediction",
     "RouterEvaluationReport",
     "RouterEvaluationSubject",
+    "evaluate_rag",
     "evaluate_router",
+    "load_rag_evaluation_cases",
     "load_router_evaluation_cases",
 ]

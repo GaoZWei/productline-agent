@@ -53,7 +53,8 @@ class KnowledgeRetriever(Protocol):
     ) -> Awaitable[tuple[RetrievalResult, ...]]:
         """使用同一过滤条件执行双路召回与确定性融合。"""
 
-# 统一检索入口 （把关键词检索、向量检索和RRF融合封装成一个统一的“混合检索入口”）
+
+# 统一检索入口 (把关键词检索、向量检索和RRF融合封装成一个统一的“混合检索入口”)
 # 只负责把用户问题转换成一批稳定、经过元数据过滤的RetrievalResult候选
 class KnowledgeRetrievalPipeline:
     """串联Query Embedding、两路安全召回和M4.8 RRF融合。"""

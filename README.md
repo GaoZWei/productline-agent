@@ -2,7 +2,7 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M4.11规范问答 Workflow已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
+当前进度为 **M4 RAG里程碑已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
 可追溯根因、字段证据和建议；Web订单页已经接入严格PageContext。诊断现在可以复用持久化Session继承
 当前订单或任务，并继续通过Java事实重校验。内部路由器已具备六类意图、上下文Prompt注入、严格结构化
 解析、一次Schema重试、`UNKNOWN`回退、来源化实体合并，以及固定置信度、缺参/冲突澄清和补参恢复；
@@ -15,7 +15,8 @@ Provider可按批生成固定1536维向量、有限重试瞬时错误，并将Ch
 同章节相邻片段合并形成稳定混合TopK；可注入Reranker现在会严格校验候选分数、按相关性稳定重排、拦截
 低相关片段，并在超时时显式回退原RRF顺序。检索结果现已保留规范名称、版本、章节、全部Chunk身份和原文，
 Web具备可展开引用卡片；内部`SpecificationSkill`可从`SPEC_QA`决策执行固定RAG图，在无结果、重排超时或
-生成引用异常时返回安全回答。具体问答/Rerank模型供应商、统一路由HTTP入口、页面问答入口、全目录入库
+生成引用异常时返回安全回答。50条RAG问题已标注预期文档和章节，统一评测器可比较纯向量、关键词、混合、
+混合加重排策略的Hit@5、MRR和无关片段占比，并输出不含问题正文的失败样本。具体问答/Rerank模型供应商、统一路由HTTP入口、页面问答入口、全目录入库
 入口、动态Agent、Approval和SSE尚未实现。
 
 ## 环境要求
@@ -87,6 +88,7 @@ make test-knowledge-hybrid # 验证 M4.8 RRF融合、去重、相邻片段和混
 make test-knowledge-rerank # 验证 M4.9 模型重排、超时降级和低相关片段拦截
 make test-knowledge-citations # 验证 M4.10 引用结构、引用原文和前端卡片
 make test-specification-qa # 验证 M4.11 规范问答Workflow、路由Skill和安全回答
+make eval-rag          # 验证 M4.12 固定RAG评测集、四策略和失败样本
 make quality          # 运行 Ruff 和 mypy 严格检查
 make agent-migrate    # 执行 Agent 自有数据库迁移
 make test-business-domain # 单独运行 Java 领域模型测试

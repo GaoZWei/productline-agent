@@ -8,8 +8,8 @@ Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与�
 确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
 具体模型供应商适配或统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
 全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
-固定1536维pgvector入库和索引版本记录，M4.5～M4.11已实现中文关键词、同版本余弦检索、统一元数据门禁、
-RRF混合排序、可降级模型重排、引用结构和固定规范问答图，但尚无具体问答/Rerank供应商、统一路由HTTP
+固定1536维pgvector入库和索引版本记录，M4.5～M4.12已实现中文关键词、同版本余弦检索、统一元数据门禁、
+RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测，但尚无具体问答/Rerank供应商、统一路由HTTP
 入口或全目录执行入口。
 
 ## 本地开发
@@ -272,6 +272,12 @@ M4.11的`KnowledgeRetrievalPipeline`对关键词和向量通道复用同一`Know
 身份；无候选、Rerank超时或生成结构/引用异常时返回不带引用和规范结论的安全回答。`SpecificationSkill`
 只接受已通过确定性门禁的`SPEC_QA`决策。当前这些能力是内部组件，尚未接入统一HTTP和页面问答交互。
 
+M4.12在`evaluation/rag_cases.jsonl`固定保存50条问题及其预期文档、完整章节路径和安全过滤条件。
+`KnowledgeRagEvaluationSubject`把当前关键词、向量、RRF和Reranker实现接入同一策略边界，`evaluate_rag`
+按“文档ID与完整章节同时命中”计算Hit@5和MRR，并按全部Top5片段计算无关片段占比。无命中样本区分
+无结果、文档未命中和章节未命中，输出只包含稳定身份与章节，不保存问题或正文。仓库用可控Subject验证
+评测数学和四策略执行链，不把替身结果声明为真实Provider质量；`make eval-rag`可重复运行完整验收。
+
 ## 固定 Workflow 节点
 
 `OrderDiagnosisWorkflow`使用LangGraph `StateGraph`固定串联：
@@ -356,6 +362,7 @@ make test-knowledge-keyword
 make test-knowledge-vector
 make test-knowledge-citations
 make test-specification-qa
+make eval-rag
 make test-agent-e2e
 ```
 

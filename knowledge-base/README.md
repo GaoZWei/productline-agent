@@ -31,3 +31,7 @@ knowledge-base/
 
 `ACTIVE`文档的`expiry_date`和`replaced_by`必须为`null`；`HISTORICAL`文档必须具有失效日期，并指向
 同类型的当前有效替代版本。默认检索只能使用`ACTIVE`文档，历史版本必须由调用方明确请求。
+
+M4.12评测标注位于`agent-service/evaluation/rag_cases.jsonl`，每条问题指向本目录中的稳定文档ID和完整章节
+路径，并携带统一日期、权限、产品和卫星过滤条件。标注只定义评测期望，不覆盖`catalog.json`元数据，也不
+代表已测得真实Embedding或Reranker质量。

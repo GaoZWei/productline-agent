@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from app.knowledge.reranking import RerankedResult
 from app.schemas.knowledge import Citation
 
+
 # 转换函数  把重排结果转换为规范引用
 def build_citations(results: Sequence[RerankedResult]) -> tuple[Citation, ...]:
     """保留规范、章节、正文和全部Chunk身份, 不用RRF冒充模型相关性。"""
