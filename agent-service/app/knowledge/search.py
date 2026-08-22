@@ -32,7 +32,9 @@ class KeywordSearchHit:
 
     chunk_id: str  # chunk_id 不能表示顺序, 用于唯一标识一个Chunk
     document_id: str
-    chunk_index: int  # chunk_index：当前文档内顺序
+    document_name: str
+    document_version: str
+    chunk_index: int  # chunk_index: 当前文档内顺序
     section_path: tuple[str, ...]
     content: str
     content_hash: str
@@ -45,6 +47,8 @@ class VectorSearchHit:
 
     chunk_id: str
     document_id: str
+    document_name: str
+    document_version: str
     chunk_index: int
     section_path: tuple[str, ...]
     content: str

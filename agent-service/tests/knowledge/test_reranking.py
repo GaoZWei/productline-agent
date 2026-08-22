@@ -26,6 +26,8 @@ def _retrieval_result(
     return RetrievalResult(
         chunk_ids=(chunk_id,),
         document_id=document_id,
+        document_name=f"{document_id}测试规范",
+        document_version="1.0",
         chunk_indexes=(0,),
         section_path=("质量规范", "复核要求"),
         content=content,

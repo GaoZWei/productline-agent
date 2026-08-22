@@ -114,7 +114,7 @@ async def rerank_retrieval_results(
     retrieval_candidates = tuple(candidates)
     # 构造模型请求
     request = _build_request(query, retrieval_candidates)
-    # 空候选短路 没有候选时不调用模型，避免无意义的网络请求和费用
+    # 空候选短路, 没有候选时不调用模型, 避免无意义的网络请求和费用
     if not request.candidates:
         return RerankOutcome(results=())
 
@@ -146,7 +146,7 @@ async def rerank_retrieval_results(
                 "error_type": type(error).__name__,
             },
         )
-        # 其他模型异常时，直接抛出异常
+        # 其他模型异常时, 直接抛出异常
         raise RerankExecutionError("reranker execution failed") from error
 
     response = _parse_response(raw_response)
@@ -160,7 +160,7 @@ async def rerank_retrieval_results(
     )
     # 低相关片段拦截和稳定排序
     retained = (item for item in scored if item[2] >= min_score)
-    # 模型分数从高到低；
+    # 模型分数从高到低;
     # 分数相同时保持原始RRF顺序
     ordered = sorted(retained, key=lambda item: (-item[2], item[0]))
     return RerankOutcome(
@@ -203,7 +203,7 @@ def _parse_response(raw_response: object) -> RerankResponse:
             return RerankResponse.model_validate_json(raw_response)
         return RerankResponse.model_validate(raw_response)
     except ValidationError as error:
-        # 解析失败，抛出异常，让调用方处理
+        # 解析失败, 抛出异常, 让调用方处理
         raise RerankValidationError("reranker output schema validation failed") from error
 
 

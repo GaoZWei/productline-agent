@@ -47,6 +47,10 @@ DocumentIdentifier = Annotated[
     Field(min_length=5, max_length=128, pattern=r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$"),
 ]
 MetadataText = Annotated[str, Field(min_length=1, max_length=128)]
+CitationChunkIdentifier = Annotated[
+    str,
+    Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9._:-]+$"),
+]
 
 
 # 建立了所有知识库Schema的统一规则
@@ -73,6 +77,32 @@ class KnowledgeSearchFilter(KnowledgeSchema):
     ] | None = None  # 明确指定规范版本
     effective_at: date  # 以哪个日期判断规范是否生效
     permission_scope: PermissionScopeValue  # 当前用户允许读取什么范围的规范
+
+# 回答参考的规范以及章节内容
+class Citation(KnowledgeSchema):
+    """把回答依据定位到规范版本、章节和一个或多个原始Chunk。"""
+
+    document_id: DocumentIdentifier
+    document_name: Annotated[str, Field(min_length=1, max_length=256)]
+    document_version: Annotated[
+        str,
+        Field(min_length=1, max_length=64, pattern=r"^[0-9]+(?:\.[0-9]+)*$"),  # 规范版本号
+    ]
+    section: Annotated[tuple[MetadataText, ...], Field(min_length=1, max_length=16)]  # 章节路径
+    chunk_id: CitationChunkIdentifier  #  简洁的主引用身份，方便模型和前端引用。
+    chunk_ids: Annotated[tuple[CitationChunkIdentifier, ...], Field(min_length=1)]  # 保存完整来源，避免合并后丢失第二个Chunk的内容
+    content: Annotated[str, Field(min_length=1, max_length=20000)]  # 引用原文内容
+    relevance_score: Annotated[float, Field(ge=0.0, le=1.0)] | None # 相关性
+
+    @model_validator(mode="after")
+    def validate_primary_chunk(self) -> Self:
+        """主Chunk必须是完整身份列表首项, 避免卡片定位与正文来源分离。"""
+
+        if self.chunk_id != self.chunk_ids[0]:
+            raise ValueError("citation primary chunk must match first chunk identity")
+        if len(set(self.chunk_ids)) != len(self.chunk_ids):
+            raise ValueError("citation chunk identities must be unique")
+        return self
 
 
 # 文档元数据Schema(完整规范文档)

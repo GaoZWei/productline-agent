@@ -53,7 +53,12 @@ class KnowledgeSearchRepository:
         )
         # 第五步: 产品、版本、权限、生效日期等信息保存在 knowledge_documents 表中
         statement = (
-            select(KnowledgeChunk, score)
+            select(
+                KnowledgeChunk,
+                KnowledgeDocument.title,
+                KnowledgeDocument.specification_version,
+                score,
+            )
             .join(
                 KnowledgeDocument,
                 KnowledgeDocument.document_id == KnowledgeChunk.document_id,
@@ -71,13 +76,15 @@ class KnowledgeSearchRepository:
             KeywordSearchHit(
                 chunk_id=chunk.chunk_id,
                 document_id=chunk.document_id,
+                document_name=str(document_name),
+                document_version=str(document_version),
                 chunk_index=chunk.chunk_index,
                 section_path=tuple(chunk.section_path),
                 content=chunk.content,
                 content_hash=chunk.content_hash,
                 keyword_score=float(keyword_score),
             )
-            for chunk, keyword_score in rows
+            for chunk, document_name, document_version, keyword_score in rows
         )
 
     # 向量检索
@@ -103,7 +110,12 @@ class KnowledgeSearchRepository:
         score = (1.0 - distance).label("vector_score")
         descriptor = query_embedding.descriptor
         statement = (
-            select(KnowledgeChunk, score)
+            select(
+                KnowledgeChunk,
+                KnowledgeDocument.title,
+                KnowledgeDocument.specification_version,
+                score,
+            )
             .join(
                 KnowledgeDocument,
                 KnowledgeDocument.document_id == KnowledgeChunk.document_id,
@@ -126,13 +138,15 @@ class KnowledgeSearchRepository:
             VectorSearchHit(
                 chunk_id=chunk.chunk_id,
                 document_id=chunk.document_id,
+                document_name=str(document_name),
+                document_version=str(document_version),
                 chunk_index=chunk.chunk_index,
                 section_path=tuple(chunk.section_path),
                 content=chunk.content,
                 content_hash=chunk.content_hash,
                 vector_score=float(vector_score),
             )
-            for chunk, vector_score in rows
+            for chunk, document_name, document_version, vector_score in rows
         )
     # 核心元数据条件生成算法
     @staticmethod

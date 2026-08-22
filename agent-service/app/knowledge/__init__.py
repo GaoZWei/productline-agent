@@ -1,6 +1,7 @@
 """知识文档加载、确定性分块、重复检测和Embedding生成能力。"""
 
 from app.knowledge.chunking import DocumentChunk, HeadingDocumentChunker
+from app.knowledge.citations import build_citations
 from app.knowledge.embeddings import (
     ChunkEmbedding,
     EmbeddingBatchGenerator,
@@ -48,6 +49,12 @@ from app.knowledge.reranking import (
     RerankValidationError,
     rerank_retrieval_results,
 )
+from app.knowledge.retrieval import (
+    KnowledgeRetrievalPipeline,
+    KnowledgeRetriever,
+    KnowledgeSearchChannels,
+    QueryEmbeddingGenerator,
+)
 from app.knowledge.search import (
     KeywordQuery,
     KeywordQueryError,
@@ -81,6 +88,9 @@ __all__ = [
     "KeywordQuery",
     "KeywordQueryError",
     "KeywordSearchHit",
+    "KnowledgeRetrievalPipeline",
+    "KnowledgeRetriever",
+    "KnowledgeSearchChannels",
     "KnowledgeSearchFilter",
     "LoadedDocument",
     "MarkdownDocumentLoader",
@@ -88,6 +98,7 @@ __all__ = [
     "PlainTextDocumentLoader",
     "ProcessedDocument",
     "QueryEmbedding",
+    "QueryEmbeddingGenerator",
     "RerankCandidate",
     "RerankDegradationReason",
     "RerankExecutionError",
@@ -101,6 +112,7 @@ __all__ = [
     "RetrievalResult",
     "UnsupportedDocumentFormatError",
     "VectorSearchHit",
+    "build_citations",
     "build_search_document",
     "fuse_hybrid_results",
     "normalize_document_content",

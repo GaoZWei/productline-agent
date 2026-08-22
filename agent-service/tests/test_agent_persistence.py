@@ -593,6 +593,8 @@ async def test_keyword_search_matches_chinese_bigrams_and_returns_rank(
 
         assert [hit.chunk_id for hit in hits] == [relevant.chunks[0].chunk_id]
         assert hits[0].document_id == relevant.metadata.document_id
+        assert hits[0].document_name == relevant.metadata.title
+        assert hits[0].document_version == relevant.metadata.specification_version
         assert hits[0].keyword_score > 0
         assert "ix_knowledge_chunks_search_vector" in index_names
         assert "ix_knowledge_chunks_embedding_cosine" in index_names
@@ -663,6 +665,8 @@ async def test_vector_search_filters_index_version_top_k_and_similarity_threshol
         ]
         assert hits[0].vector_score == pytest.approx(1.0)
         assert hits[1].vector_score == pytest.approx(0.8)
+        assert hits[0].document_name == exact.metadata.title
+        assert hits[0].document_version == exact.metadata.specification_version
         assert [hit.chunk_id for hit in top_hit] == [exact.chunks[0].chunk_id]
 
         invalid_query = QueryEmbedding(
@@ -735,6 +739,8 @@ async def test_hybrid_search_fuses_real_keyword_and_vector_candidates(
             vector_only.metadata.document_id,
         ]
         assert results[0].chunk_ids == (shared.chunks[0].chunk_id,)
+        assert results[0].document_name == shared.metadata.title
+        assert results[0].document_version == shared.metadata.specification_version
         assert results[0].keyword_rank == 1
         assert results[0].vector_rank == 1
         assert results[0].rrf_score == pytest.approx(2 / 61)

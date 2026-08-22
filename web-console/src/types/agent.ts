@@ -72,3 +72,14 @@ export interface OrderDiagnosisErrorResponse {
   retryable: boolean;
   error_step: string | null;
 }
+
+export interface KnowledgeCitation {
+  document_id: string;
+  document_name: string;
+  document_version: string;
+  section: string[];
+  chunk_id: string;
+  chunk_ids: string[];
+  content: string;
+  relevance_score: number | null;
+}

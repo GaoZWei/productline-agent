@@ -8,8 +8,9 @@ Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与�
 确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
 具体模型供应商适配或统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
 全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
-固定1536维pgvector入库和索引版本记录，M4.5～M4.9已实现中文关键词、同版本余弦检索、统一元数据门禁、
-RRF混合排序和可降级模型重排，但尚无具体Rerank供应商、全目录执行入口或引用生成。
+固定1536维pgvector入库和索引版本记录，M4.5～M4.11已实现中文关键词、同版本余弦检索、统一元数据门禁、
+RRF混合排序、可降级模型重排、引用结构和固定规范问答图，但尚无具体问答/Rerank供应商、统一路由HTTP
+入口或全目录执行入口。
 
 ## 本地开发
 
@@ -261,6 +262,16 @@ M4.9用供应商无关`Reranker`接口接收查询和M4.8候选，模型输出�
 原顺序结果，并因分数未知而跳过低相关过滤；非超时调用失败和结构错误分别以安全异常关闭失败。
 `make test-knowledge-rerank`验证重排前后顺序、阈值边界、超时降级、模型异常和不可信响应。
 
+M4.10让关键词和向量Repository在既有SQL连接中同时返回规范标题与版本，融合和重排阶段继续保留这些字段。
+`build_citations`把每个重排结果转换为文档、版本、章节、主Chunk、全部合并Chunk、正文和可空相关性分数；
+重排超时时不会拿RRF分数冒充相关性。Web的`KnowledgeCitationCard`展示引用身份，并允许用户展开或收起原文。
+
+M4.11的`KnowledgeRetrievalPipeline`对关键词和向量通道复用同一`KnowledgeSearchFilter`，随后执行RRF融合；
+`SpecificationQaWorkflow`固定串联Query Rewrite、Metadata Builder、Retrieval、Rerank、相关性检查和带引用生成。
+页面产品/卫星字段只用于收窄候选，权限范围和生效日期必须由调用方显式提供。回答模型只能返回既有主Chunk
+身份；无候选、Rerank超时或生成结构/引用异常时返回不带引用和规范结论的安全回答。`SpecificationSkill`
+只接受已通过确定性门禁的`SPEC_QA`决策。当前这些能力是内部组件，尚未接入统一HTTP和页面问答交互。
+
 ## 固定 Workflow 节点
 
 `OrderDiagnosisWorkflow`使用LangGraph `StateGraph`固定串联：
@@ -343,6 +354,8 @@ make test-knowledge-loading
 make test-knowledge-embedding
 make test-knowledge-keyword
 make test-knowledge-vector
+make test-knowledge-citations
+make test-specification-qa
 make test-agent-e2e
 ```
 

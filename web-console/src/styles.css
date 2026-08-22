@@ -702,6 +702,69 @@ input {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+.knowledge-citation-card {
+  padding: 14px;
+  color: #344054;
+  background: #f8fafc;
+  border: 1px solid #d0d5dd;
+  border-left: 3px solid var(--blue);
+  border-radius: 8px;
+}
+
+.knowledge-citation-card header,
+.knowledge-citation-card header > div {
+  display: flex;
+  gap: 8px;
+}
+
+.knowledge-citation-card header {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.knowledge-citation-card header > div {
+  flex-direction: column;
+}
+
+.knowledge-citation-card header span,
+.citation-score,
+.citation-section,
+.knowledge-citation-card code {
+  color: #667085;
+  font-size: 11px;
+}
+
+.citation-score {
+  white-space: nowrap;
+}
+
+.citation-section {
+  margin: 10px 0 6px;
+}
+
+.citation-content {
+  margin: 12px 0 0;
+  padding: 12px;
+  color: #475467;
+  background: #ffffff;
+  border: 1px solid #eaecf0;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.citation-toggle {
+  margin-top: 12px;
+  padding: 0;
+  color: var(--blue-dark);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
 .diagnosis-list code {
   color: var(--blue-dark);
   font-size: 10px;

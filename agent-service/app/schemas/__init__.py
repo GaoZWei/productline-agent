@@ -8,6 +8,7 @@ from app.schemas.agent import (
 )
 from app.schemas.context import PageContext, PageType
 from app.schemas.knowledge import (
+    Citation,
     DocumentCatalog,
     DocumentLifecycle,
     DocumentMetadata,
@@ -37,6 +38,11 @@ from app.schemas.session import (
     SessionErrorResponse,
     SessionResponse,
 )
+from app.schemas.specification import (
+    SpecificationAnswerDraft,
+    SpecificationQaResult,
+    SpecificationQaStatus,
+)
 from app.schemas.workflow import (
     BlockingStage,
     DiagnosisNarrative,
@@ -53,6 +59,7 @@ from app.schemas.workflow import (
 __all__ = [
     "BlockingStage",
     "BusinessSkill",
+    "Citation",
     "ClarificationReason",
     "ClarificationRequest",
     "ConfidenceLevel",
@@ -91,6 +98,9 @@ __all__ = [
     "SessionErrorResponse",
     "SessionResponse",
     "SourcedEntity",
+    "SpecificationAnswerDraft",
+    "SpecificationQaResult",
+    "SpecificationQaStatus",
     "StepError",
     "Suggestion",
 ]

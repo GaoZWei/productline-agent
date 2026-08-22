@@ -856,3 +856,45 @@
 - 将查询与最小候选载荷交给可注入Reranker，并要求0～1分数唯一且完整覆盖全部候选。
 - 按模型分数稳定重排且保留原始RetrievalResult，低于阈值的片段不会进入正常结果。
 - 超时显式回退原RRF顺序且跳过未知分数过滤；其他调用失败和不可信响应关闭失败。
+
+---
+
+## 2026-08-20 — `[T462-T468] M4.10 引用结构`
+
+### 核心解决的问题
+
+让规范回答依据能够定位到具体文档版本、章节和全部原始Chunk，并让用户按需查看引用原文，避免合并片段后
+丢失来源或把不同量纲的RRF分数伪装成模型相关性。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/knowledge.py`、`app/knowledge/citations.py`：严格Citation及重排结果转换。
+- `agent-service/app/repositories/knowledge_search.py`：检索时透传规范标题和版本。
+- `web-console/src/components/KnowledgeCitationCard.vue`：引用身份、分数和原文展开卡片。
+
+### 实现的核心功能
+
+- 引用保存文档ID、名称、版本、章节、主Chunk、全部合并Chunk、正文和可空重排分数。
+- 主Chunk必须匹配完整Chunk列表首项，重复身份、非法分数和不完整结构被拒绝。
+- 前端默认隐藏长原文，可查看和收起；未获得重排分数时显示未评分。
+
+---
+
+## 2026-08-20 — `[T469-T476] M4.11 规范问答 Workflow`
+
+### 核心解决的问题
+
+把分离的检索、重排和引用组件组成可路由的确定性规范问答链，并阻止无结果、重排不可用或模型引用异常时
+生成缺少规范依据的结论。
+
+### 实现的核心代码
+
+- `agent-service/app/knowledge/retrieval.py`：Query Embedding、双路召回和RRF统一入口。
+- `agent-service/app/workflows/specification_qa.py`：固定问答图、生成门禁、安全回答和SpecificationSkill。
+- `agent-service/app/schemas/specification.py`：回答草稿、终态和带引用结果契约。
+
+### 实现的核心功能
+
+- 确定性规范化查询，并将显式日期/权限与页面可选产品、卫星提示合并为统一过滤器。
+- 固定执行关键词、向量、RRF、Rerank和充足性检查，只在可信候选存在时调用回答模型。
+- 模型只能选择既有引用身份；无结果、重排超时及生成失败返回不同状态的无结论安全回答。

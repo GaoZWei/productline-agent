@@ -31,6 +31,8 @@ def _keyword_hit(
     return KeywordSearchHit(
         chunk_id=chunk_id,
         document_id=document_id,
+        document_name=f"{document_id}测试规范",
+        document_version="1.0",
         chunk_index=chunk_index,
         section_path=section_path,
         content=resolved_content,
@@ -52,6 +54,8 @@ def _vector_hit(
     return VectorSearchHit(
         chunk_id=chunk_id,
         document_id=document_id,
+        document_name=f"{document_id}测试规范",
+        document_version="1.0",
         chunk_index=chunk_index,
         section_path=section_path,
         content=resolved_content,

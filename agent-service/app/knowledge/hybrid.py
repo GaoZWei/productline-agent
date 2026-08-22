@@ -21,10 +21,12 @@ class RetrievalResult:
 
     chunk_ids: tuple[str, ...]  # 使用复数是因为一个结果可能由多个相邻Chunk合并而来
     document_id: str
+    document_name: str
+    document_version: str
     chunk_indexes: tuple[int, ...]  # 记录Chunk在原文档中的顺序
     section_path: tuple[str, ...]  
     content: str
-    content_hashes: tuple[str, ...]  # 和 chunk_ids 对应，保留每个原始Chunk的内容哈希
+    content_hashes: tuple[str, ...]  # 和 chunk_ids 对应, 保留每个原始Chunk的内容哈希
     keyword_score: float | None # 两种原始分数
     vector_score: float | None
     keyword_rank: int | None # 两种通道名次
@@ -38,6 +40,8 @@ class _Candidate:
 
     chunk_id: str
     document_id: str
+    document_name: str
+    document_version: str
     chunk_index: int
     section_path: tuple[str, ...]
     content: str
@@ -52,13 +56,13 @@ def fuse_hybrid_results(  # 两个输入列表必须已经按照各自通道的�
     keyword_hits: Sequence[KeywordSearchHit],  # 已经按关键词相关度排序的结果
     vector_hits: Sequence[VectorSearchHit],  # 已经按向量相关度排序的结果
     *,
-    top_k: int = 10,  # 最终返回数量，默认10个
+    top_k: int = 10,  # 最终返回数量, 默认10个
 ) -> tuple[RetrievalResult, ...]:  # 返回统一的 RetrievalResult 元组
     """按RRF融合两路排名, 去重Chunk并在混合TopK前合并相邻片段。"""
-    # 第一步：校验TopK是否有效
+    # 第一步: 校验TopK是否有效
     _validate_top_k(top_k)
     candidates: dict[str, _Candidate] = {}  # 候选保存在dict中
-    # 第二步：收集关键词候选
+    # 第二步: 收集关键词候选
     for rank, keyword_hit in enumerate(keyword_hits, start=1):
         _validate_keyword_hit(keyword_hit)
         candidate = _get_or_create_candidate(candidates, keyword_hit)
@@ -69,7 +73,7 @@ def fuse_hybrid_results(  # 两个输入列表必须已经按照各自通道的�
 
     for rank, vector_hit in enumerate(vector_hits, start=1):
         _validate_vector_hit(vector_hit)
-        # 第三步：合并向量候选
+        # 第三步: 合并向量候选
         candidate = _get_or_create_candidate(candidates, vector_hit)
         # 只保存第一次出现的排名
         if candidate.vector_rank is None:
@@ -80,7 +84,7 @@ def fuse_hybrid_results(  # 两个输入列表必须已经按照各自通道的�
     merged = _merge_adjacent_fragments(fused)
     return tuple(sorted(merged, key=_result_sort_key)[:top_k])
 
-# 同一个Chunk被两路召回时，会合并成一个RetrievalResult
+# 同一个Chunk被两路召回时, 会合并成一个RetrievalResult
 def _get_or_create_candidate(
     candidates: dict[str, _Candidate],
     hit: KeywordSearchHit | VectorSearchHit,
@@ -90,6 +94,8 @@ def _get_or_create_candidate(
         candidate = _Candidate(
             chunk_id=hit.chunk_id,
             document_id=hit.document_id,
+            document_name=hit.document_name,
+            document_version=hit.document_version,
             chunk_index=hit.chunk_index,
             section_path=hit.section_path,
             content=hit.content,
@@ -100,6 +106,8 @@ def _get_or_create_candidate(
 
     expected_payload = (
         candidate.document_id,
+        candidate.document_name,
+        candidate.document_version,
         candidate.chunk_index,
         candidate.section_path,
         candidate.content,
@@ -107,12 +115,14 @@ def _get_or_create_candidate(
     )
     actual_payload = (
         hit.document_id,
+        hit.document_name,
+        hit.document_version,
         hit.chunk_index,
         hit.section_path,
         hit.content,
         hit.content_hash,
     )
-    # 发现相同 chunk_id 时，不会直接相信它们是同一内容，还会比较其他参数是否一致
+    # 发现相同 chunk_id 时, 不会直接相信它们是同一内容, 还会比较其他参数是否一致
     if actual_payload != expected_payload:
         raise HybridSearchValidationError("conflicting chunk payload across search channels")
     return candidate
@@ -122,6 +132,8 @@ def _to_retrieval_result(candidate: _Candidate) -> RetrievalResult:
     return RetrievalResult(
         chunk_ids=(candidate.chunk_id,),
         document_id=candidate.document_id,
+        document_name=candidate.document_name,
+        document_version=candidate.document_version,
         chunk_indexes=(candidate.chunk_index,),
         section_path=candidate.section_path,
         content=candidate.content,
@@ -157,7 +169,7 @@ def _merge_adjacent_fragments(
             merged.append(_merge_result_group(adjacent))
     return tuple(merged)
 
-# 多个相邻Chunk合并成一个RetrievalResult时，不会只保留其中一段，而是按照原文顺序把正文拼接起来，同时保留每一段的身份信息
+# 多个相邻Chunk合并时不会覆盖正文, 而是按原文顺序拼接并保留每段身份。
 def _merge_result_group(group: Sequence[RetrievalResult]) -> RetrievalResult:
     first = group[0]
     # 每个通道只取组内最佳名次
@@ -166,6 +178,8 @@ def _merge_result_group(group: Sequence[RetrievalResult]) -> RetrievalResult:
     return RetrievalResult(
         chunk_ids=tuple(chunk_id for result in group for chunk_id in result.chunk_ids),
         document_id=first.document_id,
+        document_name=first.document_name,
+        document_version=first.document_version,
         chunk_indexes=tuple(index for result in group for index in result.chunk_indexes),
         section_path=first.section_path,
         content="\n\n".join(result.content for result in group),
@@ -207,7 +221,7 @@ def _result_sort_key(result: RetrievalResult) -> tuple[float, int, str, int, tup
     best_rank = min(ranks) if ranks else 0
     return (
         -result.rrf_score,  # RRF越大越靠前
-        best_rank,  # RRF相同时，单通道最佳名次更高的优先
+        best_rank,  # RRF相同时, 单通道最佳名次更高的优先
         result.document_id,  # 继续相同时按文档ID稳定排序
         result.chunk_indexes[0],  # 同文档按正文顺序排序
         result.chunk_ids,  # 同文档按ChunkID排序
