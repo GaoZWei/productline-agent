@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     embedding_max_backoff_seconds: float = Field(default=2.0, gt=0, le=30)
     embedding_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     embedding_index_version: str = "text-embedding-3-small-1536-v1"
+
+    @field_validator("embedding_dimension", mode="before")
+    @classmethod
+    def parse_embedding_dimension(cls, value: object) -> object:
+        """把Compose传入的固定维度字符串转换为Literal可校验的整数。"""
+
+        return 1536 if value == "1536" else value
+
     # 数据库 URL转换
     @property
     def async_database_url(self) -> str:

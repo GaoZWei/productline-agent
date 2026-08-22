@@ -1,8 +1,28 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from app.main import create_app
 from app.settings import Settings
+
+
+@pytest.mark.unit
+def test_settings_accepts_compose_embedding_dimension(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "1536")
+
+    settings = Settings()
+
+    assert settings.embedding_dimension == 1536
+
+
+@pytest.mark.unit
+def test_settings_rejects_unsupported_embedding_dimension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "1024")
+
+    with pytest.raises(ValidationError, match="Input should be 1536"):
+        Settings()
 
 
 @pytest.mark.integration
