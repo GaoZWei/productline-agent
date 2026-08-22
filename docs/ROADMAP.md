@@ -52,5 +52,6 @@
   - [x] M4.12 RAG 评测（T477～T487）
 - [ ] M5 动态 Agent（进行中）
   - [x] M5.1 Agent State 扩展（T501～T507）
+  - [x] M5.2 动作模型（T508～T514）
 - [ ] M6 人工确认回写
 - [ ] M7 Run/Step、SSE 与评测

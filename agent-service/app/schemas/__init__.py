@@ -1,6 +1,7 @@
 """Agent 服务负责管理的Pydantic与Workflow状态契约。"""
 
 from app.routing import BusinessSkill, Intent, RoutingParameter
+from app.schemas.action import ActionDecision, SpecificationRetrievalArguments
 from app.schemas.agent import (
     OrderDiagnosisErrorResponse,
     OrderDiagnosisRequest,
@@ -61,6 +62,7 @@ from app.schemas.workflow import (
 )
 
 __all__ = [
+    "ActionDecision",
     "AgentAction",
     "AgentObservation",
     "AgentTerminationReason",
@@ -109,6 +111,7 @@ __all__ = [
     "SpecificationAnswerDraft",
     "SpecificationQaResult",
     "SpecificationQaStatus",
+    "SpecificationRetrievalArguments",
     "StepError",
     "Suggestion",
 ]
