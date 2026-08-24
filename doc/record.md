@@ -935,7 +935,7 @@
 
 ### 实现的核心功能
 
-- 固化七种只读动作和显式`FINISH`动作，以及正常完成和四类安全预算终止原因。
+- 固化七种只读动作和显式`FINISH`动作，以及信息充分、不足、执行异常和四类安全预算终止原因。
 - Tool历史只保存动作、参数指纹、安全摘要、新信息标记和结构化错误，不复制原始业务载荷。
 - 固定Workflow为新增通道提供中性初始值，保持既有确定性诊断路径和黄金结果不变。
 
@@ -959,3 +959,24 @@
 - 六种Java查询、规范检索和结束动作分别绑定唯一执行器与严格参数，订单和任务ID还必须来自当前状态。
 - Prompt只注入已校验业务事实、安全历史、缺口和实际注册的LOW风险Tool描述，页面提示不作为业务事实进入。
 - 对象与纯JSON输出共享Schema校验，非法输出纠错一次，未知或不可用动作及模型异常安全结束且不泄露响应。
+
+---
+
+## 2026-08-22 — `[T515-T523] M5.3 LangGraph 动态图`
+
+### 核心解决的问题
+
+把模型的一次动作建议连接成可回环的动态诊断执行链，并确保动作校验、Tool执行、事实合并、完成判断和异常
+结束都有确定性节点负责，避免模型直接操纵业务事实或执行失败后继续生成可靠性不明的结论。
+
+### 实现的核心代码
+
+- `agent-service/app/workflows/dynamic_diagnosis.py`：`DynamicDiagnosisWorkflow`、`DynamicDiagnosisState`和八个图节点。
+- `agent-service/app/schemas/workflow.py`、`app/workflows/diagnosis_generation.py`：动态终止原因和无事实时的信息不足结果边界。
+- `agent-service/tests/test_dynamic_diagnosis_workflow.py`：黄金循环、主动安全结束和Tool异常路径。
+
+### 实现的核心功能
+
+- 编译决策、校验、执行、观察、完成判断和结束分支；每轮只执行一个经过二次校验的LOW风险动作。
+- Java Tool结果写入对应强类型事实通道，规范问答显式携带日期与权限并独立保存，不参与业务根因裁决。
+- `FINISH`以规则区分信息充分或不足；Tool失败保存安全Observation和StepError，并输出不伪造证据的信息不足结果。

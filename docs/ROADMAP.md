@@ -53,5 +53,6 @@
 - [ ] M5 动态 Agent（进行中）
   - [x] M5.1 Agent State 扩展（T501～T507）
   - [x] M5.2 动作模型（T508～T514）
+  - [x] M5.3 LangGraph 动态图（T515～T523）
 - [ ] M6 人工确认回写
 - [ ] M7 Run/Step、SSE 与评测

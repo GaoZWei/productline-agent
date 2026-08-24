@@ -30,6 +30,8 @@ def test_agent_action_and_termination_reason_are_stable_machine_contracts() -> N
     )
     assert tuple(AgentTerminationReason) == (
         AgentTerminationReason.SUFFICIENT_INFORMATION,
+        AgentTerminationReason.INSUFFICIENT_INFORMATION,
+        AgentTerminationReason.EXECUTION_ERROR,
         AgentTerminationReason.MAX_ITERATIONS,
         AgentTerminationReason.MAX_TOOL_CALLS,
         AgentTerminationReason.NO_NEW_INFORMATION,

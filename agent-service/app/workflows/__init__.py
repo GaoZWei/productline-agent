@@ -14,6 +14,11 @@ from app.workflows.diagnosis_generation import (
     generate_rule_diagnosis,
 )
 from app.workflows.diagnosis_rules import evaluate_diagnosis_rules
+from app.workflows.dynamic_diagnosis import (
+    DynamicDiagnosisState,
+    DynamicDiagnosisWorkflow,
+    SpecificationActionWorkflow,
+)
 from app.workflows.order_diagnosis import OrderDiagnosisWorkflow
 from app.workflows.recording import DatabaseWorkflowStepRecorder, WorkflowStepRecorder
 from app.workflows.specification_qa import (
@@ -32,9 +37,12 @@ __all__ = [
     "ActionDecisionModel",
     "DatabaseWorkflowStepRecorder",
     "DiagnosisNarrativeModel",
+    "DynamicDiagnosisState",
+    "DynamicDiagnosisWorkflow",
     "InvalidActionDecisionOutputError",
     "InvalidDiagnosisNarrativeError",
     "OrderDiagnosisWorkflow",
+    "SpecificationActionWorkflow",
     "SpecificationAnswerModel",
     "SpecificationAnswerRequest",
     "SpecificationQaValidationError",

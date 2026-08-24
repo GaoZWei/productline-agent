@@ -385,8 +385,19 @@ def _no_blocker_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
 
 def _insufficient_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
     order = state["order"]
-    if order is None:
-        raise ValueError("insufficient diagnosis requires at least one loaded Tool fact")
+    evidence = (
+        []
+        if order is None
+        else [
+            Evidence(
+                source_type="TOOL",
+                tool_name="get_order_detail",
+                field_path="status",
+                value=order.status,
+                description=f"仅能确认{order.order_id}订单状态为{order.status}",
+            )
+        ]
+    )
     return (
         "当前业务事实不完整。无法可靠判断订单阻塞环节。",
         [
@@ -395,15 +406,7 @@ def _insufficient_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
                 description="诊断所需业务事实缺失或归属不一致",
             )
         ],
-        [
-            Evidence(
-                source_type="TOOL",
-                tool_name="get_order_detail",
-                field_path="status",
-                value=order.status,
-                description=f"仅能确认{order.order_id}订单状态为{order.status}",
-            )
-        ],
+        evidence,
         [
             Suggestion(
                 action_type="RELOAD_BUSINESS_FACTS",

@@ -73,6 +73,8 @@ class AgentTerminationReason(StrEnum):
     """记录动态诊断循环正常完成或受安全预算终止的稳定原因。"""
 
     SUFFICIENT_INFORMATION = "SUFFICIENT_INFORMATION"  # 已经收集到足够事实，可以生成诊断结果。
+    INSUFFICIENT_INFORMATION = "INSUFFICIENT_INFORMATION"  # Agent主动结束, 但事实不足以形成可靠结论
+    EXECUTION_ERROR = "EXECUTION_ERROR"  # 执行链路异常, 已生成不冒充业务结论的安全结果
     MAX_ITERATIONS = "MAX_ITERATIONS"  # 已经执行了最大决策次数
     MAX_TOOL_CALLS = "MAX_TOOL_CALLS"  # 已经执行了最大Tool调用次数
     NO_NEW_INFORMATION = "NO_NEW_INFORMATION"  # 已经没有新的信息可以添加
@@ -208,7 +210,7 @@ class DiagnosisResult(WorkflowSchema):
     blocking_stage: BlockingStage  # 规则判断出的阻塞环节
     summary: WorkflowText  # 面向用户的阶段说明
     root_causes: list[RootCause]  # 结构化根因, 包含稳定 code 和说明
-    evidence: Annotated[list[Evidence], Field(min_length=1)]  # Tool字段级证据
+    evidence: list[Evidence]  # Tool字段级证据; 尚未获得任何事实的信息不足结果允许为空
     suggestions: Annotated[list[Suggestion], Field(min_length=1)]  # 建议动作类型和说明
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]  # 规则结果置信度, 0-1之间, 1表示完全信
 
@@ -220,6 +222,11 @@ class DiagnosisResult(WorkflowSchema):
             raise ValueError("NONE blocking stage must not contain root causes")
         if self.blocking_stage is not BlockingStage.NONE and not self.root_causes:
             raise ValueError("blocked diagnosis must contain at least one root cause")
+        if (
+            self.blocking_stage is not BlockingStage.INSUFFICIENT_INFORMATION
+            and not self.evidence
+        ):
+            raise ValueError("conclusive diagnosis must contain at least one evidence")
         return self
 
 # 订单诊断状态

@@ -10,8 +10,8 @@ Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与�
 全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
 固定1536维pgvector入库和索引版本记录，M4.5～M4.12已实现中文关键词、同版本余弦检索、统一元数据门禁、
 RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测，但尚无具体问答/Rerank供应商、统一路由HTTP
-入口或全目录执行入口。M5.1～M5.2已扩展动态诊断状态并实现结构化动作决策，但尚未实现动态图、具体动作模型
-供应商或循环执行限制。
+入口或全目录执行入口。M5.1～M5.3已扩展动态诊断状态、实现结构化动作决策和可回环LangGraph执行图，但尚无
+具体动作模型供应商或循环执行限制。
 
 ## 本地开发
 
@@ -160,7 +160,8 @@ Tool响应写入Step；开发调试API仍未接入持久化Run/Step。
 `DiagnosisResult`使用严格、不可变且禁止额外字段的Pydantic模型，包含订单ID、阻塞阶段、阶段说明、
 结构化`RootCause`、`Evidence`、`Suggestion`和0～1置信度。`Evidence`当前只接受七个已注册只读Tool、
 可定位字段路径和标量值，禁止把模型判断或整段业务响应冒充事实证据；`StepError`只保留稳定
-错误码、安全文案、retryable和可选Trace ID，不接收原始响应或异常堆栈。
+错误码、安全文案、retryable和可选Trace ID，不接收原始响应或异常堆栈。只有尚未获得任何Tool事实的
+`INSUFFICIENT_INFORMATION`结果允许证据为空，其他结论仍必须包含字段级证据。
 
 `blocking_stage`由`BlockingStage`限制为`PRODUCTION/PRODUCTION_BLOCKED/QUALITY_REVIEW/REVIEW/
 DELIVERY/NONE/INSUFFICIENT_INFORMATION`。`NONE`不得同时携带根因，其他阶段至少需要一个根因。
@@ -177,6 +178,12 @@ LOW风险Tool，`RETRIEVE_SPEC`使用最小问题参数，`FINISH`不得携带�
 强类型Java事实、安全Tool历史、信息缺口、迭代次数和当前实际可用的执行器描述，不使用页面提示冒充事实，
 也不暴露未映射的`get_task_detail`。模型对象或纯JSON输出必须通过Schema、当前Registry及状态内资源身份校验；首次非法
 输出只纠错一次，二次失败、未知/未注册Tool或模型异常统一回退为不声称业务结论的安全`FINISH`。
+
+M5.3用`DynamicDiagnosisWorkflow`把初始化、动作规划、二次校验、执行、Observation保存、完成判断和结果生成
+编译为可回环LangGraph。模型只能选择动作；执行层会再次验证注册表LOW风险属性、参数Schema及订单/任务归属，
+随后调用Java只读Tool或显式日期/权限约束的规范问答Workflow。业务Tool结果只合并到对应强类型事实通道，
+规范结果独立保存且不会冒充Java事实；`FINISH`由确定性规则区分信息充分和信息不足，Tool失败则保存结构化
+Observation并进入异常结束节点。M5.4的轮次、调用数、重复动作和无新增信息限制尚未加入。
 
 ## 会话上下文
 
