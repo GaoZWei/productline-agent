@@ -8,10 +8,11 @@ from typing import Any, Literal, Protocol, cast
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from app.errors import ToolErrorCode
 from app.schemas.action import (
+    ACTION_TOOL_NAMES,
     ActionDecision,
     SpecificationRetrievalArguments,
     action_argument_model,
@@ -36,6 +37,7 @@ from app.schemas.workflow import (
     BlockingStage,
     OrderDiagnosisState,
     StepError,
+    WorkflowSchema,
 )
 from app.tools import ToolContext, ToolRegistry, ToolRiskLevel
 from app.tools.deduplication import build_tool_call_fingerprint
@@ -45,7 +47,18 @@ from app.workflows.diagnosis_rules import evaluate_diagnosis_rules
 
 type StateUpdate = dict[str, object]
 type StartRoute = Literal["plan", "exceptional"]
+type PlanRoute = Literal["validate", "generate", "exceptional"]
+type ValidationRoute = Literal["execute", "generate", "exceptional"]
 type CompletionRoute = Literal["continue", "generate", "exceptional"]
+
+# 执行限制配置
+class AgentExecutionLimits(WorkflowSchema):
+    """限制一次动态诊断允许消耗的决策、Tool和无新增信息预算。"""
+
+    max_decision_rounds: int = Field(default=6, ge=1, le=100)  # 最多让模型做6次动作决策
+    max_tool_calls: int = Field(default=8, ge=1, le=100)  # 最多真正执行8次 Tool 调用
+    max_consecutive_no_new_information: int = Field(default=2, ge=1, le=100)  # 连续两次查询没有获得新信息就停止循环
+
 
 # 动态诊断状态定义
 class DynamicDiagnosisState(OrderDiagnosisState):
@@ -54,7 +67,7 @@ class DynamicDiagnosisState(OrderDiagnosisState):
     current_decision: ActionDecision | None  # 模型本轮选择的动作
     current_call_fingerprint: str | None  # Tool名称和参数生成的SHA-256调用身份
     pending_observation: AgentObservation | None  # 已执行但还没有正式写入历史的观察
-    specification_result: SpecificationQaResult | None  #  RAG规范检索结果，与Java业务事实隔离保存
+    specification_result: SpecificationQaResult | None  # RAG规范检索结果, 与Java业务事实隔离保存
 
 
 class SpecificationActionWorkflow(Protocol):
@@ -83,6 +96,7 @@ class DynamicDiagnosisWorkflow:
         specification_workflow: SpecificationActionWorkflow,
         effective_at: date,
         permission_scope: PermissionScope,
+        limits: AgentExecutionLimits | None = None,
     ) -> None:
         self._action_decider = action_decider
         self._tool_registry = tool_registry
@@ -90,6 +104,7 @@ class DynamicDiagnosisWorkflow:
         self._specification_workflow = specification_workflow
         self._effective_at = effective_at
         self._permission_scope = permission_scope
+        self._limits = limits or AgentExecutionLimits()
         self._invoked = False
         self.graph = self._build_graph()
 
@@ -118,6 +133,7 @@ class DynamicDiagnosisWorkflow:
             }
         )
         return cast(DynamicDiagnosisState, result)
+
     # 图结构定义
     def _build_graph(self) -> CompiledStateGraph[Any, Any, Any, Any]:
         """编译“决策—校验—执行—观察—判断”的可回环状态图。"""
@@ -139,13 +155,21 @@ class DynamicDiagnosisWorkflow:
         )
         builder.add_conditional_edges(
             "plan_next_action",
-            self._route_after_initialize,
-            {"plan": "validate_action", "exceptional": "exceptional_finish"},
+            self._route_after_plan,
+            {
+                "validate": "validate_action",
+                "generate": "generate_result",
+                "exceptional": "exceptional_finish",
+            },
         )
         builder.add_conditional_edges(
             "validate_action",
-            self._route_after_initialize,
-            {"plan": "execute_action", "exceptional": "exceptional_finish"},
+            self._route_after_validation,
+            {
+                "execute": "execute_action",
+                "generate": "generate_result",
+                "exceptional": "exceptional_finish",
+            },
         )
         builder.add_edge("execute_action", "save_observation")
         builder.add_edge("save_observation", "check_completion")
@@ -161,6 +185,7 @@ class DynamicDiagnosisWorkflow:
         builder.add_edge("generate_result", END)
         builder.add_edge("exceptional_finish", END)
         return builder.compile(name="dynamic-order-diagnosis")
+
     # 初始化与上下文校验
     async def initialize(self, state: DynamicDiagnosisState) -> StateUpdate:
         """校验运行身份与页面订单, 并初始化全部共享及瞬时状态。"""
@@ -188,13 +213,14 @@ class DynamicDiagnosisWorkflow:
             "specification_result": None,
         }
         try:
-            if state.get("run_id") != self._tool_context.run_id:  #  Workflow的run_id必须等于ToolContext.run_id
+            # Workflow的run_id必须等于ToolContext.run_id
+            if state.get("run_id") != self._tool_context.run_id:
                 raise ValueError("workflow run_id does not match ToolContext")
             # 校验order_id是否符合ORDER-xxx格式
             order_input = OrderIdInput.model_validate({"order_id": state.get("order_id")})
             context = PageContext.model_validate(state.get("page_context"))
             # 页面中的订单和用户角色必须与本次执行身份一致
-            if context.order_id != order_input.order_id: 
+            if context.order_id != order_input.order_id:
                 raise ValueError("page context order_id does not match request")
             if context.user_role != self._tool_context.identity.role:
                 raise ValueError("page context user_role does not match identity")
@@ -204,25 +230,31 @@ class DynamicDiagnosisWorkflow:
                 "errors": [self._step_error("initialize", ToolErrorCode.PARAM_VALIDATION_ERROR)],
             }
         return {**base, "order_id": order_input.order_id, "page_context": context}
-    # 模型只负责选择动作，不负责执行Tool或写入事实
+
+    # 模型只负责选择动作, 不负责执行Tool或写入事实（限制模型决策次数） 防止模型无限规划动作
     async def plan_next_action(self, state: DynamicDiagnosisState) -> StateUpdate:
         """只请求下一动作, 不允许决策模型直接执行 Tool 或写入事实。"""
-
+        # 检查是否超过最大决策轮数，发生在调用模型之前，避免无限决策
+        if state["iteration_count"] >= self._limits.max_decision_rounds:
+            return {"termination_reason": AgentTerminationReason.MAX_ITERATIONS}
         try:
             # 调用模型决策器获取动作决策
             decision = await self._action_decider.decide(state)
         except Exception:
             return {
+                "iteration_count": state["iteration_count"] + 1,
                 "errors": [
                     *state["errors"],
                     self._step_error("plan_next_action", ToolErrorCode.UNKNOWN_TOOL_ERROR),
-                ]
+                ],
             }
         return {
             "current_decision": decision,
             "current_call_fingerprint": None,
             "pending_observation": None,
+            "iteration_count": state["iteration_count"] + 1,
         }
+
     # 二次校验动作决策是否符合注册Tool和状态要求
     async def validate_action(self, state: DynamicDiagnosisState) -> StateUpdate:
         """再次校验动作参数、注册表风险和状态资源归属并生成调用指纹。"""
@@ -230,12 +262,24 @@ class DynamicDiagnosisWorkflow:
         decision = state["current_decision"]
         if decision is None:
             return self._validation_failure(state)
+        try:
+            # Workflow 根据动作查找 预期 Tool
+            expected_tool_name = ACTION_TOOL_NAMES[decision.action]
+        except (KeyError, TypeError):
+            return self._validation_failure(state)
+        # 校验动作和 Tool 是否匹配
+        if decision.tool_name != expected_tool_name:
+            return self._validation_failure(state)
+        # 校验 FINISH 是否携带 Tool 参数
         if decision.action is AgentAction.FINISH:
+            if decision.tool_arguments:
+                return self._validation_failure(state)
             return {"current_call_fingerprint": None}
         argument_model = action_argument_model(decision.action)
         if argument_model is None:
             return self._validation_failure(state)
         try:
+            # 校验动作参数是否符合注册Tool和状态要求
             arguments = argument_model.model_validate(decision.tool_arguments)
             if decision.action is AgentAction.RETRIEVE_SPEC:
                 fingerprint = build_tool_call_fingerprint("retrieve_spec", arguments)
@@ -245,15 +289,31 @@ class DynamicDiagnosisWorkflow:
                 tool = self._tool_registry.get(decision.tool_name)
                 if tool.risk_level is not ToolRiskLevel.LOW:  #  动作决策中的 Tool必须是LOW风险
                     raise ValueError("dynamic diagnosis only permits LOW risk tools")
-                validated = tool.input_model.model_validate(decision.tool_arguments) 
+                # 校验动作决策中的 Tool 是否有必要的权限   Tool 要求的权限必须全部包含在当前 ToolContext 中
+                if not tool.required_permissions.issubset(self._tool_context.permissions):
+                    return self._validation_failure(
+                        state,
+                        code=ToolErrorCode.PERMISSION_DENIED,
+                    )
+                validated = tool.input_model.model_validate(decision.tool_arguments)
+                # 校验动作决策中的 Tool 是否有必要的资源归属
                 self._validate_resource_identity(decision, state)
                 # 生成稳定调用指纹
                 fingerprint = build_tool_call_fingerprint(tool.name, validated)
         except (ValidationError, LookupError, ValueError):
             return self._validation_failure(state)
+        # 检查 Tool 调用次数是否超过最大限制
+        if len(state["tool_history"]) >= self._limits.max_tool_calls:
+            return {"termination_reason": AgentTerminationReason.MAX_TOOL_CALLS}
+        if any(
+            observation.call_fingerprint == fingerprint for observation in state["tool_history"]
+        ):  # 检查是否重复调用相同 Tool
+            return {"termination_reason": AgentTerminationReason.NO_NEW_INFORMATION}
         return {"current_call_fingerprint": fingerprint}
+
     # 真正执行Tool动作 只负责执行并描述这次发生了什么
-    async def execute_action(self, state: DynamicDiagnosisState) -> StateUpdate:  #  接收完整动态图状态
+    # 接收完整动态图状态
+    async def execute_action(self, state: DynamicDiagnosisState) -> StateUpdate:
         """执行一个已校验动作并把原始结果转换成事实更新和安全 Observation。"""
         # 读取当前动作
         decision = state["current_decision"]
@@ -267,12 +327,12 @@ class DynamicDiagnosisWorkflow:
         # 规范检索单独处理
         if decision.action is AgentAction.RETRIEVE_SPEC:
             return await self._execute_specification(state, decision, fingerprint)
-        
+
         if decision.tool_name is None:
             return self._validation_failure(state)
         # 获取并执行Java Tool
         tool = self._tool_registry.get(decision.tool_name)
-        result = await tool.execute(decision.tool_arguments, self._tool_context) #会经过通用门禁
+        result = await tool.execute(decision.tool_arguments, self._tool_context)  # 会经过通用门禁
         # Tool失败如何处理
         if not result.success:
             error = result.error
@@ -300,7 +360,7 @@ class DynamicDiagnosisWorkflow:
         # 成功但data为空如何处理
         if result.data is None:
             return self._execution_failure(state, decision.action, fingerprint)
-        try: 
+        try:
             # 把Tool结果合并进业务状态
             fact_update, summary, has_new = self._merge_business_fact(
                 state,
@@ -320,7 +380,8 @@ class DynamicDiagnosisWorkflow:
                 has_new_information=has_new,
             ),
         }
-    # 统一保存Observation 负责更新历史、轮次和错误通道
+
+    # 把本轮结果写入历史
     async def save_observation(self, state: DynamicDiagnosisState) -> StateUpdate:
         """把单轮观察按顺序追加到历史, 失败同时进入结构化错误通道。"""
 
@@ -331,12 +392,12 @@ class DynamicDiagnosisWorkflow:
         if observation.error is not None:
             errors = [*errors, observation.error]
         return {
-            "tool_history": [*state["tool_history"], observation],
-            "iteration_count": state["iteration_count"] + 1,
-            "errors": errors,
-            "pending_observation": None,
+            "tool_history": [*state["tool_history"], observation],  #  把观察结果追加到 tool_history
+            "errors": errors,  #  把错误追加到 errors
+            "pending_observation": None,  #  清空 临时 pending_observation
         }
-    # 谁决定是否结束流程
+
+    # 决定是否结束流程
     async def check_completion(self, state: DynamicDiagnosisState) -> StateUpdate:
         """在显式 FINISH 时以确定性规则区分事实充分与安全不足。"""
         # 存在错误则进入异常出口
@@ -345,15 +406,21 @@ class DynamicDiagnosisWorkflow:
         decision = state["current_decision"]
         # 当前动作不是FINISH 则继续执行
         if decision is None or decision.action is not AgentAction.FINISH:
+            if (
+                self._count_consecutive_no_new_information(state["tool_history"])
+                >= self._limits.max_consecutive_no_new_information
+            ):  # 检查是否连续调用相同 Tool 且无新信息
+                return {"termination_reason": AgentTerminationReason.NO_NEW_INFORMATION}
             return {}
-        # 当前动作是FINISH，不会直接相信模型，而是再次执行
+        # 当前动作是FINISH, 不会直接相信模型, 而是再次执行确定性规则
         rule_decision = evaluate_diagnosis_rules(state)
         reason = (
             AgentTerminationReason.INSUFFICIENT_INFORMATION
-            if rule_decision.blocking_stage is BlockingStage.INSUFFICIENT_INFORMATION 
-            else AgentTerminationReason.SUFFICIENT_INFORMATION #如果事实完整且规则能形成结论
+            if rule_decision.blocking_stage is BlockingStage.INSUFFICIENT_INFORMATION
+            else AgentTerminationReason.SUFFICIENT_INFORMATION  # 如果事实完整且规则能形成结论
         )
         return {"termination_reason": reason}
+
     # 正常结果
     async def generate_result(self, state: DynamicDiagnosisState) -> StateUpdate:
         """只用已保存的 Java Tool 事实运行规则并生成最终诊断。"""
@@ -364,6 +431,7 @@ class DynamicDiagnosisWorkflow:
             "rule_decision": decision,
             "diagnosis": generate_rule_diagnosis(diagnosis_state),
         }
+
     # 异常结果
     async def exceptional_finish(self, state: DynamicDiagnosisState) -> StateUpdate:
         """异常时生成信息不足结果, 不把执行失败误报为业务阻塞。"""
@@ -408,7 +476,8 @@ class DynamicDiagnosisWorkflow:
                 has_new_information=result != state["specification_result"],
             ),
         }
-    # 核心事实合并算法 根据动作类型，把Tool结果放入唯一对应的状态字段
+
+    # 核心事实合并算法 根据动作类型, 把Tool结果放入唯一对应的状态字段
     @staticmethod
     def _merge_business_fact(
         state: DynamicDiagnosisState,
@@ -453,7 +522,7 @@ class DynamicDiagnosisWorkflow:
                 data != state["delivery"],
             )
         raise ValueError("tool output does not match dynamic action")
-
+    # 校验资源身份
     @staticmethod
     def _validate_resource_identity(
         decision: ActionDecision,
@@ -471,11 +540,16 @@ class DynamicDiagnosisWorkflow:
         if decision.tool_arguments.get("task_id") not in task_ids:
             raise ValueError("action task id is not present in state")
 
-    def _validation_failure(self, state: DynamicDiagnosisState) -> StateUpdate:
+    def _validation_failure(
+        self,
+        state: DynamicDiagnosisState,
+        *,
+        code: ToolErrorCode = ToolErrorCode.PARAM_VALIDATION_ERROR,
+    ) -> StateUpdate:
         return {
             "errors": [
                 *state["errors"],
-                self._step_error("validate_action", ToolErrorCode.PARAM_VALIDATION_ERROR),
+                self._step_error("validate_action", code),
             ]
         }
 
@@ -510,7 +584,23 @@ class DynamicDiagnosisWorkflow:
     @staticmethod
     def _route_after_initialize(state: DynamicDiagnosisState) -> StartRoute:
         return "exceptional" if state["errors"] else "plan"
-
+    # 计划路由
+    @staticmethod
+    def _route_after_plan(state: DynamicDiagnosisState) -> PlanRoute:
+        if state["errors"]:
+            return "exceptional"
+        if state["termination_reason"] is not None:
+            return "generate"
+        return "validate"
+    # 校验路由
+    @staticmethod
+    def _route_after_validation(state: DynamicDiagnosisState) -> ValidationRoute:
+        if state["errors"]:
+            return "exceptional"
+        if state["termination_reason"] is not None:
+            return "generate"
+        return "execute"
+    # 执行路由
     @staticmethod
     def _route_after_completion(state: DynamicDiagnosisState) -> CompletionRoute:
         if state["errors"]:
@@ -518,3 +608,16 @@ class DynamicDiagnosisWorkflow:
         if state["termination_reason"] is not None:
             return "generate"
         return "continue"
+
+    @staticmethod
+    def _count_consecutive_no_new_information(
+        history: list[AgentObservation],
+    ) -> int:
+        """从最近一次Observation向前计算连续成功但没有新增信息的次数。"""
+
+        count = 0
+        for observation in reversed(history):
+            if not observation.success or observation.has_new_information:
+                break
+            count += 1
+        return count

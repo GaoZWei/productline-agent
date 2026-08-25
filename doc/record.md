@@ -980,3 +980,24 @@
 - 编译决策、校验、执行、观察、完成判断和结束分支；每轮只执行一个经过二次校验的LOW风险动作。
 - Java Tool结果写入对应强类型事实通道，规范问答显式携带日期与权限并独立保存，不参与业务根因裁决。
 - `FINISH`以规则区分信息充分或不足；Tool失败保存安全Observation和StepError，并输出不伪造证据的信息不足结果。
+
+---
+
+## 2026-08-24 — `[T524-T531] M5.4 Agent 执行限制`
+
+### 核心解决的问题
+
+阻止动态诊断在模型不结束、持续重复查询或选择非法执行器时无限消耗资源，并让每一种预算终止和执行拒绝都
+进入确定性、可审计的图分支。
+
+### 实现的核心代码
+
+- `agent-service/app/workflows/dynamic_diagnosis.py`：`AgentExecutionLimits`、三阶段限制检查和预算路由。
+- `agent-service/app/schemas/workflow.py`：`iteration_count`决策轮次语义。
+- `agent-service/tests/test_dynamic_diagnosis_workflow.py`：无限循环、Tool上限、重复、无新增信息和非法动作测试。
+
+### 实现的核心功能
+
+- 默认最多6轮决策、8次Tool调用和连续2次无新增信息，测试可通过严格配置独立验证各预算。
+- 调用指纹在BaseTool前拦截重复逻辑调用；决策轮与Tool调用分开计数，`FINISH`只占用决策轮。
+- 执行前复核动作唯一映射、LOW风险、Registry、参数、资源归属和权限，拦截写Tool、未知Tool及缺权调用。

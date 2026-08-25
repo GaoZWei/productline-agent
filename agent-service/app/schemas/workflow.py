@@ -247,5 +247,5 @@ class OrderDiagnosisState(TypedDict):
     errors: list[StepError]
     tool_history: list[AgentObservation]  # 按照执行顺序保存 Observation
     information_gaps: list[InformationGap]
-    iteration_count: Annotated[int, Field(ge=0)]  # 当前是第几轮迭代 （主要用于落实计划中的限制）
+    iteration_count: Annotated[int, Field(ge=0)]  # 已完成的决策轮数, FINISH也计入
     termination_reason: AgentTerminationReason | None  # 终止原因

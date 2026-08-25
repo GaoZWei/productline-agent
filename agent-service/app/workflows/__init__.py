@@ -15,6 +15,7 @@ from app.workflows.diagnosis_generation import (
 )
 from app.workflows.diagnosis_rules import evaluate_diagnosis_rules
 from app.workflows.dynamic_diagnosis import (
+    AgentExecutionLimits,
     DynamicDiagnosisState,
     DynamicDiagnosisWorkflow,
     SpecificationActionWorkflow,
@@ -35,6 +36,7 @@ from app.workflows.specification_qa import (
 __all__ = [
     "ActionDecider",
     "ActionDecisionModel",
+    "AgentExecutionLimits",
     "DatabaseWorkflowStepRecorder",
     "DiagnosisNarrativeModel",
     "DynamicDiagnosisState",
