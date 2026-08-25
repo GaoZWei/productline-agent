@@ -34,7 +34,6 @@ from app.schemas.workflow import (
     AgentAction,
     AgentObservation,
     AgentTerminationReason,
-    BlockingStage,
     OrderDiagnosisState,
     StepError,
     WorkflowSchema,
@@ -43,7 +42,11 @@ from app.tools import ToolContext, ToolRegistry, ToolRiskLevel
 from app.tools.deduplication import build_tool_call_fingerprint
 from app.workflows.action_decision import ActionDecider
 from app.workflows.diagnosis_generation import generate_rule_diagnosis
-from app.workflows.diagnosis_rules import evaluate_diagnosis_rules
+from app.workflows.diagnosis_rules import (
+    evaluate_diagnosis_rules,
+    evaluate_dynamic_diagnosis_rules,
+)
+from app.workflows.information_gaps import InformationGapDetector
 
 type StateUpdate = dict[str, object]
 type StartRoute = Literal["plan", "exceptional"]
@@ -51,13 +54,18 @@ type PlanRoute = Literal["validate", "generate", "exceptional"]
 type ValidationRoute = Literal["execute", "generate", "exceptional"]
 type CompletionRoute = Literal["continue", "generate", "exceptional"]
 
+
 # 执行限制配置
 class AgentExecutionLimits(WorkflowSchema):
     """限制一次动态诊断允许消耗的决策、Tool和无新增信息预算。"""
 
     max_decision_rounds: int = Field(default=6, ge=1, le=100)  # 最多让模型做6次动作决策
     max_tool_calls: int = Field(default=8, ge=1, le=100)  # 最多真正执行8次 Tool 调用
-    max_consecutive_no_new_information: int = Field(default=2, ge=1, le=100)  # 连续两次查询没有获得新信息就停止循环
+    max_consecutive_no_new_information: int = Field(
+        default=2,
+        ge=1,
+        le=100,
+    )  # 连续两次查询没有获得新信息就停止循环
 
 
 # 动态诊断状态定义
@@ -97,6 +105,7 @@ class DynamicDiagnosisWorkflow:
         effective_at: date,
         permission_scope: PermissionScope,
         limits: AgentExecutionLimits | None = None,
+        information_gap_detector: InformationGapDetector | None = None,  #  缺口怎样进入动态 Workflow
     ) -> None:
         self._action_decider = action_decider
         self._tool_registry = tool_registry
@@ -105,6 +114,7 @@ class DynamicDiagnosisWorkflow:
         self._effective_at = effective_at
         self._permission_scope = permission_scope
         self._limits = limits or AgentExecutionLimits()
+        self._information_gap_detector = information_gap_detector or InformationGapDetector()  #  默认创建真实探测器
         self._invoked = False
         self.graph = self._build_graph()
 
@@ -229,12 +239,19 @@ class DynamicDiagnosisWorkflow:
                 **base,
                 "errors": [self._step_error("initialize", ToolErrorCode.PARAM_VALIDATION_ERROR)],
             }
-        return {**base, "order_id": order_input.order_id, "page_context": context}
+        initialized = {
+            **base,
+            "order_id": order_input.order_id,
+            "page_context": context,
+        }
+        # 初始化缺口,缺口会进入第一轮动作决策Prompt
+        gaps = self._information_gap_detector.detect(cast(OrderDiagnosisState, initialized))
+        return {**initialized, "information_gaps": gaps}
 
-    # 模型只负责选择动作, 不负责执行Tool或写入事实（限制模型决策次数） 防止模型无限规划动作
+    # 模型只负责选择动作, 不负责执行Tool或写入事实, 并限制决策次数
     async def plan_next_action(self, state: DynamicDiagnosisState) -> StateUpdate:
         """只请求下一动作, 不允许决策模型直接执行 Tool 或写入事实。"""
-        # 检查是否超过最大决策轮数，发生在调用模型之前，避免无限决策
+        # 在模型调用前检查最大决策轮数, 避免无限决策
         if state["iteration_count"] >= self._limits.max_decision_rounds:
             return {"termination_reason": AgentTerminationReason.MAX_ITERATIONS}
         try:
@@ -289,7 +306,7 @@ class DynamicDiagnosisWorkflow:
                 tool = self._tool_registry.get(decision.tool_name)
                 if tool.risk_level is not ToolRiskLevel.LOW:  #  动作决策中的 Tool必须是LOW风险
                     raise ValueError("dynamic diagnosis only permits LOW risk tools")
-                # 校验动作决策中的 Tool 是否有必要的权限   Tool 要求的权限必须全部包含在当前 ToolContext 中
+                # Tool要求的权限必须全部包含在当前ToolContext中
                 if not tool.required_permissions.issubset(self._tool_context.permissions):
                     return self._validation_failure(
                         state,
@@ -400,9 +417,17 @@ class DynamicDiagnosisWorkflow:
     # 决定是否结束流程
     async def check_completion(self, state: DynamicDiagnosisState) -> StateUpdate:
         """在显式 FINISH 时以确定性规则区分事实充分与安全不足。"""
+        # 每轮检查缺口
+        gaps = self._information_gap_detector.detect(
+            state,
+            specification_result=state["specification_result"],
+        )
         # 存在错误则进入异常出口
         if state["errors"]:
-            return {"termination_reason": AgentTerminationReason.EXECUTION_ERROR}
+            return {
+                "information_gaps": gaps,
+                "termination_reason": AgentTerminationReason.EXECUTION_ERROR,
+            }
         decision = state["current_decision"]
         # 当前动作不是FINISH 则继续执行
         if decision is None or decision.action is not AgentAction.FINISH:
@@ -410,24 +435,39 @@ class DynamicDiagnosisWorkflow:
                 self._count_consecutive_no_new_information(state["tool_history"])
                 >= self._limits.max_consecutive_no_new_information
             ):  # 检查是否连续调用相同 Tool 且无新信息
-                return {"termination_reason": AgentTerminationReason.NO_NEW_INFORMATION}
-            return {}
-        # 当前动作是FINISH, 不会直接相信模型, 而是再次执行确定性规则
-        rule_decision = evaluate_diagnosis_rules(state)
+                return {
+                    "information_gaps": gaps,
+                    "termination_reason": AgentTerminationReason.NO_NEW_INFORMATION,
+                }
+            return {"information_gaps": gaps}
+        # 当前动作是FINISH, 不会直接相信模型, 而是检查确定性信息缺口
         reason = (
             AgentTerminationReason.INSUFFICIENT_INFORMATION
-            if rule_decision.blocking_stage is BlockingStage.INSUFFICIENT_INFORMATION
-            else AgentTerminationReason.SUFFICIENT_INFORMATION  # 如果事实完整且规则能形成结论
+            if gaps
+            else AgentTerminationReason.SUFFICIENT_INFORMATION
         )
-        return {"termination_reason": reason}
+        return {"information_gaps": gaps, "termination_reason": reason}
 
     # 正常结果
     async def generate_result(self, state: DynamicDiagnosisState) -> StateUpdate:
         """只用已保存的 Java Tool 事实运行规则并生成最终诊断。"""
-
-        decision = evaluate_diagnosis_rules(state)
-        diagnosis_state = cast(OrderDiagnosisState, {**state, "rule_decision": decision})
+        # 结果生成前再次执行缺口检查
+        gaps = self._information_gap_detector.detect(
+            state,
+            specification_result=state["specification_result"],
+        )
+        # 用最新缺口构造诊断状态，防止使用旧的 information_gaps
+        diagnosis_state = cast(
+            OrderDiagnosisState,
+            {**state, "information_gaps": gaps},
+        )
+        decision = evaluate_dynamic_diagnosis_rules(diagnosis_state)
+        diagnosis_state = cast(
+            OrderDiagnosisState,
+            {**diagnosis_state, "rule_decision": decision},
+        )
         return {
+            "information_gaps": gaps,
             "rule_decision": decision,
             "diagnosis": generate_rule_diagnosis(diagnosis_state),
         }
@@ -522,6 +562,7 @@ class DynamicDiagnosisWorkflow:
                 data != state["delivery"],
             )
         raise ValueError("tool output does not match dynamic action")
+
     # 校验资源身份
     @staticmethod
     def _validate_resource_identity(
@@ -584,6 +625,7 @@ class DynamicDiagnosisWorkflow:
     @staticmethod
     def _route_after_initialize(state: DynamicDiagnosisState) -> StartRoute:
         return "exceptional" if state["errors"] else "plan"
+
     # 计划路由
     @staticmethod
     def _route_after_plan(state: DynamicDiagnosisState) -> PlanRoute:
@@ -592,6 +634,7 @@ class DynamicDiagnosisWorkflow:
         if state["termination_reason"] is not None:
             return "generate"
         return "validate"
+
     # 校验路由
     @staticmethod
     def _route_after_validation(state: DynamicDiagnosisState) -> ValidationRoute:
@@ -600,6 +643,7 @@ class DynamicDiagnosisWorkflow:
         if state["termination_reason"] is not None:
             return "generate"
         return "execute"
+
     # 执行路由
     @staticmethod
     def _route_after_completion(state: DynamicDiagnosisState) -> CompletionRoute:

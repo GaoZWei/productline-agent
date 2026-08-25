@@ -13,13 +13,17 @@ from app.workflows.diagnosis_generation import (
     apply_model_narrative,
     generate_rule_diagnosis,
 )
-from app.workflows.diagnosis_rules import evaluate_diagnosis_rules
+from app.workflows.diagnosis_rules import (
+    evaluate_diagnosis_rules,
+    evaluate_dynamic_diagnosis_rules,
+)
 from app.workflows.dynamic_diagnosis import (
     AgentExecutionLimits,
     DynamicDiagnosisState,
     DynamicDiagnosisWorkflow,
     SpecificationActionWorkflow,
 )
+from app.workflows.information_gaps import InformationGapDetector
 from app.workflows.order_diagnosis import OrderDiagnosisWorkflow
 from app.workflows.recording import DatabaseWorkflowStepRecorder, WorkflowStepRecorder
 from app.workflows.specification_qa import (
@@ -41,6 +45,7 @@ __all__ = [
     "DiagnosisNarrativeModel",
     "DynamicDiagnosisState",
     "DynamicDiagnosisWorkflow",
+    "InformationGapDetector",
     "InvalidActionDecisionOutputError",
     "InvalidDiagnosisNarrativeError",
     "OrderDiagnosisWorkflow",
@@ -55,6 +60,7 @@ __all__ = [
     "apply_model_narrative",
     "build_specification_metadata",
     "evaluate_diagnosis_rules",
+    "evaluate_dynamic_diagnosis_rules",
     "generate_rule_diagnosis",
     "parse_action_decision",
     "rewrite_specification_query",

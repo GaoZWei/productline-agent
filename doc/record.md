@@ -1001,3 +1001,25 @@
 - 默认最多6轮决策、8次Tool调用和连续2次无新增信息，测试可通过严格配置独立验证各预算。
 - 调用指纹在BaseTool前拦截重复逻辑调用；决策轮与Tool调用分开计数，`FINISH`只占用决策轮。
 - 执行前复核动作唯一映射、LOW风险、Registry、参数、资源归属和权限，拦截写Tool、未知Tool及缺权调用。
+
+---
+
+## 2026-08-25 — `[T532-T538] M5.5 信息充分度判断`
+
+### 核心解决的问题
+
+让动态诊断按当前业务场景确定仍缺少的事实, 避免模型主观宣布信息充分, 也避免固定全量事实规则迫使所有
+订单查询与当前阶段无关的数据。
+
+### 实现的核心代码
+
+- `agent-service/app/workflows/information_gaps.py`：`InformationGapDetector`和基础、生产、质检、复核、交付及规范规则。
+- `agent-service/app/workflows/diagnosis_rules.py`：`evaluate_dynamic_diagnosis_rules`场景化规则入口。
+- `agent-service/app/workflows/dynamic_diagnosis.py`：初始化、Observation后重算缺口以及动态结束判断。
+- `agent-service/tests/test_information_gaps.py`：场景化缺口、嵌套事实有效性和动态结论测试。
+
+### 实现的核心功能
+
+- 基础事实校验订单归属、非空任务及有效交付记录, 再按订单和任务状态补充进度、质检、复核与规范要求。
+- 通过任务键区分“已查询且没有问题”和“尚未查询”, 并校验进度、问题、复核及交付的父子资源归属。
+- 缺口进入动作Prompt并在每轮后更新；`FINISH`或预算终止仍有缺口时只生成信息不足结果, 固定Workflow保持原规则。

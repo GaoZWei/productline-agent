@@ -8,7 +8,7 @@ _PRODUCTION_ACTIVE = frozenset({"PENDING", "RUNNING"})
 _QUALITY_UNRESOLVED = frozenset({"OPEN", "PROCESSING"})
 _DELIVERY_BLOCKED = frozenset({"NOT_READY", "FAILED", "BLOCKED"})
 
-
+# 固定规则
 def evaluate_diagnosis_rules(state: OrderDiagnosisState) -> RuleDecision:
     """按最早业务阶段优先原则返回稳定决策, 不生成根因或建议文案。"""
     # 第一步检查数据是否足够
@@ -16,8 +16,20 @@ def evaluate_diagnosis_rules(state: OrderDiagnosisState) -> RuleDecision:
         stage = BlockingStage.INSUFFICIENT_INFORMATION
     else:
         # 第二步判断完整数据对应的阻塞阶段
-        stage = _evaluate_complete_facts(state)
+        stage = _evaluate_loaded_facts(state)
     return RuleDecision(order_id=state["order_id"], blocking_stage=stage)
+
+# 动态规则 动态 Workflow 不再要求所有 Tool 都必须调用，只要求当前场景的缺口已经清空
+def evaluate_dynamic_diagnosis_rules(state: OrderDiagnosisState) -> RuleDecision:
+    """仅在场景化信息缺口清空后使用已加载事实判断动态诊断阶段。"""
+
+    stage = (
+        BlockingStage.INSUFFICIENT_INFORMATION
+        if state["errors"] or state["information_gaps"]
+        else _evaluate_loaded_facts(state)
+    )
+    return RuleDecision(order_id=state["order_id"], blocking_stage=stage)
+
 
 # 完整性检查防止缺数据误报正常
 def _has_complete_facts(state: OrderDiagnosisState) -> bool:
@@ -64,15 +76,14 @@ def _has_complete_facts(state: OrderDiagnosisState) -> bool:
             return False
     return True
 
+
 # 正式判断阶段
-def _evaluate_complete_facts(state: OrderDiagnosisState) -> BlockingStage:
+def _evaluate_loaded_facts(state: OrderDiagnosisState) -> BlockingStage:
     """按生产、质检、复核、交付顺序返回最早未满足的阶段。"""
     # 收集生产状态
     task_statuses = {task.status for task in state["tasks"]}
     step_statuses = {
-        step.status
-        for progress in state["progress"].values()
-        for step in progress.steps
+        step.status for progress in state["progress"].values() for step in progress.steps
     }
     # 生产失败优先处理
     if task_statuses & _PRODUCTION_FAILED or step_statuses & _PRODUCTION_FAILED:
@@ -81,11 +92,7 @@ def _evaluate_complete_facts(state: OrderDiagnosisState) -> BlockingStage:
     if task_statuses & _PRODUCTION_ACTIVE or step_statuses & _PRODUCTION_ACTIVE:
         return BlockingStage.PRODUCTION
     # 质检规则
-    issues = [
-        issue
-        for task_issues in state["quality_issues"].values()
-        for issue in task_issues
-    ]
+    issues = [issue for task_issues in state["quality_issues"].values() for issue in task_issues]
     if any(issue.status in _QUALITY_UNRESOLVED for issue in issues):
         return BlockingStage.QUALITY_REVIEW
     # 复核规则
@@ -105,6 +112,7 @@ def _evaluate_complete_facts(state: OrderDiagnosisState) -> BlockingStage:
         return BlockingStage.DELIVERY
     return BlockingStage.NONE
 
+
 # 复核规则
 def _requires_review(
     issues: list[QualityIssue],
@@ -115,10 +123,7 @@ def _requires_review(
     if any(review.status != "APPROVED" for review in reviews):
         return True
     # 问题已解决, 但还没有通过复核
-    approved_issue_ids = {
-        review.issue_id for review in reviews if review.status == "APPROVED"
-    }
+    approved_issue_ids = {review.issue_id for review in reviews if review.status == "APPROVED"}
     return any(
-        issue.status == "RESOLVED" and issue.issue_id not in approved_issue_ids
-        for issue in issues
+        issue.status == "RESOLVED" and issue.issue_id not in approved_issue_ids for issue in issues
     )

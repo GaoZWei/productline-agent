@@ -310,6 +310,11 @@ async def test_dynamic_graph_finishes_safely_when_facts_are_insufficient() -> No
     assert state["tool_history"] == []
     assert state["iteration_count"] == 1
     assert state["termination_reason"] is AgentTerminationReason.INSUFFICIENT_INFORMATION
+    assert [gap.code for gap in state["information_gaps"]] == [
+        "ORDER_REQUIRED",
+        "RELATED_TASKS_REQUIRED",
+        "DELIVERY_STATUS_REQUIRED",
+    ]
     assert state["diagnosis"] is not None
     assert state["diagnosis"].blocking_stage is BlockingStage.INSUFFICIENT_INFORMATION
     assert state["diagnosis"].evidence == []
@@ -400,7 +405,8 @@ async def test_dynamic_graph_stops_infinite_planning_at_six_decision_rounds() ->
     assert len(state["tool_history"]) == 6
     assert state["termination_reason"] is AgentTerminationReason.MAX_ITERATIONS
     assert state["diagnosis"] is not None
-    assert state["diagnosis"].blocking_stage is BlockingStage.QUALITY_REVIEW
+    assert state["diagnosis"].blocking_stage is BlockingStage.INSUFFICIENT_INFORMATION
+    assert [gap.code for gap in state["information_gaps"]] == ["SPECIFICATION_RESULT_REQUIRED"]
 
 
 @pytest.mark.asyncio
