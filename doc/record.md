@@ -1088,3 +1088,24 @@
 - 原始Agent草稿与用户修改副本分开保存，执行侧可确定性选择修改副本且不丢失审查基线。
 - 固化`SUBMIT_REVIEW`/`CREATE_REWORK`与对应写Tool的一一映射，同时保存目标任务和乐观锁版本。
 - 状态迁移使用比较更新阻止跳步与并发覆盖；确认后禁止修改，来源Run删除时仍保留Approval审计证据。
+
+---
+
+## 2026-08-26 — `[T610-T615] M6.2 复核草稿 Schema`
+
+### 核心解决的问题
+
+阻止模型生成内容或用户修改以任意JSON进入Approval，避免非最终复核结论、超长文案、无效或重复引用、返工
+结论矛盾及目标任务漂移一直延迟到业务写入阶段才暴露。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/approval.py`：Conclusion、ReworkSuggestion、ReviewDraft及规范引用校验。
+- `agent-service/app/services/approval_lifecycle.py`：创建、修改和读取最终草稿时统一应用ReviewDraft契约。
+- `agent-service/tests/test_approval_schemas.py`：字段长度、跨字段关系、引用和不可变性测试。
+
+### 实现的核心功能
+
+- 复核结论只允许`APPROVED`、`REJECTED`或`REWORK_REQUIRED`，明确排除Java不接受的`PENDING`。
+- 返工结论、是否返工与返工类型必须一致，复核意见上限与Java接口的1000字符约束对齐。
+- 规范依据复用Citation版本和Chunk身份并拒绝重复来源；JSON落库后可恢复严格类型，用户修改不得改变目标任务。

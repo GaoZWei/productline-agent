@@ -21,8 +21,15 @@ from app.services import (
 
 _NOW = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
 _ORIGINAL_DRAFT = {
+    "task_id": "TASK-003",
     "conclusion": "REWORK_REQUIRED",
+    "problem_summary": "存在未关闭的坐标系质量问题",
     "review_comment": "完成坐标系统处理后重新提交复核",
+    "specification_references": [],
+    "suggested_rework": {
+        "required": True,
+        "type": "COORDINATE_SYSTEM_FIX",
+    },
 }
 
 
@@ -99,7 +106,7 @@ async def _create_review_draft(
 @pytest.mark.asyncio
 async def test_create_draft_freezes_original_operation_tool_and_target_version() -> None:
     service, _ = _service()
-    source: dict[str, Any] = {**_ORIGINAL_DRAFT, "references": ["SPEC-001"]}
+    source: dict[str, Any] = {**_ORIGINAL_DRAFT, "specification_references": []}
 
     approval = await service.create_draft(
         approval_id=" approval-001 ",
@@ -110,7 +117,7 @@ async def test_create_draft_freezes_original_operation_tool_and_target_version()
         target_id="TASK-003",
         target_version=0,
     )
-    source["references"].append("SPEC-CHANGED")
+    source["specification_references"].append("SPEC-CHANGED")
 
     assert approval.approval_id == "approval-001"
     assert approval.run_id == "run-001"
@@ -119,7 +126,7 @@ async def test_create_draft_freezes_original_operation_tool_and_target_version()
     assert approval.pending_tool_name is PendingToolName.WRITE_REVIEW_RESULT
     assert approval.target_id == "TASK-003"
     assert approval.target_version == 0
-    assert approval.original_draft["references"] == ["SPEC-001"]
+    assert approval.original_draft["specification_references"] == []
     assert approval.user_modified_draft is None
     assert approval.confirmed_by_user_id is None
     assert approval.confirmed_at is None
@@ -147,6 +154,7 @@ async def test_happy_path_preserves_original_and_executes_user_modified_draft() 
 
     assert modified.original_draft == _ORIGINAL_DRAFT
     assert service.effective_draft(modified)["review_comment"] == "用户修改后的意见"
+    assert service.effective_review_draft(modified).task_id == "TASK-003"
     assert confirmed.confirmed_by_user_id == "reviewer-001"
     assert confirmed.confirmed_at == _NOW
     assert succeeded.status is ApprovalStatus.SUCCEEDED
@@ -253,6 +261,18 @@ async def test_create_draft_rejects_mismatched_tool_invalid_target_and_json() ->
         )
     assert invalid_json.value.field_name == "original_draft"
 
+    with pytest.raises(ApprovalLifecycleValidationError) as draft_target:
+        await service.create_draft(
+            approval_id="approval-draft-target",
+            run_id="run-001",
+            operation_type=OperationType.SUBMIT_REVIEW,
+            original_draft={**_ORIGINAL_DRAFT, "task_id": "TASK-004"},
+            pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
+            target_id="TASK-003",
+            target_version=0,
+        )
+    assert draft_target.value.field_name == "original_draft.task_id"
+
     for invalid_version in (True, -1, 9_223_372_036_854_775_808):
         with pytest.raises(ApprovalLifecycleValidationError) as version:
             await service.create_draft(
@@ -265,6 +285,28 @@ async def test_create_draft_rejects_mismatched_tool_invalid_target_and_json() ->
                 target_version=invalid_version,
             )
         assert version.value.field_name == "target_version"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_user_modification_must_remain_a_valid_draft_for_same_target() -> None:
+    service, _ = _service()
+    approval = await _create_review_draft(service)
+    await service.mark_waiting_confirmation(approval.approval_id)
+
+    with pytest.raises(ApprovalLifecycleValidationError) as invalid_schema:
+        await service.save_user_modification(
+            approval.approval_id,
+            modified_draft={**_ORIGINAL_DRAFT, "conclusion": "PENDING"},
+        )
+    assert invalid_schema.value.field_name == "modified_draft"
+
+    with pytest.raises(ApprovalLifecycleValidationError) as changed_target:
+        await service.save_user_modification(
+            approval.approval_id,
+            modified_draft={**_ORIGINAL_DRAFT, "task_id": "TASK-004"},
+        )
+    assert changed_target.value.field_name == "modified_draft.task_id"
 
 
 @pytest.mark.unit

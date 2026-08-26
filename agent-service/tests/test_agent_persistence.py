@@ -52,6 +52,7 @@ from app.repositories import (
     KnowledgeSearchRepository,
     KnowledgeSearchValidationError,
 )
+from app.schemas import Conclusion
 from app.schemas.knowledge import (
     DocumentLifecycle,
     DocumentMetadata,
@@ -105,6 +106,28 @@ TEST_RUN_VERSION_SNAPSHOT = RunVersionSnapshot(
         parameters={},
     ),
 )
+TEST_REVIEW_DRAFT = {
+    "task_id": "TASK-003",
+    "conclusion": "REWORK_REQUIRED",
+    "problem_summary": "存在未关闭的坐标系质量问题",
+    "review_comment": "Agent原始意见",
+    "specification_references": [
+        {
+            "document_id": "SPEC-COORD-001",
+            "document_name": "坐标系统处理规范",
+            "document_version": "2.0",
+            "section": ["质量复核", "坐标系统"],
+            "chunk_id": "CHUNK-COORD-001",
+            "chunk_ids": ["CHUNK-COORD-001"],
+            "content": "坐标系统问题关闭后方可重新提交复核。",
+            "relevance_score": 0.98,
+        }
+    ],
+    "suggested_rework": {
+        "required": True,
+        "type": "COORDINATE_SYSTEM_FIX",
+    },
+}
 
 
 def _configured_url() -> str:
@@ -1009,7 +1032,7 @@ async def test_approval_lifecycle_persists_drafts_confirmation_and_run_detachmen
                 approval_id="approval-001",
                 run_id="run-approval",
                 operation_type=OperationType.SUBMIT_REVIEW,
-                original_draft={"review_comment": "Agent原始意见"},
+                original_draft=TEST_REVIEW_DRAFT,
                 pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
                 target_id="TASK-003",
                 target_version=0,
@@ -1017,7 +1040,7 @@ async def test_approval_lifecycle_persists_drafts_confirmation_and_run_detachmen
             await approval_service.mark_waiting_confirmation(approval.approval_id)
             await approval_service.save_user_modification(
                 approval.approval_id,
-                modified_draft={"review_comment": "用户修改意见"},
+                modified_draft={**TEST_REVIEW_DRAFT, "review_comment": "用户修改意见"},
             )
             confirmed = await approval_service.confirm(
                 approval.approval_id,
@@ -1029,12 +1052,20 @@ async def test_approval_lifecycle_persists_drafts_confirmation_and_run_detachmen
             repository = ApprovalRecordRepository(verification_session)
             stored = await repository.get("approval-001")
             assert stored is not None
-            assert stored.original_draft == {"review_comment": "Agent原始意见"}
-            assert stored.user_modified_draft == {"review_comment": "用户修改意见"}
+            assert stored.original_draft == TEST_REVIEW_DRAFT
+            assert stored.user_modified_draft == {
+                **TEST_REVIEW_DRAFT,
+                "review_comment": "用户修改意见",
+            }
             assert stored.target_id == "TASK-003"
             assert stored.target_version == 0
             assert stored.confirmed_by_user_id == "reviewer-001"
             assert stored.confirmed_at == confirmed_at
+            effective = ApprovalLifecycleService.effective_review_draft(stored)
+            assert effective.conclusion is Conclusion.REWORK_REQUIRED
+            assert effective.specification_references[0].chunk_ids == (
+                "CHUNK-COORD-001",
+            )
 
         async with database.session() as delete_session, delete_session.begin():
             assert await AgentRunRepository(delete_session).delete("run-approval") is True

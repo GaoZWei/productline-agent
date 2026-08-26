@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
+
+from pydantic import ValidationError
 
 from app.models import (
     ApprovalRecord,
@@ -14,6 +15,7 @@ from app.models import (
     OperationType,
     PendingToolName,
 )
+from app.schemas import ReviewDraft
 
 _APPROVAL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _TASK_ID_PATTERN = re.compile(r"^TASK-[A-Z0-9][A-Z0-9-]*$")
@@ -22,7 +24,7 @@ _OPERATION_TO_TOOL = {
     OperationType.SUBMIT_REVIEW: PendingToolName.WRITE_REVIEW_RESULT,
     OperationType.CREATE_REWORK: PendingToolName.CREATE_REWORK_TASK,
 }
-# 核心状态机定义，描述Approval状态之间的合法转换！
+# 核心状态机定义, 描述Approval状态之间的合法转换。
 _ALLOWED_TRANSITIONS = {
     ApprovalStatus.DRAFT: frozenset(
         {ApprovalStatus.WAITING_CONFIRMATION, ApprovalStatus.CANCELLED}
@@ -84,7 +86,7 @@ class ApprovalNotFoundError(ApprovalLifecycleError):
         self.approval_id = approval_id
         super().__init__(f"approval '{approval_id}' was not found")
 
-# 状态不允许跳转，或者当前状态不允许修改内容
+# 状态不允许跳转, 或者当前状态不允许修改内容。
 class InvalidApprovalTransitionError(ApprovalLifecycleError):
     """当前状态不允许目标状态或内容修改。"""
 
@@ -135,7 +137,7 @@ class ApprovalLifecycleService:
         approval_id: str,
         run_id: str,
         operation_type: OperationType,
-        original_draft: dict[str, Any],
+        original_draft: ReviewDraft | dict[str, Any], # 传入的原始草稿数据
         pending_tool_name: PendingToolName,
         target_id: str,
         target_version: int,
@@ -168,7 +170,14 @@ class ApprovalLifecycleService:
                 field_name="pending_tool_name",
                 message=f"must be {expected_tool.value} for {operation_type.value}",
             )
-        draft_snapshot = self._json_snapshot(original_draft, "original_draft")
+        review_draft = self._review_draft(original_draft, "original_draft")
+        # 校验目标是否与传入的目标一致
+        self._validate_draft_target(
+            review_draft,
+            target_id=normalized_target_id,
+            field_name="original_draft",
+        )
+        draft_snapshot = review_draft.model_dump(mode="json")
         return await self._repository.create(
             ApprovalRecord(
                 approval_id=normalized_approval_id,
@@ -194,12 +203,30 @@ class ApprovalLifecycleService:
         self,
         approval_id: str,
         *,
-        modified_draft: dict[str, Any],
+        modified_draft: ReviewDraft | dict[str, Any],
     ) -> ApprovalRecord:
         """只保存用户修改副本, 原始Agent草稿保持不变。"""
 
         normalized_id = self._identifier(approval_id, "approval_id")
-        snapshot = self._json_snapshot(modified_draft, "modified_draft")
+        # 先读取Approval记录
+        current = await self._require_current(normalized_id)
+        # 然后检查状态是否为 WAITING_CONFIRMATION，只有该状态下才能保存用户修改副本
+        if current.status is not ApprovalStatus.WAITING_CONFIRMATION:
+            raise InvalidApprovalTransitionError(
+                approval_id=normalized_id,
+                current_status=current.status,
+                target_status=ApprovalStatus.WAITING_CONFIRMATION,
+            )
+        # 接着重新解析用户修改副本，校验目标是否与传入的目标一致
+        review_draft = self._review_draft(modified_draft, "modified_draft")
+        # 再比较目标是否与传入的目标一致
+        self._validate_draft_target(
+            review_draft,
+            target_id=current.target_id,
+            field_name="modified_draft",
+        )
+        snapshot = review_draft.model_dump(mode="json")
+        # 最后才保存用户修改副本
         updated = await self._repository.save_user_modified_draft(
             normalized_id,
             expected_status=ApprovalStatus.WAITING_CONFIRMATION,
@@ -214,7 +241,7 @@ class ApprovalLifecycleService:
             current_status=current.status,
             target_status=ApprovalStatus.WAITING_CONFIRMATION,
         )
-    # 记录真实确认人和确认时间，状态变更为 CONFIRMED
+    # 记录真实确认人和确认时间, 状态变更为 CONFIRMED。
     async def confirm(self, approval_id: str, *, confirmed_by_user_id: str) -> ApprovalRecord:
         """记录真实确认人和确认时间, 但尚不执行Java写操作。"""
 
@@ -254,12 +281,20 @@ class ApprovalLifecycleService:
     def effective_draft(approval: ApprovalRecord) -> dict[str, Any]:
         """执行阶段优先使用用户修改副本, 否则使用原始Agent草稿。"""
 
+        return ApprovalLifecycleService.effective_review_draft(approval).model_dump(
+            mode="json"
+        )
+    # 取得最终执行草稿
+    @staticmethod
+    def effective_review_draft(approval: ApprovalRecord) -> ReviewDraft:
+        """返回经过Schema复核的最终草稿, 供后续写Tool安全映射参数。"""
+
         value = (
             approval.user_modified_draft
-            if approval.user_modified_draft is not None
+            if approval.user_modified_draft is not None # 有用户修改就使用用户修改副本，否则使用原始Agent草稿
             else approval.original_draft
         )
-        return ApprovalLifecycleService._json_snapshot(value, "effective_draft")
+        return ApprovalLifecycleService._review_draft(value, "effective_draft")
 
     async def _transition(
         self,
@@ -326,19 +361,30 @@ class ApprovalLifecycleService:
                 message="contains unsupported characters",
             )
         return normalized
+    # 异常转换，将传入的ReviewDraft或字典转换为ReviewDraft模型
+    @staticmethod
+    def _review_draft(
+        value: ReviewDraft | dict[str, Any],
+        field_name: str,
+    ) -> ReviewDraft:
+        try: # 如果已经是ReviewDraft，直接返回，否则转换为ReviewDraft模型
+            return value if isinstance(value, ReviewDraft) else ReviewDraft.model_validate(value)
+        except ValidationError as exception:
+            raise ApprovalLifecycleValidationError(
+                field_name=field_name,
+                message="must match the ReviewDraft schema",
+            ) from exception
 
     @staticmethod
-    def _json_snapshot(value: dict[str, Any], field_name: str) -> dict[str, Any]:
-        if not value:
+    def _validate_draft_target(
+        draft: ReviewDraft,
+        *,
+        target_id: str,
+        field_name: str,
+    ) -> None:
+        # 第二层校验，确定还是原来的目标
+        if draft.task_id != target_id:
             raise ApprovalLifecycleValidationError(
-                field_name=field_name,
-                message="must not be empty",
+                field_name=f"{field_name}.task_id",
+                message="must match the immutable approval target",
             )
-        try:  # 冻结原始原始草稿内容
-            serialized = json.dumps(value, ensure_ascii=False, allow_nan=False)
-            return cast(dict[str, Any], json.loads(serialized))
-        except (TypeError, ValueError) as exception:
-            raise ApprovalLifecycleValidationError(
-                field_name=field_name,
-                message="must contain only standard JSON values",
-            ) from exception
