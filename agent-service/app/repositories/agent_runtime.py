@@ -116,6 +116,20 @@ class AgentRunRepository:
             .order_by(AgentRun.created_at, AgentRun.run_id)
         )
         return list((await self._session.scalars(statement)).all())
+    # 定位最近一个带结果的Run
+    async def latest_result_by_session(self, session_id: str) -> AgentRun | None:
+        """返回会话中最近一个带结果的Run, 不回退到更旧的可审批状态。"""
+
+        statement = (
+            select(AgentRun)
+            .where(
+                AgentRun.session_id == session_id,
+                AgentRun.final_result.is_not(None),
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.run_id.desc())
+            .limit(1)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def delete(self, run_id: str) -> bool:
         """删除存在的 Run; 数据库级联删除其 Step。"""

@@ -26,6 +26,19 @@ from app.workflows.dynamic_diagnosis import (
 from app.workflows.information_gaps import InformationGapDetector
 from app.workflows.order_diagnosis import OrderDiagnosisWorkflow
 from app.workflows.recording import DatabaseWorkflowStepRecorder, WorkflowStepRecorder
+from app.workflows.review_draft import (
+    InvalidReviewDraftOutputError,
+    ReviewDraftBusinessFactError,
+    ReviewDraftGenerationError,
+    ReviewDraftGenerationModel,
+    ReviewDraftGenerationModelRequest,
+    ReviewDraftGenerationResult,
+    ReviewDraftGenerationWorkflow,
+    ReviewDraftPersistenceResult,
+    ReviewDraftRunSnapshot,
+    ReviewDraftSourceError,
+    ReviewDraftSpecificationError,
+)
 from app.workflows.specification_qa import (
     SpecificationAnswerModel,
     SpecificationAnswerRequest,
@@ -48,7 +61,18 @@ __all__ = [
     "InformationGapDetector",
     "InvalidActionDecisionOutputError",
     "InvalidDiagnosisNarrativeError",
+    "InvalidReviewDraftOutputError",
     "OrderDiagnosisWorkflow",
+    "ReviewDraftBusinessFactError",
+    "ReviewDraftGenerationError",
+    "ReviewDraftGenerationModel",
+    "ReviewDraftGenerationModelRequest",
+    "ReviewDraftGenerationResult",
+    "ReviewDraftGenerationWorkflow",
+    "ReviewDraftPersistenceResult",
+    "ReviewDraftRunSnapshot",
+    "ReviewDraftSourceError",
+    "ReviewDraftSpecificationError",
     "SpecificationActionWorkflow",
     "SpecificationAnswerModel",
     "SpecificationAnswerRequest",

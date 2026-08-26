@@ -58,7 +58,7 @@ def _utc_now() -> datetime:
 
 
 class RunLifecycleService:
-    """执行 PENDING 到 RUNNING 再到成功或失败的原子状态流转。"""
+    """执行Run启动、诊断终态及成功诊断进入人工确认的原子流转。"""
 
     def __init__(
         self,
@@ -138,6 +138,16 @@ class RunLifecycleService:
                 "error_code": None,
                 "error_step": None,
             },
+        )
+
+    async def mark_waiting_approval(self, run_id: str) -> AgentRun:
+        """仅允许带结果的成功诊断进入等待人工确认状态。"""
+
+        return await self._transition(
+            run_id,
+            expected_status=AgentRunStatus.SUCCEEDED,
+            target_status=AgentRunStatus.WAITING_APPROVAL,
+            changes={},
         )
 
     # 标记为FAILED

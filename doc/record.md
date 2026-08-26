@@ -1109,3 +1109,24 @@
 - 复核结论只允许`APPROVED`、`REJECTED`或`REWORK_REQUIRED`，明确排除Java不接受的`PENDING`。
 - 返工结论、是否返工与返工类型必须一致，复核意见上限与Java接口的1000字符约束对齐。
 - 规范依据复用Citation版本和Chunk身份并拒绝重复来源；JSON落库后可恢复严格类型，用户修改不得改变目标任务。
+
+---
+
+## 2026-08-26 — `[T616-T623] M6.3 草稿生成 Workflow`
+
+### 核心解决的问题
+
+避免直接根据历史诊断或模型自由输出生成待确认内容；草稿保存前重新读取Java任务与质检事实、取得现行规范引用，
+并在任何事实、引用或结构不可信时关闭失败且不执行写操作。
+
+### 实现的核心代码
+
+- `agent-service/app/workflows/review_draft.py`：`ReviewDraftGenerationWorkflow`、模型输入契约、事实与引用门禁。
+- `agent-service/app/services/review_draft_store.py`：`DatabaseReviewDraftStore`短事务读取和Approval/Run原子保存。
+- `agent-service/app/repositories/agent_runtime.py`、`app/services/run_lifecycle.py`：最近诊断定位与`WAITING_APPROVAL`转换。
+
+### 实现的核心功能
+
+- 只接受会话最近的`SUCCEEDED`诊断Run，并从JSON快照恢复严格`DiagnosisResult`，不回退使用更旧诊断。
+- 强制刷新任务详情和质检问题，校验任务所属订单后检索当前日期、权限范围内的规范依据。
+- 模型草稿必须保持目标任务不变并只引用RAG白名单；Approval和Run原子进入等待确认，全流程不调用Java写接口。

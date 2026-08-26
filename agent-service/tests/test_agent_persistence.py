@@ -52,7 +52,8 @@ from app.repositories import (
     KnowledgeSearchRepository,
     KnowledgeSearchValidationError,
 )
-from app.schemas import Conclusion
+from app.schemas import Conclusion, ReviewDraft
+from app.schemas.business import BusinessIdentity
 from app.schemas.knowledge import (
     DocumentLifecycle,
     DocumentMetadata,
@@ -68,11 +69,13 @@ from app.schemas.versioning import (
 )
 from app.services import (
     ApprovalLifecycleService,
+    DatabaseReviewDraftStore,
     InvalidRunTransitionError,
     InvalidStepTransitionError,
     RunLifecycleService,
     RunLifecycleValidationError,
     RunNotFoundError,
+    SessionAccessDeniedError,
     StepLifecycleService,
     StepLifecycleValidationError,
     StepNotFoundError,
@@ -1075,6 +1078,111 @@ async def test_approval_lifecycle_persists_drafts_confirmation_and_run_detachmen
             assert retained is not None
             assert retained.run_id is None
             assert retained.status is ApprovalStatus.CONFIRMED
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_review_draft_store_atomically_waits_approval_and_run(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session, session.begin():
+            session.add(AgentSession(session_id="session-draft", user_id="reviewer-001"))
+            run_service = RunLifecycleService(AgentRunRepository(session))
+            await run_service.create_run(
+                run_id="run-draft",
+                session_id="session-draft",
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            )
+            await run_service.mark_running("run-draft")
+            await run_service.mark_succeeded(
+                "run-draft",
+                final_result={
+                    "order_id": "ORDER-003",
+                    "blocking_stage": "QUALITY_REVIEW",
+                    "summary": "订单阻塞在质量复核环节。",
+                    "root_causes": [
+                        {
+                            "code": "OPEN_COORDINATE_SYSTEM_ISSUE",
+                            "description": "存在未关闭的坐标系问题",
+                        }
+                    ],
+                    "evidence": [
+                        {
+                            "source_type": "TOOL",
+                            "tool_name": "get_quality_issues",
+                            "field_path": "issues[0].status",
+                            "value": "OPEN",
+                            "description": "ISSUE-001问题状态为OPEN",
+                        }
+                    ],
+                    "suggestions": [
+                        {
+                            "action_type": "CREATE_COORDINATE_SYSTEM_REWORK",
+                            "description": "创建坐标系处理返工任务",
+                        }
+                    ],
+                    "confidence": 1.0,
+                },
+            )
+
+        store = DatabaseReviewDraftStore(database)
+        identity = BusinessIdentity(user_id="reviewer-001", role="INTERNAL_REVIEWER")
+        source = await store.latest_diagnosis("session-draft", identity=identity)
+        assert source is not None
+        assert source.run_id == "run-draft"
+        assert source.status is AgentRunStatus.SUCCEEDED
+
+        with pytest.raises(SessionAccessDeniedError):
+            await store.latest_diagnosis(
+                "session-draft",
+                identity=BusinessIdentity(
+                    user_id="reviewer-other",
+                    role="INTERNAL_REVIEWER",
+                ),
+            )
+
+        persisted = await store.save_waiting_approval(
+            approval_id="approval-draft",
+            run_id=source.run_id,
+            draft=ReviewDraft.model_validate(TEST_REVIEW_DRAFT),
+            target_version=7,
+        )
+        assert persisted.approval_status is ApprovalStatus.WAITING_CONFIRMATION
+        assert persisted.run_status is AgentRunStatus.WAITING_APPROVAL
+
+        async with database.session() as verification_session:
+            run = await AgentRunRepository(verification_session).get("run-draft")
+            approval = await ApprovalRecordRepository(verification_session).get(
+                "approval-draft"
+            )
+            assert run is not None
+            assert run.status is AgentRunStatus.WAITING_APPROVAL
+            assert run.final_result is not None
+            assert run.finished_at is not None
+            assert approval is not None
+            assert approval.status is ApprovalStatus.WAITING_CONFIRMATION
+            assert approval.target_version == 7
+
+        latest = await store.latest_diagnosis("session-draft", identity=identity)
+        assert latest is not None
+        assert latest.status is AgentRunStatus.WAITING_APPROVAL
+        with pytest.raises(InvalidRunTransitionError):
+            await store.save_waiting_approval(
+                approval_id="approval-duplicate",
+                run_id=latest.run_id,
+                draft=ReviewDraft.model_validate(TEST_REVIEW_DRAFT),
+                target_version=7,
+            )
+
+        async with database.session() as final_session:
+            assert (
+                await ApprovalRecordRepository(final_session).get("approval-duplicate")
+                is None
+            )
     finally:
         await database.dispose()
 
