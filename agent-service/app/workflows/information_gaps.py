@@ -15,12 +15,13 @@ class InformationGapDetector:
 
     def detect(
         self,
-        state: OrderDiagnosisState,  # 已经通过 Tool Schema 校验的订单、任务、进度、质检、复核和交付事实
+        # 已经通过Tool Schema校验的订单、任务、进度、质检、复核和交付事实
+        state: OrderDiagnosisState,
         *,
         specification_result: SpecificationQaResult | None = None,  # 独立保存的规范问答结果
     ) -> list[InformationGap]:
         """先检查基础事实, 再按生产、质检、复核和规范场景追加要求。"""
-        # 不仅要求 order 存在，还要求 Tool 返回的订单ID与当前诊断订单一致
+        # 不仅要求order存在, 还要求Tool返回的订单ID与当前诊断订单一致
         gaps: list[InformationGap] = []
         order = state["order"]
         order_is_valid = order is not None and order.order_id == state["order_id"]
@@ -31,7 +32,7 @@ class InformationGapDetector:
                     description="需要读取与目标订单一致的订单状态。",
                 )
             )
-        
+
         # 检查三件事  1. 至少有一个任务 2. 任务ID唯一 3. 任务属于当前订单
         tasks = state["tasks"]
         task_ids = [task.task_id for task in tasks]
@@ -62,7 +63,7 @@ class InformationGapDetector:
         # 生产场景规则
         # 首先找出没有完成的任务
         production_task_ids = [task.task_id for task in tasks if task.status != "COMPLETED"]
-        # 如果订单状态仍是 PRODUCING，但任务都显示 COMPLETED，也会要求查询进度
+        # 如果订单状态仍是PRODUCING, 但任务都显示COMPLETED, 也会要求查询进度
         if order.status in _PRODUCTION_ORDER_STATUSES and not production_task_ids:
             production_task_ids = task_ids
         missing_progress = [
@@ -104,7 +105,7 @@ class InformationGapDetector:
             if self._has_valid_quality_issues(state, task_id) and state["quality_issues"][task_id]
         ]
         review_task_ids = list(
-            # dict.fromkeys 会去重，同时保留原来的任务顺序
+            # dict.fromkeys会去重, 同时保留原来的任务顺序
             dict.fromkeys(
                 [
                     *(task_ids if order.status in _REVIEW_ORDER_STATUSES else []),
@@ -131,7 +132,7 @@ class InformationGapDetector:
             for task_id in issue_task_ids
             for issue in state["quality_issues"][task_id]
         )
-        # 如果还没有执行规范问答，要求规范检索结果
+        # 如果还没有执行规范问答, 要求规范检索结果
         if requires_specification and specification_result is None:
             gaps.append(
                 InformationGap(
@@ -140,15 +141,17 @@ class InformationGapDetector:
                 )
             )
         return gaps
+
     # 生产进度怎样才算有效进度
     @staticmethod
     def _has_valid_progress(state: OrderDiagnosisState, task_id: str) -> bool:
         progress = state["progress"].get(task_id)
         return (
-            progress is not None  #  已经查询到该任务的进度；
+            progress is not None  # 已经查询到该任务的进度
             and progress.task_id == task_id  # ProgressResult.task_id正确
             and bool(progress.steps)  #  至少有一个生产步骤
-            and all(step.task_id == task_id for step in progress.steps)  #  每个生产步骤都属于当前任务
+            # 每个生产步骤都属于当前任务
+            and all(step.task_id == task_id for step in progress.steps)
         )
 
     @staticmethod
@@ -156,6 +159,7 @@ class InformationGapDetector:
         if task_id not in state["quality_issues"]:
             return False
         return all(issue.task_id == task_id for issue in state["quality_issues"][task_id])
+
     # 复核结果有效性判断
     @staticmethod
     def _has_valid_review(state: OrderDiagnosisState, task_id: str) -> bool:
@@ -174,7 +178,8 @@ class InformationGapDetector:
             delivery is not None  #  查询过交付状态
             and delivery.order_id == state["order_id"]  # 交付结果属于当前订单
             and bool(delivery.records)  # 至少有一条交付记录
-            and all(record.order_id == state["order_id"] for record in delivery.records)  # 每条交付记录都属于当前订单
+            # 每条交付记录都属于当前订单
+            and all(record.order_id == state["order_id"] for record in delivery.records)
         )
 
     @staticmethod

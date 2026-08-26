@@ -8,6 +8,7 @@ _PRODUCTION_ACTIVE = frozenset({"PENDING", "RUNNING"})
 _QUALITY_UNRESOLVED = frozenset({"OPEN", "PROCESSING"})
 _DELIVERY_BLOCKED = frozenset({"NOT_READY", "FAILED", "BLOCKED"})
 
+
 # 固定规则
 def evaluate_diagnosis_rules(state: OrderDiagnosisState) -> RuleDecision:
     """按最早业务阶段优先原则返回稳定决策, 不生成根因或建议文案。"""
@@ -19,7 +20,8 @@ def evaluate_diagnosis_rules(state: OrderDiagnosisState) -> RuleDecision:
         stage = _evaluate_loaded_facts(state)
     return RuleDecision(order_id=state["order_id"], blocking_stage=stage)
 
-# 动态规则 动态 Workflow 不再要求所有 Tool 都必须调用，只要求当前场景的缺口已经清空
+
+# 动态规则不要求所有Tool都必须调用, 只要求当前场景的缺口已经清空
 def evaluate_dynamic_diagnosis_rules(state: OrderDiagnosisState) -> RuleDecision:
     """仅在场景化信息缺口清空后使用已加载事实判断动态诊断阶段。"""
 

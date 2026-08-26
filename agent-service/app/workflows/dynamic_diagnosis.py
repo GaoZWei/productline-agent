@@ -105,7 +105,8 @@ class DynamicDiagnosisWorkflow:
         effective_at: date,
         permission_scope: PermissionScope,
         limits: AgentExecutionLimits | None = None,
-        information_gap_detector: InformationGapDetector | None = None,  #  缺口怎样进入动态 Workflow
+        # 缺口怎样进入动态Workflow
+        information_gap_detector: InformationGapDetector | None = None,
     ) -> None:
         self._action_decider = action_decider
         self._tool_registry = tool_registry
@@ -114,7 +115,8 @@ class DynamicDiagnosisWorkflow:
         self._effective_at = effective_at
         self._permission_scope = permission_scope
         self._limits = limits or AgentExecutionLimits()
-        self._information_gap_detector = information_gap_detector or InformationGapDetector()  #  默认创建真实探测器
+        # 默认创建真实探测器
+        self._information_gap_detector = information_gap_detector or InformationGapDetector()
         self._invoked = False
         self.graph = self._build_graph()
 
@@ -456,7 +458,7 @@ class DynamicDiagnosisWorkflow:
             state,
             specification_result=state["specification_result"],
         )
-        # 用最新缺口构造诊断状态，防止使用旧的 information_gaps
+        # 用最新缺口构造诊断状态, 防止使用旧的information_gaps
         diagnosis_state = cast(
             OrderDiagnosisState,
             {**state, "information_gaps": gaps},
