@@ -114,6 +114,7 @@ async def diagnose_order(
         database,
         registry,
         session_ttl_seconds=request.app.state.settings.session_ttl_seconds,
+        version_snapshot=request.app.state.run_version_snapshot,  # API 从应用状态取出运行版本快照
     )
     try:
         execution = await service.diagnose(

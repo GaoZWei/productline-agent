@@ -44,6 +44,13 @@ from app.schemas.specification import (
     SpecificationQaResult,
     SpecificationQaStatus,
 )
+from app.schemas.versioning import (
+    ModelRuntimeSnapshot,
+    RagStrategySnapshot,
+    RunVersionSnapshot,
+    ToolSchemaSnapshot,
+    VersionCaptureStatus,
+)
 from app.schemas.workflow import (
     AgentAction,
     AgentObservation,
@@ -86,6 +93,7 @@ __all__ = [
     "Evidence",
     "InformationGap",
     "Intent",
+    "ModelRuntimeSnapshot",
     "OrderDiagnosisErrorResponse",
     "OrderDiagnosisRequest",
     "OrderDiagnosisResponse",
@@ -94,6 +102,7 @@ __all__ = [
     "PageType",
     "PendingActionContext",
     "PermissionScope",
+    "RagStrategySnapshot",
     "ReadToolName",
     "RootCause",
     "RouterEntities",
@@ -103,6 +112,7 @@ __all__ = [
     "RoutingEntityName",
     "RoutingParameter",
     "RuleDecision",
+    "RunVersionSnapshot",
     "SessionContext",
     "SessionCreateRequest",
     "SessionErrorResponse",
@@ -114,4 +124,6 @@ __all__ = [
     "SpecificationRetrievalArguments",
     "StepError",
     "Suggestion",
+    "ToolSchemaSnapshot",
+    "VersionCaptureStatus",
 ]

@@ -53,6 +53,13 @@ from app.schemas.knowledge import (
     DocumentType,
     PermissionScope,
 )
+from app.schemas.versioning import (
+    ModelRuntimeSnapshot,
+    RagStrategySnapshot,
+    RunVersionSnapshot,
+    ToolSchemaSnapshot,
+    VersionCaptureStatus,
+)
 from app.services import (
     InvalidRunTransitionError,
     InvalidStepTransitionError,
@@ -69,6 +76,29 @@ from app.workflows import DatabaseWorkflowStepRecorder
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_DATABASE_URL_ENV = "AGENT_PERSISTENCE_TEST_DATABASE_URL"
+TEST_RUN_VERSION_SNAPSHOT = RunVersionSnapshot(
+    capture_status=VersionCaptureStatus.CAPTURED,
+    router_prompt_version="router-test-v1",
+    agent_prompt_version="agent-test-v1",
+    model=ModelRuntimeSnapshot(
+        configured=False,
+        provider=None,
+        model_name=None,
+        parameters={},
+    ),
+    tool_schema=ToolSchemaSnapshot(
+        version="tool-test-v1",
+        digest="0" * 64,
+        tool_names=(),
+    ),
+    rag_strategy=RagStrategySnapshot(
+        version="rag-test-v1",
+        embedding_provider="test-provider",
+        embedding_model="test-embedding",
+        embedding_index_version="test-index-v1",
+        parameters={},
+    ),
+)
 
 
 def _configured_url() -> str:
@@ -167,6 +197,7 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "session_id",
         "request_message_id",
         "status",
+        "version_snapshot",
         "final_result",
         "error_code",
         "error_step",
@@ -231,6 +262,7 @@ async def test_alembic_creates_agent_tables_and_repository_crud(
                     run_id="run-001",
                     session=agent_session,
                     request_message=user_message,
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT.model_dump(mode="json"),
                 )
                 session.add(agent_session)
                 run_repository = AgentRunRepository(session)
@@ -882,6 +914,56 @@ async def test_search_filters_exclude_historical_expired_and_future_documents(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_version_migration_marks_existing_runs_as_unavailable_legacy(
+    migrated_database_url: str,
+) -> None:
+    database_name = _database_name(migrated_database_url)
+    _, alembic_url = _database_urls(migrated_database_url, database_name)
+    _run_alembic(alembic_url, "downgrade", "0006_vector_search")
+
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "INSERT INTO agent_sessions "
+                    "(session_id, user_id, context, expires_at) "
+                    "VALUES ('session-legacy', 'user-001', CAST('{}' AS JSON), "
+                    "CURRENT_TIMESTAMP + INTERVAL '30 minutes')"
+                )
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO agent_runs (run_id, session_id) "
+                    "VALUES ('run-legacy', 'session-legacy')"
+                )
+            )
+
+        _run_alembic(alembic_url, "upgrade", "head")
+        async with database.engine.connect() as connection:
+            snapshot = await connection.scalar(
+                text(
+                    "SELECT version_snapshot FROM agent_runs "
+                    "WHERE run_id = 'run-legacy'"
+                )
+            )
+            columns = await connection.run_sync(
+                lambda sync_connection: inspect(sync_connection).get_columns("agent_runs")
+            )
+
+        assert snapshot["capture_status"] == "UNAVAILABLE_LEGACY"
+        assert snapshot["router_prompt_version"] is None
+        version_column = next(
+            column for column in columns if column["name"] == "version_snapshot"
+        )
+        assert version_column["nullable"] is False
+        assert version_column["default"] is None
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_alembic_downgrade_removes_only_agent_runtime_tables(
     migrated_database_url: str,
 ) -> None:
@@ -907,7 +989,11 @@ async def test_step_sequence_is_unique_inside_one_run(migrated_database_url: str
     try:
         async with database.session() as session:
             agent_session = AgentSession(session_id="session-duplicate", user_id="user-001")
-            run = AgentRun(run_id="run-duplicate", session=agent_session)
+            run = AgentRun(
+                run_id="run-duplicate",
+                session=agent_session,
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT.model_dump(mode="json"),
+            )
             session.add(agent_session)
             session.add_all(
                 [
@@ -952,6 +1038,7 @@ async def test_run_lifecycle_persists_success_result(migrated_database_url: str)
                 created = await service.create_run(
                     run_id="run-success",
                     session_id="session-success",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
                 )
                 assert created.status is AgentRunStatus.PENDING
                 assert created.started_at is None
@@ -994,7 +1081,11 @@ async def test_run_lifecycle_persists_failure_details(migrated_database_url: str
                 service = RunLifecycleService(
                     AgentRunRepository(session), now=lambda: next(clock_values)
                 )
-                await service.create_run(run_id="run-failed", session_id="session-failed")
+                await service.create_run(
+                    run_id="run-failed",
+                    session_id="session-failed",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+                )
                 await service.mark_running("run-failed")
                 failed = await service.mark_failed(
                     "run-failed",
@@ -1026,7 +1117,11 @@ async def test_run_lifecycle_rejects_invalid_transitions_and_failure_data(
                     AgentRunRepository(session),
                     now=lambda: datetime(2026, 8, 9, 3, 0, tzinfo=UTC),
                 )
-                await service.create_run(run_id="run-invalid", session_id="session-invalid")
+                await service.create_run(
+                    run_id="run-invalid",
+                    session_id="session-invalid",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+                )
 
                 with pytest.raises(InvalidRunTransitionError) as pending_success:
                     await service.mark_succeeded("run-invalid", final_result={})
@@ -1087,7 +1182,11 @@ async def test_run_lifecycle_allows_only_one_concurrent_terminal_transition(
             async with setup_session.begin():
                 setup_session.add(AgentSession(session_id="session-race", user_id="user-001"))
                 setup_service = RunLifecycleService(AgentRunRepository(setup_session))
-                await setup_service.create_run(run_id="run-race", session_id="session-race")
+                await setup_service.create_run(
+                    run_id="run-race",
+                    session_id="session-race",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+                )
                 await setup_service.mark_running("run-race")
 
         async def mark_succeeded() -> str:
@@ -1150,6 +1249,7 @@ async def test_step_lifecycle_persists_success_summaries_and_duration(
                 await run_service.create_run(
                     run_id="run-step-success",
                     session_id="session-step-success",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
                 )
                 await run_service.mark_running("run-step-success")
                 step_service = StepLifecycleService(
@@ -1214,6 +1314,7 @@ async def test_step_lifecycle_persists_failure_details(migrated_database_url: st
                 await run_service.create_run(
                     run_id="run-step-failed",
                     session_id="session-step-failed",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
                 )
                 await run_service.mark_running("run-step-failed")
                 step_service = StepLifecycleService(
@@ -1259,6 +1360,7 @@ async def test_step_lifecycle_rejects_unavailable_run_invalid_data_and_transitio
                 await run_service.create_run(
                     run_id="run-step-invalid",
                     session_id="session-step-invalid",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
                 )
                 step_service = StepLifecycleService(
                     AgentStepRepository(session),
@@ -1359,6 +1461,7 @@ async def test_step_lifecycle_allows_only_one_concurrent_terminal_transition(
                 await run_service.create_run(
                     run_id="run-step-race",
                     session_id="session-step-race",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
                 )
                 await run_service.mark_running("run-step-race")
                 step_service = StepLifecycleService(
@@ -1440,6 +1543,7 @@ async def test_step_lifecycle_serializes_step_start_with_parent_run_terminal_upd
                 await run_service.create_run(
                     run_id="run-step-parent-lock",
                     session_id="session-step-parent-lock",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
                 )
                 await run_service.mark_running("run-step-parent-lock")
 
@@ -1508,6 +1612,7 @@ async def test_workflow_step_recorder_uses_committed_short_transactions(
                 await run_service.create_run(
                     run_id="run-workflow-recorder",
                     session_id="session-workflow-recorder",
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
                 )
                 await run_service.mark_running("run-workflow-recorder")
 

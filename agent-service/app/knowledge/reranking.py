@@ -15,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.knowledge.hybrid import RetrievalResult
 
 _LOGGER = logging.getLogger("agent-service.knowledge-reranking")
+DEFAULT_RERANK_TIMEOUT_SECONDS = 2.0
+DEFAULT_MIN_RELEVANCE_SCORE = 0.5
 
 # 发送给模型的最小候选, 不携带权限或会话等无关上下文
 class RerankValidationError(ValueError):
@@ -104,8 +106,8 @@ async def rerank_retrieval_results(
     candidates: Sequence[RetrievalResult],
     reranker: Reranker,
     *,
-    timeout_seconds: float = 2.0,
-    min_score: float = 0.5,
+    timeout_seconds: float = DEFAULT_RERANK_TIMEOUT_SECONDS,
+    min_score: float = DEFAULT_MIN_RELEVANCE_SCORE,
 ) -> RerankOutcome:
     """按模型相关性重排并过滤低分候选; 超时则保留原RRF结果。"""
     # 参数校验

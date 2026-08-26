@@ -33,6 +33,7 @@ from app.workflows import (
 )
 from app.workflows.action_prompt import ActionDecisionPrompt
 
+
 # 控制测试中模型的动作顺序
 class SequenceActionModel:
     """按测试声明顺序返回动作并记录实际模型调用次数。"""

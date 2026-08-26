@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     business_write_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
     business_pool_timeout_seconds: float = Field(default=1.0, gt=0, le=60)
     session_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
+    model_provider: str = Field(default="openai", min_length=1, max_length=128)  # 模型供应商
+    model_name: str | None = Field(default=None, max_length=128)  # 模型名称
+    model_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 模型温度
+    model_max_output_tokens: int = Field(default=2048, ge=1, le=65536)  # 模型最大输出令牌数
     embedding_provider: Literal["openai_compatible"] = "openai_compatible"
     embedding_model: str = "text-embedding-3-small"
     embedding_base_url: AnyHttpUrl = AnyHttpUrl("https://api.openai.com/v1")
@@ -48,6 +52,15 @@ class Settings(BaseSettings):
         """把Compose传入的固定维度字符串转换为Literal可校验的整数。"""
 
         return 1536 if value == "1536" else value
+
+    @field_validator("model_name", mode="before")
+    @classmethod
+    def empty_model_name_is_unconfigured(cls, value: object) -> object:
+        """Compose 的空字符串表示尚未接入真实决策模型。"""
+
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     # 数据库 URL转换
     @property

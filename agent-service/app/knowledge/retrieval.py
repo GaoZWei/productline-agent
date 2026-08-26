@@ -11,6 +11,10 @@ from app.knowledge.hybrid import RetrievalResult, fuse_hybrid_results
 from app.knowledge.search import KeywordSearchHit, VectorSearchHit
 from app.schemas.knowledge import KnowledgeSearchFilter
 
+DEFAULT_CHANNEL_TOP_K = 20
+DEFAULT_HYBRID_TOP_K = 10
+DEFAULT_MIN_VECTOR_SIMILARITY = -1.0
+
 
 class QueryEmbeddingGenerator(Protocol):
     """规范问答只依赖生成单条Query向量的最小接口。"""
@@ -64,9 +68,9 @@ class KnowledgeRetrievalPipeline:
         *,
         repository: KnowledgeSearchChannels,
         embedding_generator: QueryEmbeddingGenerator,
-        channel_top_k: int = 20,  # 每条检索通道最多返回多少候选
-        hybrid_top_k: int = 10,  # RRF融合后最多保留多少条候选
-        min_vector_similarity: float = -1.0, 
+        channel_top_k: int = DEFAULT_CHANNEL_TOP_K,  # 每条检索通道最多返回多少候选
+        hybrid_top_k: int = DEFAULT_HYBRID_TOP_K,  # RRF融合后最多保留多少条候选
+        min_vector_similarity: float = DEFAULT_MIN_VECTOR_SIMILARITY,
     ) -> None:
         _validate_top_k("channel_top_k", channel_top_k)
         _validate_top_k("hybrid_top_k", hybrid_top_k)

@@ -1980,6 +1980,15 @@ initialize
 
 ## M5.7 版本记录
 
+### 解决的问题
+
+Run只有执行状态和结果时, 配置或Schema变化后无法确认一次历史诊断使用了哪套Prompt、模型、Tool契约与 RAG策略, 容易把当前配置错误归因到旧执行。
+
+### 核心作用
+
+本阶段在应用启动时从代码常量、非敏感配置和真实Tool注册表生成统一版本快照, 并在Run创建时一次性冻结。
+它连接Router、动态Agent、Tool和RAG的演进证据, 同时明确区分未配置模型与迁移前不可恢复版本, 不保存密钥、完整Prompt或Tool响应。
+
 | ID | 任务 | 工时 |
 |---|---:|
 | T550 | 记录 Router Prompt 版本 | 1h |
@@ -1994,8 +2003,9 @@ initialize
 ## M5 完整验收
 
 ```bash
-make test-agent-policy
-pytest tests/e2e/test_dynamic_agent.py -q
+cd agent-service
+uv run --frozen pytest tests/test_action_decision.py tests/test_dynamic_diagnosis_workflow.py \
+  tests/test_dynamic_diagnosis_paths.py tests/test_run_versioning.py -q
 ```
 
 必须满足：

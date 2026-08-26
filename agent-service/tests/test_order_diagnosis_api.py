@@ -470,6 +470,20 @@ async def test_order_diagnosis_api_persists_successful_run_and_returns_golden_re
         assert run is not None
         assert run.status is AgentRunStatus.SUCCEEDED
         assert run.final_result == payload["diagnosis"]
+        assert run.version_snapshot["capture_status"] == "CAPTURED"
+        assert run.version_snapshot["router_prompt_version"] == "router-v3"
+        assert run.version_snapshot["agent_prompt_version"] == "action-decision-v1"
+        assert run.version_snapshot["model"]["configured"] is False
+        assert run.version_snapshot["tool_schema"]["tool_names"] == [
+            "get_delivery_status",
+            "get_order_detail",
+            "get_production_progress",
+            "get_quality_issues",
+            "get_related_tasks",
+            "get_review_result",
+            "get_task_detail",
+        ]
+        assert run.version_snapshot["rag_strategy"]["version"] == "hybrid-rrf-rerank-v1"
         assert run.request_message_id is not None
         message = await session.get(AgentMessage, run.request_message_id)
         assert message is not None

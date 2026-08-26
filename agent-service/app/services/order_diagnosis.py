@@ -21,6 +21,7 @@ from app.schemas.session import (
     context_from_page,
     page_context_from_session,
 )
+from app.schemas.versioning import RunVersionSnapshot
 from app.schemas.workflow import DiagnosisResult, StepError
 from app.services.run_lifecycle import RunLifecycleService
 from app.services.session_context import (
@@ -82,10 +83,13 @@ class OrderDiagnosisService:
         tool_registry: ToolRegistry,
         *,
         session_ttl_seconds: int,
+        version_snapshot: RunVersionSnapshot,
     ) -> None:
         self._database = database
         self._tool_registry = tool_registry
         self._session_ttl = timedelta(seconds=session_ttl_seconds)
+        # 诊断服务在构造时保存运行版本快照
+        self._version_snapshot = version_snapshot
 
     async def diagnose(
         self,
@@ -288,6 +292,7 @@ class OrderDiagnosisService:
                 run_id=run_id,
                 session_id=resolved_session_id,
                 request_message_id=message_id,
+                version_snapshot=self._version_snapshot,
             )
             await lifecycle.mark_running(run_id)
         return resolved_session_id, resolved_order_id, resolved_page_context

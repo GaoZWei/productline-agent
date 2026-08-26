@@ -19,6 +19,7 @@ from app.database import Database
 from app.observability import TraceIdMiddleware, configure_logging
 from app.settings import Settings, get_settings
 from app.tools import create_read_tool_registry
+from app.versioning import build_run_version_snapshot
 
 logger = logging.getLogger("agent-service.lifecycle")
 
@@ -47,6 +48,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.business_client = business_client
         # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。
         application.state.tool_registry = create_read_tool_registry(business_client)
+        # 在应用启动时生成运行版本快照
+        application.state.run_version_snapshot = build_run_version_snapshot(
+            resolved_settings,
+            application.state.tool_registry,
+        )
         logger.info(
             "service_started",
             extra={

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from app.knowledge.search import KeywordSearchHit, VectorSearchHit
 
-_RRF_RANK_CONSTANT = 60
+RRF_RANK_CONSTANT = 60
 
 
 class HybridSearchValidationError(ValueError):
@@ -210,7 +210,7 @@ def _minimum_optional(values: Iterable[int | None]) -> int | None:
 # 向量贡献   = 1 / (60 + vector_rank)
 def _rrf_score(keyword_rank: int | None, vector_rank: int | None) -> float:
     return sum(
-        1.0 / (_RRF_RANK_CONSTANT + rank)
+        1.0 / (RRF_RANK_CONSTANT + rank)
         for rank in (keyword_rank, vector_rank)
         if rank is not None
     )

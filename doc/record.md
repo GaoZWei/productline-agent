@@ -1044,3 +1044,25 @@
 - ORDER-001～005分别覆盖生产、生产阻塞、质量复核、等待复核和可交付路径, 且动态结果与固定结果完全一致。
 - 只读Tool首次超时只额外重试一次, 恢复后图中保存单条成功Observation, 不把物理重试误计为模型动作。
 - 复用确定性限制测试证明重复调用、预算耗尽、无新增信息和写Tool选择不会绕过动态图门禁。
+
+---
+
+## 2026-08-26 — `[T550-T555] M5.7 版本记录`
+
+### 核心解决的问题
+
+让历史Run能够识别创建时对应的Prompt、模型配置、Tool契约和RAG策略, 避免组件升级后只能看到结果却无法
+确认执行环境, 同时不把密钥或大段运行载荷写入版本证据。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/versioning.py`：严格版本快照Schema和诚实的历史不可恢复状态。
+- `agent-service/app/versioning.py`：Prompt、模型、Tool Schema摘要和RAG策略的统一快照构造。
+- `agent-service/app/services/run_lifecycle.py`、`models/agent_runtime.py`：创建时强制关联并冻结Run版本。
+- `agent-service/migrations/versions/0007_run_version_snapshot.py`：旧Run回填与非空字段迁移。
+
+### 实现的核心功能
+
+- 记录Router与Agent Prompt版本；真实模型未配置时显式保存未配置状态, 配置后记录名称和非敏感参数。
+- 对排序后的Tool输入/输出Schema、安全等级和权限计算稳定SHA-256, 并记录RAG策略与Embedding索引版本。
+- 新Run必须保存完整快照；迁移前Run标记为不可恢复, 终态流转不能修改版本字段。

@@ -56,6 +56,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local-only}@postgres:5432/${POSTGRES_DB:-remote_sensing_agent}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-openai}
       MODEL_NAME: ${MODEL_NAME:-}
+      MODEL_TEMPERATURE: ${MODEL_TEMPERATURE:-0.0}
+      MODEL_MAX_OUTPUT_TOKENS: ${MODEL_MAX_OUTPUT_TOKENS:-2048}
       MODEL_BASE_URL: ${MODEL_BASE_URL:-}
       MODEL_API_KEY: ${MODEL_API_KEY:-}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai_compatible}

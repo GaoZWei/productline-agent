@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from app.models import AgentRun, AgentRunStatus
 from app.repositories import AgentRunRepository
+from app.schemas.versioning import RunVersionSnapshot, VersionCaptureStatus
 
 
 class RunLifecycleError(Exception):
@@ -74,6 +75,7 @@ class RunLifecycleService:
         *,
         run_id: str,
         session_id: str,
+        version_snapshot: RunVersionSnapshot,
         request_message_id: str | None = None,
     ) -> AgentRun:
         """创建初始 PENDING Run, 父 Session 和可选 Message 必须已经存在。"""
@@ -85,6 +87,12 @@ class RunLifecycleService:
             if request_message_id is not None
             else None
         )
+        # 校验版本快照是否完整
+        if version_snapshot.capture_status is not VersionCaptureStatus.CAPTURED:
+            raise RunLifecycleValidationError(
+                field_name="version_snapshot",
+                message="must contain a complete captured component snapshot",
+            )
         # 第二步: 构造ORM对象
         return await self._repository.create(
             AgentRun(
@@ -92,6 +100,10 @@ class RunLifecycleService:
                 session_id=normalized_session_id,
                 request_message_id=normalized_message_id,
                 status=AgentRunStatus.PENDING,  # 初始状态为PENDING
+                version_snapshot=self._json_snapshot(
+                    version_snapshot.model_dump(mode="json"),  #  转换成标准JSON字符串
+                    field_name="version_snapshot",
+                ),
             )
         )
 
@@ -212,7 +224,11 @@ class RunLifecycleService:
 
     # 校验JSON结果是否有效
     @staticmethod
-    def _json_snapshot(value: dict[str, Any]) -> dict[str, Any]:
+    def _json_snapshot(
+        value: dict[str, Any],
+        *,
+        field_name: str = "final_result",
+    ) -> dict[str, Any]:
         """验证并复制标准 JSON 结果, 避免延迟到 commit 才发现不可序列化数据。"""
 
         try:  # 验证JSON数据是不是标准JSON。创建结果副本, 避免修改原始数据。
@@ -220,6 +236,6 @@ class RunLifecycleService:
             return cast(dict[str, Any], json.loads(serialized))
         except (TypeError, ValueError) as exception:
             raise RunLifecycleValidationError(
-                field_name="final_result",
+                field_name=field_name,
                 message="must contain only standard JSON values",
             ) from exception

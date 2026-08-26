@@ -22,6 +22,10 @@ from app.knowledge import (
     build_citations,
     rerank_retrieval_results,
 )
+from app.knowledge.reranking import (
+    DEFAULT_MIN_RELEVANCE_SCORE,
+    DEFAULT_RERANK_TIMEOUT_SECONDS,
+)
 from app.routing import BusinessSkill, Intent, skill_for_intent
 from app.schemas.context import PageContext
 from app.schemas.knowledge import Citation, KnowledgeSearchFilter, PermissionScope
@@ -82,8 +86,8 @@ class SpecificationQaWorkflow:
         retriever: KnowledgeRetriever,
         reranker: Reranker,
         answer_model: SpecificationAnswerModel,
-        rerank_timeout_seconds: float = 2.0,
-        min_relevance_score: float = 0.5,
+        rerank_timeout_seconds: float = DEFAULT_RERANK_TIMEOUT_SECONDS,
+        min_relevance_score: float = DEFAULT_MIN_RELEVANCE_SCORE,
     ) -> None:
         self._retriever = retriever
         self._reranker = reranker

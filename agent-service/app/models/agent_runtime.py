@@ -179,6 +179,11 @@ class AgentRun(Base):
         server_default=AgentRunStatus.PENDING.value,
         nullable=False,
     )
+    # 创建时冻结跨组件版本; 迁移前历史Run只能明确标记为不可恢复, 不能补造版本。
+    version_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,  # 所有新 Run 必须有关联版本信息
+    )
     # 保存的是“本次Run当时得到的诊断结果”, 订单最新状态仍要重新调用Java Tool获取
     final_result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # 错误字段
