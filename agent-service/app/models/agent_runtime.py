@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     JSON,
@@ -20,6 +20,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.approval import ApprovalRecord
 
 
 # Message角色
@@ -207,6 +210,10 @@ class AgentRun(Base):
     steps: Mapped[list["AgentStep"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    approvals: Mapped[list["ApprovalRecord"]] = relationship(
+        back_populates="run",
         passive_deletes=True,
     )
 

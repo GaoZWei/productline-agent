@@ -1066,3 +1066,25 @@
 - 记录Router与Agent Prompt版本；真实模型未配置时显式保存未配置状态, 配置后记录名称和非敏感参数。
 - 对排序后的Tool输入/输出Schema、安全等级和权限计算稳定SHA-256, 并记录RAG策略与Embedding索引版本。
 - 新Run必须保存完整快照；迁移前Run标记为不可恢复, 终态流转不能修改版本字段。
+
+---
+
+## 2026-08-26 — `[T601-T609] M6.1 Approval 数据模型`
+
+### 核心解决的问题
+
+为模型提出的业务写操作建立独立、可审查且可并发校验的持久化边界，保留原始草稿、用户修改、目标版本和
+确认事实，防止跳过确认、重复确认或并发覆盖后进入执行阶段。
+
+### 实现的核心代码
+
+- `agent-service/app/models/approval.py`：Approval稳定枚举、持久化字段和数据库约束。
+- `agent-service/app/repositories/approval.py`：按预期状态比较更新的持久化操作。
+- `agent-service/app/services/approval_lifecycle.py`：草稿快照、修改副本和确定性状态流转。
+- `agent-service/migrations/versions/0008_approval_records.py`：Approval表、Run关联、约束和索引迁移。
+
+### 实现的核心功能
+
+- 原始Agent草稿与用户修改副本分开保存，执行侧可确定性选择修改副本且不丢失审查基线。
+- 固化`SUBMIT_REVIEW`/`CREATE_REWORK`与对应写Tool的一一映射，同时保存目标任务和乐观锁版本。
+- 状态迁移使用比较更新阻止跳步与并发覆盖；确认后禁止修改，来源Run删除时仍保留Approval审计证据。

@@ -1,5 +1,12 @@
 """Agent 运行生命周期与后续 Workflow 服务入口。"""
 
+from app.services.approval_lifecycle import (
+    ApprovalLifecycleError,
+    ApprovalLifecycleService,
+    ApprovalLifecycleValidationError,
+    ApprovalNotFoundError,
+    InvalidApprovalTransitionError,
+)
 from app.services.intent_router import (
     IntentRouter,
     IntentRoutingModel,
@@ -39,8 +46,13 @@ from app.services.step_lifecycle import (
 )
 
 __all__ = [
+    "ApprovalLifecycleError",
+    "ApprovalLifecycleService",
+    "ApprovalLifecycleValidationError",
+    "ApprovalNotFoundError",
     "IntentRouter",
     "IntentRoutingModel",
+    "InvalidApprovalTransitionError",
     "InvalidRouterOutputError",
     "InvalidRunTransitionError",
     "InvalidStepTransitionError",

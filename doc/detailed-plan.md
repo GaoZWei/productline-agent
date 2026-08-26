@@ -2028,6 +2028,17 @@ uv run --frozen pytest tests/test_action_decision.py tests/test_dynamic_diagnosi
 
 ## M6.1 Approval 数据模型
 
+### 解决的问题
+
+在模型生成写操作建议后保存可审查、可修改且不可绕过确认的持久化记录，避免原始草稿、用户修改、目标版本和
+确认事实混在一起而无法审计，也避免重复确认或并发状态变化直接触发错误写入。
+
+### 核心作用
+
+Approval 是 Agent 草稿与 Java 业务写 Tool 之间的安全边界：冻结原始草稿，独立保存用户修改、操作与 Tool
+映射、目标对象版本和确认人，并通过确定性状态机控制后续执行资格。本阶段只建立持久化与生命周期，不调用
+任何业务写接口。
+
 Approval 状态：
 
 ```text

@@ -10,6 +10,12 @@ from app.models.agent_runtime import (
     AgentStepStatus,
     AgentStepType,
 )
+from app.models.approval import (
+    ApprovalRecord,
+    ApprovalStatus,
+    OperationType,
+    PendingToolName,
+)
 from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
 
 __all__ = [
@@ -21,6 +27,10 @@ __all__ = [
     "AgentStep",
     "AgentStepStatus",
     "AgentStepType",
+    "ApprovalRecord",
+    "ApprovalStatus",
     "KnowledgeChunk",
     "KnowledgeDocument",
+    "OperationType",
+    "PendingToolName",
 ]

@@ -37,12 +37,17 @@ from app.models import (
     AgentStep,
     AgentStepStatus,
     AgentStepType,
+    ApprovalRecord,
+    ApprovalStatus,
     KnowledgeChunk,
     KnowledgeDocument,
+    OperationType,
+    PendingToolName,
 )
 from app.repositories import (
     AgentRunRepository,
     AgentStepRepository,
+    ApprovalRecordRepository,
     KnowledgeIndexRepository,
     KnowledgeSearchRepository,
     KnowledgeSearchValidationError,
@@ -61,6 +66,7 @@ from app.schemas.versioning import (
     VersionCaptureStatus,
 )
 from app.services import (
+    ApprovalLifecycleService,
     InvalidRunTransitionError,
     InvalidStepTransitionError,
     RunLifecycleService,
@@ -172,6 +178,7 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "agent_runs",
         "agent_sessions",
         "agent_steps",
+        "approval_records",
         "knowledge_chunks",
         "knowledge_documents",
     }
@@ -221,6 +228,21 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "started_at",
         "finished_at",
     }
+    assert set(Base.metadata.tables["approval_records"].columns.keys()) == {
+        "approval_id",
+        "run_id",
+        "status",
+        "operation_type",
+        "original_draft",
+        "user_modified_draft",
+        "pending_tool_name",
+        "target_id",
+        "target_version",
+        "confirmed_by_user_id",
+        "confirmed_at",
+        "created_at",
+        "updated_at",
+    }
 
 
 @pytest.mark.integration
@@ -240,6 +262,7 @@ async def test_alembic_creates_agent_tables_and_repository_crud(
             "agent_runs",
             "agent_sessions",
             "agent_steps",
+            "approval_records",
             "knowledge_chunks",
             "knowledge_documents",
         } <= table_names
@@ -958,6 +981,106 @@ async def test_version_migration_marks_existing_runs_as_unavailable_legacy(
         )
         assert version_column["nullable"] is False
         assert version_column["default"] is None
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_approval_lifecycle_persists_drafts_confirmation_and_run_detachment(
+    migrated_database_url: str,
+) -> None:
+    confirmed_at = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session, session.begin():
+            session.add(AgentSession(session_id="session-approval", user_id="reviewer-001"))
+            run_service = RunLifecycleService(AgentRunRepository(session))
+            await run_service.create_run(
+                run_id="run-approval",
+                session_id="session-approval",
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            )
+            approval_service = ApprovalLifecycleService(
+                ApprovalRecordRepository(session),
+                now=lambda: confirmed_at,
+            )
+            approval = await approval_service.create_draft(
+                approval_id="approval-001",
+                run_id="run-approval",
+                operation_type=OperationType.SUBMIT_REVIEW,
+                original_draft={"review_comment": "Agent原始意见"},
+                pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
+                target_id="TASK-003",
+                target_version=0,
+            )
+            await approval_service.mark_waiting_confirmation(approval.approval_id)
+            await approval_service.save_user_modification(
+                approval.approval_id,
+                modified_draft={"review_comment": "用户修改意见"},
+            )
+            confirmed = await approval_service.confirm(
+                approval.approval_id,
+                confirmed_by_user_id="reviewer-001",
+            )
+            assert confirmed.status is ApprovalStatus.CONFIRMED
+
+        async with database.session() as verification_session:
+            repository = ApprovalRecordRepository(verification_session)
+            stored = await repository.get("approval-001")
+            assert stored is not None
+            assert stored.original_draft == {"review_comment": "Agent原始意见"}
+            assert stored.user_modified_draft == {"review_comment": "用户修改意见"}
+            assert stored.target_id == "TASK-003"
+            assert stored.target_version == 0
+            assert stored.confirmed_by_user_id == "reviewer-001"
+            assert stored.confirmed_at == confirmed_at
+
+        async with database.session() as delete_session, delete_session.begin():
+            assert await AgentRunRepository(delete_session).delete("run-approval") is True
+
+        async with database.session() as final_session:
+            retained = await ApprovalRecordRepository(final_session).get("approval-001")
+            assert retained is not None
+            assert retained.run_id is None
+            assert retained.status is ApprovalStatus.CONFIRMED
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_approval_database_rejects_operation_tool_mismatch(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session:
+            agent_session = AgentSession(session_id="session-mismatch", user_id="reviewer-001")
+            run = AgentRun(
+                run_id="run-mismatch",
+                session=agent_session,
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT.model_dump(mode="json"),
+            )
+            session.add(
+                ApprovalRecord(
+                    approval_id="approval-mismatch",
+                    run=run,
+                    status=ApprovalStatus.DRAFT,
+                    operation_type=OperationType.SUBMIT_REVIEW,
+                    original_draft={"review_comment": "原始意见"},
+                    user_modified_draft=None,
+                    pending_tool_name=PendingToolName.CREATE_REWORK_TASK,
+                    target_id="TASK-003",
+                    target_version=0,
+                    confirmed_by_user_id=None,
+                    confirmed_at=None,
+                )
+            )
+
+            with pytest.raises(IntegrityError):
+                await session.commit()
+            await session.rollback()
     finally:
         await database.dispose()
 
