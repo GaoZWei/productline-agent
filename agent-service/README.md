@@ -11,8 +11,8 @@ Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与�
 固定1536维pgvector入库和索引版本记录，M4.5～M4.12已实现中文关键词、同版本余弦检索、统一元数据门禁、
 RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测，但尚无具体问答/Rerank供应商、统一路由HTTP
 入口或全目录执行入口。M5.1～M5.4已扩展动态诊断状态、实现结构化动作决策、可回环LangGraph执行图和
-确定性执行限制，但尚无具体动作模型供应商。M6.1～M6.5已加入Approval生命周期、严格复核草稿、安全草稿生成、
-执行结果持久化，以及不暴露给动态模型的复核回写和返工创建Tool；确认前重校验和对外确认执行接口仍待M6.6实现。
+确定性执行限制，但尚无具体动作模型供应商。M6.1～M6.6已加入Approval生命周期、严格复核草稿、安全草稿生成、
+执行结果持久化、不暴露给动态模型的复核/返工写Tool，以及带有效期、最新事实校验和数据库执行锁的确认HTTP接口。
 
 ## 本地开发
 
@@ -26,7 +26,7 @@ uv run python -m app.main
 
 默认健康检查为 <http://localhost:8000/health>。可使用 `PORT`、`ENVIRONMENT`、
 `LOG_LEVEL`、`DATABASE_URL`、`BUSINESS_SERVICE_URL`、四项`BUSINESS_*_TIMEOUT_SECONDS`和
-`SESSION_TTL_SECONDS`覆盖基础配置。启用Embedding生成时还需设置`EMBEDDING_API_KEY`；Provider、模型、
+`SESSION_TTL_SECONDS`和`APPROVAL_TTL_SECONDS`覆盖会话及确认单有效期，后者默认900秒。启用Embedding生成时还需设置`EMBEDDING_API_KEY`；Provider、模型、
 Base URL、1536维度、批大小、超时、重试和索引版本均可通过对应`EMBEDDING_*`变量配置。
 
 ## Java HTTP Client
@@ -65,7 +65,13 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 保存到`execution_result`。幂等重放返回相同业务结果时保留首次Trace，内容不同则拒绝覆盖审计证据。
 
 两个写Tool均为`HIGH`风险、`max_retries=0`，并放在单独的写Tool注册表中，不注册到动态Agent或开发调试API。
-M6.5只提供受控执行原语；Approval过期、最新权限/任务版本重校验、执行锁、成功/失败终态和HTTP入口属于M6.6。
+`POST /api/agent/approvals/{approval_id}/confirm`接收页面最终ReviewDraft和身份Header，先原子保存修改副本与确认人，
+再强制调用`get_task_detail`和`get_quality_issues`刷新Java事实。任务版本或状态、问题归属/状态、坐标系返工类型变化时
+进入`STALE`，超时进入`EXPIRED`；只有数据库CAS成功把`CONFIRMED`改为`EXECUTING`的请求才能执行写Tool，随后进入
+`SUCCEEDED`或`FAILED`。重复提交已成功的同一确认会读取并返回首次`execution_result`，不会再次调用Java。
+
+当前确认服务按`REVIEWER`演示角色重新构造只读及写权限，Java仍执行最终角色、任务状态、版本和幂等校验。确认前
+重校验当前不重新运行RAG；前端已有确认请求客户端，但诊断侧边栏尚未取得和挂载Approval卡片。
 
 ## 只读业务 Tool
 

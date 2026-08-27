@@ -8,6 +8,11 @@ from app.schemas.agent import (
     OrderDiagnosisResponse,
 )
 from app.schemas.approval import Conclusion, ReviewDraft, ReworkSuggestion, ReworkType
+from app.schemas.approval_execution import (
+    ApprovalConfirmationErrorResponse,
+    ApprovalConfirmationRequest,
+    ApprovalConfirmationResponse,
+)
 from app.schemas.context import PageContext, PageType
 from app.schemas.knowledge import (
     Citation,
@@ -80,6 +85,9 @@ __all__ = [
     "AgentAction",
     "AgentObservation",
     "AgentTerminationReason",
+    "ApprovalConfirmationErrorResponse",
+    "ApprovalConfirmationRequest",
+    "ApprovalConfirmationResponse",
     "BlockingStage",
     "BusinessSkill",
     "Citation",

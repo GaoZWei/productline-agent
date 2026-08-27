@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     business_write_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
     business_pool_timeout_seconds: float = Field(default=1.0, gt=0, le=60)
     session_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
+    approval_ttl_seconds: int = Field(default=900, ge=60, le=86400)
     model_provider: str = Field(default="openai", min_length=1, max_length=128)  # 模型供应商
     model_name: str | None = Field(default=None, max_length=128)  # 模型名称
     model_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 模型温度

@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from app.api.approvals import router as approvals_router
 from app.api.order_diagnosis import router as order_diagnosis_router
 from app.api.sessions import router as sessions_router
 from app.api.tool_debug import ToolDebugRunContextStore
@@ -17,8 +18,9 @@ from app.api.tool_debug import router as tool_debug_router
 from app.clients.business import BusinessHttpClient
 from app.database import Database
 from app.observability import TraceIdMiddleware, configure_logging
+from app.services import DatabaseApprovalExecutionStore
 from app.settings import Settings, get_settings
-from app.tools import create_read_tool_registry
+from app.tools import create_read_tool_registry, create_write_tool_registry
 from app.versioning import build_run_version_snapshot
 
 logger = logging.getLogger("agent-service.lifecycle")
@@ -48,6 +50,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.business_client = business_client
         # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。
         application.state.tool_registry = create_read_tool_registry(business_client)
+        application.state.write_tool_registry = create_write_tool_registry(
+            business_client,
+            DatabaseApprovalExecutionStore(database),
+        )
         # 在应用启动时生成运行版本快照
         application.state.run_version_snapshot = build_run_version_snapshot(
             resolved_settings,
@@ -78,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.settings = resolved_settings
     application.include_router(order_diagnosis_router)
     application.include_router(sessions_router)
+    application.include_router(approvals_router)
     # 根据环境决定是否注册路由
     if resolved_settings.environment == "development":
         application.state.tool_debug_context_store = ToolDebugRunContextStore()

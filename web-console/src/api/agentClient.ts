@@ -1,10 +1,14 @@
 import axios, { AxiosError } from "axios";
 
 import type {
+  ApprovalConfirmationErrorResponse,
+  ApprovalConfirmationResponse,
+  ApprovalStatus,
   BlockingStage,
   OrderDiagnosisErrorResponse,
   OrderDiagnosisRequest,
   OrderDiagnosisResponse,
+  ReviewApprovalDecision,
 } from "../types/agent";
 
 const AGENT_API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL ?? "/agent-api";
@@ -27,6 +31,7 @@ export class AgentApiError extends Error {
   readonly traceId?: string;
   readonly retryable: boolean;
   readonly errorStep: string | null;
+  readonly approvalStatus: ApprovalStatus | null;
   readonly status?: number;
 
   constructor(options: {
@@ -36,6 +41,7 @@ export class AgentApiError extends Error {
     traceId?: string;
     retryable?: boolean;
     errorStep?: string | null;
+    approvalStatus?: ApprovalStatus | null;
     status?: number;
   }) {
     super(options.message);
@@ -45,6 +51,7 @@ export class AgentApiError extends Error {
     this.traceId = options.traceId;
     this.retryable = options.retryable ?? false;
     this.errorStep = options.errorStep ?? null;
+    this.approvalStatus = options.approvalStatus ?? null;
     this.status = options.status;
   }
 }
@@ -74,6 +81,24 @@ export async function requestOrderDiagnosis(
   }
 }
 
+export async function requestApprovalConfirmation(
+  decision: ReviewApprovalDecision,
+): Promise<ApprovalConfirmationResponse> {
+  try {
+    const approvalId = encodeURIComponent(decision.approval_id);
+    const response = await agentHttpClient.post<unknown>(
+      `/api/agent/approvals/${approvalId}/confirm`,
+      { draft: decision.draft },
+    );
+    if (!isApprovalConfirmationResponse(response.data)) {
+      throw responseValidationError(response.status, traceIdFrom(response.data));
+    }
+    return response.data;
+  } catch (reason) {
+    throw normalizeAgentError(reason);
+  }
+}
+
 function normalizeAgentError(reason: unknown): AgentApiError {
   if (reason instanceof AgentApiError) return reason;
   if (!axios.isAxiosError(reason)) {
@@ -88,6 +113,16 @@ function normalizeAgentError(reason: unknown): AgentApiError {
 function errorFromAxios(error: AxiosError): AgentApiError {
   const status = error.response?.status;
   const payload = error.response?.data;
+  if (isApprovalConfirmationErrorResponse(payload)) {
+    return new AgentApiError({
+      code: payload.code,
+      message: payload.message,
+      traceId: payload.trace_id,
+      retryable: payload.retryable,
+      approvalStatus: payload.status,
+      status,
+    });
+  }
   if (isOrderDiagnosisErrorResponse(payload)) {
     return new AgentApiError({
       code: payload.code,
@@ -123,6 +158,74 @@ function errorFromAxios(error: AxiosError): AgentApiError {
     message: "无法连接诊断服务，请检查服务状态",
     retryable: true,
   });
+}
+
+function isApprovalConfirmationResponse(value: unknown): value is ApprovalConfirmationResponse {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.approval_id) &&
+    value.status === "SUCCEEDED" &&
+    isNonEmptyString(value.trace_id) &&
+    isApprovalWriteResult(value.result)
+  );
+}
+
+function isApprovalWriteResult(value: unknown) {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.approval_id) ||
+    !isNonEmptyString(value.task_id) ||
+    !Number.isInteger(value.task_version) ||
+    Number(value.task_version) < 0 ||
+    !isNonEmptyString(value.java_trace_id)
+  ) {
+    return false;
+  }
+  if (isNonEmptyString(value.review_id)) {
+    return (
+      isNonEmptyString(value.issue_id) &&
+      ["APPROVED", "REJECTED", "REWORK_REQUIRED"].includes(String(value.status)) &&
+      isNonEmptyString(value.review_comment)
+    );
+  }
+  return (
+    isNonEmptyString(value.rework_task_id) &&
+    isNonEmptyString(value.source_issue_id) &&
+    value.rework_type === "COORDINATE_SYSTEM_FIX" &&
+    value.status === "PENDING" &&
+    isNonEmptyString(value.reason)
+  );
+}
+
+function isApprovalConfirmationErrorResponse(
+  value: unknown,
+): value is ApprovalConfirmationErrorResponse {
+  return (
+    isRecord(value) &&
+    (value.approval_id === null || isNonEmptyString(value.approval_id)) &&
+    (value.status === null || isApprovalStatus(value.status)) &&
+    isNonEmptyString(value.trace_id) &&
+    isNonEmptyString(value.code) &&
+    isNonEmptyString(value.message) &&
+    typeof value.retryable === "boolean"
+  );
+}
+
+function isApprovalStatus(value: unknown): value is ApprovalStatus {
+  return (
+    typeof value === "string" &&
+    [
+      "DRAFT",
+      "WAITING_CONFIRMATION",
+      "CONFIRMED",
+      "EXECUTING",
+      "SUCCEEDED",
+      "FAILED",
+      "CANCELLED",
+      "EXPIRED",
+      "STALE",
+    ].includes(value)
+  );
 }
 
 function responseValidationError(status?: number, traceId?: string) {

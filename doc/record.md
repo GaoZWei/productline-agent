@@ -1173,3 +1173,25 @@
 - 写Tool只接收Approval身份和幂等键，业务请求完全映射自`EXECUTING`确认快照，并校验待执行Tool和当前确认人。
 - 复核回写核对问题、结论、意见和递增版本；返工创建还限制受支持类型，并保存Java返回的新资源身份。
 - 两个Tool均不自动重试且不暴露给动态模型；相同Java业务结果的幂等重放保留首次Trace，不同结果不能覆盖执行证据。
+
+---
+
+## 2026-08-27 — `[T647-T654] M6.6 确认前重新校验`
+
+### 核心解决的问题
+
+防止用户确认后业务版本、任务状态或质检问题已经变化却继续按旧草稿写入，并阻止连续点击、多标签页和并发请求让
+同一Approval多次进入Java写接口。
+
+### 实现的核心代码
+
+- `agent-service/app/services/approval_confirmation.py`：确认快照、有效期、事实刷新、CAS执行锁和终态裁决。
+- `agent-service/app/api/approvals.py`、`app/schemas/approval_execution.py`：严格确认HTTP请求、成功结果和错误契约。
+- `agent-service/app/main.py`：应用生命周期注册独立写Tool注册表和Approval确认路由。
+- `web-console/src/api/agentClient.ts`：确认请求、写入结果校验及Approval错误映射。
+
+### 实现的核心功能
+
+- 原子保存用户最终草稿与确认人，默认15分钟有效期；确认人、请求草稿或角色不一致时不读取Java、更不执行写Tool。
+- 强制刷新任务和质检问题，版本、任务状态、问题归属/状态或返工类型变化时以`STALE`关闭，不把旧确认用于新事实。
+- 数据库比较更新只允许一个请求进入`EXECUTING`；成功保存`SUCCEEDED`和执行结果，写冲突进入`STALE`，其他写失败进入`FAILED`，成功重放直接返回首次结果。

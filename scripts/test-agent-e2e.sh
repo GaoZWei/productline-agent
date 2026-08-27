@@ -46,4 +46,5 @@ AGENT_E2E_BUSINESS_URL="http://127.0.0.1:${business_port}" \
   uv run --frozen pytest \
     tests/e2e/test_order_diagnosis.py \
     tests/e2e/test_write_tools.py \
+    tests/e2e/test_approval_confirmation.py \
     -q "$@"

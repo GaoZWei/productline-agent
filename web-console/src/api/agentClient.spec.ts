@@ -1,7 +1,12 @@
 import MockAdapter from "axios-mock-adapter";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AgentApiError, agentHttpClient, requestOrderDiagnosis } from "./agentClient";
+import {
+  AgentApiError,
+  agentHttpClient,
+  requestApprovalConfirmation,
+  requestOrderDiagnosis,
+} from "./agentClient";
 
 const mock = new MockAdapter(agentHttpClient);
 
@@ -98,7 +103,73 @@ describe("agent API client", () => {
       retryable: true,
     });
   });
+
+  it("提交最终复核草稿并校验Java写入结果", async () => {
+    mock.onPost("/api/agent/approvals/approval-confirm-003/confirm").reply(200, {
+      approval_id: "approval-confirm-003",
+      status: "SUCCEEDED",
+      trace_id: "trace-confirm-003",
+      result: {
+        approval_id: "approval-confirm-003",
+        task_id: "TASK-003",
+        issue_id: "ISSUE-001",
+        review_id: "REVIEW-WRITE-003",
+        status: "REWORK_REQUIRED",
+        review_comment: "完成坐标系统处理后重新提交复核",
+        task_version: 8,
+        java_trace_id: "trace-java-write",
+      },
+    });
+
+    await expect(
+      requestApprovalConfirmation({
+        approval_id: "approval-confirm-003",
+        draft: reviewDraft(),
+      }),
+    ).resolves.toMatchObject({
+      status: "SUCCEEDED",
+      result: { review_id: "REVIEW-WRITE-003", task_version: 8 },
+    });
+    expect(JSON.parse(mock.history.post[0]?.data ?? "{}")).toEqual({ draft: reviewDraft() });
+  });
+
+  it("把Approval过期错误转换为可展示的客户端错误", async () => {
+    mock.onPost("/api/agent/approvals/approval-confirm-003/confirm").reply(410, {
+      approval_id: "approval-confirm-003",
+      status: "EXPIRED",
+      trace_id: "trace-confirm-expired",
+      code: "APPROVAL_EXPIRED",
+      message: "approval confirmation window has expired",
+      retryable: false,
+    });
+
+    await expect(
+      requestApprovalConfirmation({
+        approval_id: "approval-confirm-003",
+        draft: reviewDraft(),
+      }),
+    ).rejects.toMatchObject({
+      code: "APPROVAL_EXPIRED",
+      traceId: "trace-confirm-expired",
+      status: 410,
+    });
+  });
 });
+
+function reviewDraft() {
+  return {
+    task_id: "TASK-003",
+    issue_id: "ISSUE-001",
+    conclusion: "REWORK_REQUIRED" as const,
+    problem_summary: "存在未关闭的坐标系质量问题",
+    review_comment: "完成坐标系统处理后重新提交复核",
+    specification_references: [],
+    suggested_rework: {
+      required: true,
+      type: "COORDINATE_SYSTEM_FIX" as const,
+    },
+  };
+}
 
 function orderPageContext() {
   return {

@@ -130,3 +130,42 @@ export interface ReviewApprovalDecision {
   approval_id: string;
   draft: ReviewDraft;
 }
+
+export interface WriteReviewResult {
+  approval_id: string;
+  task_id: string;
+  issue_id: string;
+  review_id: string;
+  status: ReviewConclusion;
+  review_comment: string;
+  task_version: number;
+  java_trace_id: string;
+}
+
+export interface CreateReworkTaskResult {
+  approval_id: string;
+  task_id: string;
+  source_issue_id: string;
+  rework_task_id: string;
+  rework_type: ReworkType;
+  status: "PENDING";
+  reason: string;
+  task_version: number;
+  java_trace_id: string;
+}
+
+export interface ApprovalConfirmationResponse {
+  approval_id: string;
+  status: "SUCCEEDED";
+  trace_id: string;
+  result: WriteReviewResult | CreateReworkTaskResult;
+}
+
+export interface ApprovalConfirmationErrorResponse {
+  approval_id: string | null;
+  status: ApprovalStatus | null;
+  trace_id: string;
+  code: string;
+  message: string;
+  retryable: boolean;
+}

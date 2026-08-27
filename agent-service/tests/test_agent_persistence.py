@@ -69,6 +69,7 @@ from app.schemas.versioning import (
 )
 from app.services import (
     ApprovalLifecycleService,
+    DatabaseApprovalConfirmationStore,
     DatabaseApprovalExecutionStore,
     DatabaseReviewDraftStore,
     InvalidRunTransitionError,
@@ -1150,6 +1151,70 @@ async def test_approval_execution_store_saves_only_the_first_java_result(
             )
             assert stored is not None
             assert stored.execution_result == result
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_confirmation_store_atomically_confirms_and_allows_one_execution_lock(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session, session.begin():
+            session.add(AgentSession(session_id="session-confirm-cas", user_id="reviewer-001"))
+            await RunLifecycleService(AgentRunRepository(session)).create_run(
+                run_id="run-confirm-cas",
+                session_id="session-confirm-cas",
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            )
+            lifecycle = ApprovalLifecycleService(ApprovalRecordRepository(session))
+            approval = await lifecycle.create_draft(
+                approval_id="approval-confirm-cas",
+                run_id="run-confirm-cas",
+                operation_type=OperationType.SUBMIT_REVIEW,
+                original_draft=TEST_REVIEW_DRAFT,
+                pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
+                target_id="TASK-003",
+                target_version=7,
+            )
+            await lifecycle.mark_waiting_confirmation(approval.approval_id)
+
+        store = DatabaseApprovalConfirmationStore(database)
+        modified = ReviewDraft.model_validate(
+            {**TEST_REVIEW_DRAFT, "review_comment": "用户确认意见"}
+        )
+        confirmed = await store.confirm_waiting(
+            "approval-confirm-cas",
+            draft=modified,
+            confirmed_by_user_id="reviewer-001",
+            confirmed_at=datetime.now(UTC),
+        )
+        assert confirmed is not None
+        assert confirmed.status is ApprovalStatus.CONFIRMED
+        assert confirmed.draft.review_comment == "用户确认意见"
+
+        first, second = await asyncio.gather(
+            store.transition(
+                "approval-confirm-cas",
+                expected_status=ApprovalStatus.CONFIRMED,
+                target_status=ApprovalStatus.EXECUTING,
+                updated_at=datetime.now(UTC),
+            ),
+            store.transition(
+                "approval-confirm-cas",
+                expected_status=ApprovalStatus.CONFIRMED,
+                target_status=ApprovalStatus.EXECUTING,
+                updated_at=datetime.now(UTC),
+            ),
+        )
+
+        assert sum(result is not None for result in (first, second)) == 1
+        current = await store.get_snapshot("approval-confirm-cas")
+        assert current is not None
+        assert current.status is ApprovalStatus.EXECUTING
+        assert current.confirmed_by_user_id == "reviewer-001"
     finally:
         await database.dispose()
 

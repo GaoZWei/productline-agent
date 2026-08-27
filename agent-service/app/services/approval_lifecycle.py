@@ -40,7 +40,9 @@ _ALLOWED_TRANSITIONS = {
     ApprovalStatus.CONFIRMED: frozenset(
         {ApprovalStatus.EXECUTING, ApprovalStatus.EXPIRED, ApprovalStatus.STALE}
     ),
-    ApprovalStatus.EXECUTING: frozenset({ApprovalStatus.SUCCEEDED, ApprovalStatus.FAILED}),
+    ApprovalStatus.EXECUTING: frozenset(
+        {ApprovalStatus.SUCCEEDED, ApprovalStatus.FAILED, ApprovalStatus.STALE}
+    ),
     ApprovalStatus.SUCCEEDED: frozenset(),
     ApprovalStatus.FAILED: frozenset(),
     ApprovalStatus.CANCELLED: frozenset(),

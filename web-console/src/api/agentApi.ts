@@ -1,5 +1,10 @@
-import { requestOrderDiagnosis } from "./agentClient";
-import type { OrderDiagnosisResponse, PageContext } from "../types/agent";
+import { requestApprovalConfirmation, requestOrderDiagnosis } from "./agentClient";
+import type {
+  ApprovalConfirmationResponse,
+  OrderDiagnosisResponse,
+  PageContext,
+  ReviewApprovalDecision,
+} from "../types/agent";
 
 export function diagnoseOrder(
   orderId: string,
@@ -13,4 +18,10 @@ export function diagnoseOrder(
     user_message: userMessage,
     page_context: pageContext,
   });
+}
+
+export function confirmReviewApproval(
+  decision: ReviewApprovalDecision,
+): Promise<ApprovalConfirmationResponse> {
+  return requestApprovalConfirmation(decision);
 }
