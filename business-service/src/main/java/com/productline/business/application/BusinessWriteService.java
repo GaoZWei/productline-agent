@@ -34,6 +34,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.EnumSet;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -119,7 +120,7 @@ public class BusinessWriteService {
                 validateReviewState(issue, request.status());
 
                 int reviewCountBefore = reviewRepository.findAllByTaskIdOrderByReviewIdAsc(taskId).size();
-                String reviewId = "REVIEW-WRITE-" + UUID.randomUUID();
+                String reviewId = generatedId("REVIEW-WRITE-");
                 ReviewRecord review = new ReviewRecord(reviewId, request.status(), request.reviewComment());
                 issue.addReviewRecord(review);
 
@@ -127,7 +128,7 @@ public class BusinessWriteService {
                 idempotency.complete(reviewId, nextVersion);
                 operationLogRepository.save(
                                 new OperationLog(
-                                                "OPERATION-" + UUID.randomUUID(),
+                                                generatedId("OPERATION-"),
                                                 SUBMIT_REVIEW,
                                                 "PRODUCTION_TASK",
                                                 taskId,
@@ -193,7 +194,7 @@ public class BusinessWriteService {
                                         "active rework already exists for issue: " + issue.getIssueId());
                 }
 
-                String reworkTaskId = "REWORK-WRITE-" + UUID.randomUUID();
+                String reworkTaskId = generatedId("REWORK-WRITE-");
                 ReworkTask rework = new ReworkTask(
                                 reworkTaskId,
                                 ProductionTaskStatus.PENDING,
@@ -205,7 +206,7 @@ public class BusinessWriteService {
                 idempotency.complete(reworkTaskId, nextVersion);
                 operationLogRepository.save(
                                 new OperationLog(
-                                                "OPERATION-" + UUID.randomUUID(),
+                                                generatedId("OPERATION-"),
                                                 CREATE_REWORK,
                                                 "PRODUCTION_TASK",
                                                 taskId,
@@ -368,6 +369,10 @@ public class BusinessWriteService {
                                                 : rework.getSourceIssue().getIssueId(),
                                 rework.getStatus(),
                                 rework.getReason());
+        }
+
+        private String generatedId(String prefix) {
+                return prefix + UUID.randomUUID().toString().toUpperCase(Locale.ROOT);
         }
 
         private String json(Map<String, Object> value) {

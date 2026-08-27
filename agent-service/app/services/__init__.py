@@ -1,5 +1,9 @@
 """Agent 运行生命周期与后续 Workflow 服务入口。"""
 
+from app.services.approval_execution_store import (
+    ApprovalExecutionSnapshot,
+    DatabaseApprovalExecutionStore,
+)
 from app.services.approval_lifecycle import (
     ApprovalLifecycleError,
     ApprovalLifecycleService,
@@ -47,10 +51,12 @@ from app.services.step_lifecycle import (
 )
 
 __all__ = [
+    "ApprovalExecutionSnapshot",
     "ApprovalLifecycleError",
     "ApprovalLifecycleService",
     "ApprovalLifecycleValidationError",
     "ApprovalNotFoundError",
+    "DatabaseApprovalExecutionStore",
     "DatabaseReviewDraftStore",
     "IntentRouter",
     "IntentRoutingModel",

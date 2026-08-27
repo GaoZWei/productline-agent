@@ -225,6 +225,13 @@ class ApprovalLifecycleService:
             target_id=current.target_id,
             field_name="modified_draft",
         )
+        # 用户修改时不能替换问题ID
+        original_draft = self._review_draft(current.original_draft, "original_draft")
+        if review_draft.issue_id != original_draft.issue_id:
+            raise ApprovalLifecycleValidationError(
+                field_name="modified_draft.issue_id",
+                message="must match the immutable approval issue",
+            )
         snapshot = review_draft.model_dump(mode="json")
         # 最后才保存用户修改副本
         updated = await self._repository.save_user_modified_draft(

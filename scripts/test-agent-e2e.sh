@@ -43,4 +43,7 @@ done
 cd "$(dirname "$0")/../agent-service"
 AGENT_E2E_DATABASE_URL="postgresql://${e2e_user}:${e2e_password}@127.0.0.1:${postgres_port}/${e2e_database}" \
 AGENT_E2E_BUSINESS_URL="http://127.0.0.1:${business_port}" \
-  uv run --frozen pytest tests/e2e/test_order_diagnosis.py -q "$@"
+  uv run --frozen pytest \
+    tests/e2e/test_order_diagnosis.py \
+    tests/e2e/test_write_tools.py \
+    -q "$@"

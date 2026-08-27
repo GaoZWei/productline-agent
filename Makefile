@@ -119,11 +119,12 @@ test-specification-qa: ## 验证 M4.11 规范问答固定Workflow、路由Skill�
 eval-rag: ## 验证 M4.12 固定评测集、四策略、Hit@5、MRR和失败样本
 	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_rag_eval.py tests/integration/rag
 
-test-approval: ## 验证 M6 Approval生命周期、草稿Schema和安全草稿生成
-	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_review_draft_generation.py
-	./scripts/test-agent-persistence.sh -k "approval or review_draft_store"
+test-approval: ## 验证 M6 Approval生命周期、草稿生成、写Tool和前端确认卡片
+	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_review_draft_generation.py tests/test_write_tools.py
+	./scripts/test-agent-persistence.sh -k "approval or review_draft_store or execution"
+	cd web-console && npm test -- --run src/components/ReviewApprovalCard.spec.ts
 
-test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证 M2.10 完整诊断链路
+test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证诊断链路及M6.5写Tool
 	./scripts/test-agent-e2e.sh
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查

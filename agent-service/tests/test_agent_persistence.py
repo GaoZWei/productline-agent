@@ -69,6 +69,7 @@ from app.schemas.versioning import (
 )
 from app.services import (
     ApprovalLifecycleService,
+    DatabaseApprovalExecutionStore,
     DatabaseReviewDraftStore,
     InvalidRunTransitionError,
     InvalidStepTransitionError,
@@ -111,6 +112,7 @@ TEST_RUN_VERSION_SNAPSHOT = RunVersionSnapshot(
 )
 TEST_REVIEW_DRAFT = {
     "task_id": "TASK-003",
+    "issue_id": "ISSUE-001",
     "conclusion": "REWORK_REQUIRED",
     "problem_summary": "存在未关闭的坐标系质量问题",
     "review_comment": "Agent原始意见",
@@ -266,6 +268,7 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "target_version",
         "confirmed_by_user_id",
         "confirmed_at",
+        "execution_result",
         "created_at",
         "updated_at",
     }
@@ -1078,6 +1081,75 @@ async def test_approval_lifecycle_persists_drafts_confirmation_and_run_detachmen
             assert retained is not None
             assert retained.run_id is None
             assert retained.status is ApprovalStatus.CONFIRMED
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_approval_execution_store_saves_only_the_first_java_result(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session, session.begin():
+            session.add(AgentSession(session_id="session-execution", user_id="reviewer-001"))
+            await RunLifecycleService(AgentRunRepository(session)).create_run(
+                run_id="run-execution",
+                session_id="session-execution",
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            )
+            lifecycle = ApprovalLifecycleService(ApprovalRecordRepository(session))
+            approval = await lifecycle.create_draft(
+                approval_id="approval-execution",
+                run_id="run-execution",
+                operation_type=OperationType.SUBMIT_REVIEW,
+                original_draft=TEST_REVIEW_DRAFT,
+                pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
+                target_id="TASK-003",
+                target_version=7,
+            )
+            await lifecycle.mark_waiting_confirmation(approval.approval_id)
+            await lifecycle.confirm(
+                approval.approval_id,
+                confirmed_by_user_id="reviewer-001",
+            )
+            await lifecycle.mark_executing(approval.approval_id)
+
+        store = DatabaseApprovalExecutionStore(database)
+        snapshot = await store.get_execution_snapshot("approval-execution")
+        assert snapshot is not None
+        assert snapshot.status is ApprovalStatus.EXECUTING
+        assert snapshot.draft.issue_id == "ISSUE-001"
+
+        result = {
+            "approval_id": "approval-execution",
+            "review_id": "REVIEW-WRITE-003",
+            "task_version": 8,
+            "java_trace_id": "trace-first",
+        }
+        assert await store.save_execution_result("approval-execution", result=result) is True
+        assert (
+            await store.save_execution_result(
+                "approval-execution",
+                result={**result, "java_trace_id": "trace-replay"},
+            )
+            is True
+        )
+        assert (
+            await store.save_execution_result(
+                "approval-execution",
+                result={**result, "review_id": "REVIEW-WRITE-OTHER"},
+            )
+            is False
+        )
+
+        async with database.session() as verification_session:
+            stored = await ApprovalRecordRepository(verification_session).get(
+                "approval-execution"
+            )
+            assert stored is not None
+            assert stored.execution_result == result
     finally:
         await database.dispose()
 

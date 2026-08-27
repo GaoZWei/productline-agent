@@ -8,7 +8,8 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.knowledge import Citation
-from app.schemas.tools import TaskIdentifier
+from app.schemas.tools import BusinessIdentifier, TaskIdentifier
+
 
 # 复核结论枚举
 class Conclusion(StrEnum):
@@ -65,6 +66,7 @@ class ReviewDraft(ApprovalDraftSchema):
     """保存复核结论、说明、规范依据和可选返工建议的完整草稿。"""
 
     task_id: TaskIdentifier  # 草稿作用于哪个生产任务
+    issue_id: BusinessIdentifier  # 草稿作用于哪个质检问题, 写Tool不得临时猜测
     conclusion: ConclusionValue  # 复核结论
     problem_summary: ProblemSummary  # 问题事实的摘要
     review_comment: ReviewComment  # 将写入Java复核记录的意见

@@ -68,6 +68,12 @@ from app.schemas.workflow import (
     StepError,
     Suggestion,
 )
+from app.schemas.write_tools import (
+    CreateReworkTaskInput,
+    CreateReworkTaskOutput,
+    WriteReviewResultInput,
+    WriteReviewResultOutput,
+)
 
 __all__ = [
     "ActionDecision",
@@ -81,6 +87,8 @@ __all__ = [
     "ClarificationRequest",
     "Conclusion",
     "ConfidenceLevel",
+    "CreateReworkTaskInput",
+    "CreateReworkTaskOutput",
     "DiagnosisNarrative",
     "DiagnosisResult",
     "DocumentCatalog",
@@ -131,4 +139,6 @@ __all__ = [
     "Suggestion",
     "ToolSchemaSnapshot",
     "VersionCaptureStatus",
+    "WriteReviewResultInput",
+    "WriteReviewResultOutput",
 ]

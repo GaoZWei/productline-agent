@@ -1108,7 +1108,7 @@
 
 - 复核结论只允许`APPROVED`、`REJECTED`或`REWORK_REQUIRED`，明确排除Java不接受的`PENDING`。
 - 返工结论、是否返工与返工类型必须一致，复核意见上限与Java接口的1000字符约束对齐。
-- 规范依据复用Citation版本和Chunk身份并拒绝重复来源；JSON落库后可恢复严格类型，用户修改不得改变目标任务。
+- 规范依据复用Citation版本和Chunk身份并拒绝重复来源；草稿同时携带任务和质检问题身份，用户修改不得替换影响对象。
 
 ---
 
@@ -1129,4 +1129,47 @@
 
 - 只接受会话最近的`SUCCEEDED`诊断Run，并从JSON快照恢复严格`DiagnosisResult`，不回退使用更旧诊断。
 - 强制刷新任务详情和质检问题，校验任务所属订单后检索当前日期、权限范围内的规范依据。
-- 模型草稿必须保持目标任务不变并只引用RAG白名单；Approval和Run原子进入等待确认，全流程不调用Java写接口。
+- 模型草稿必须保持目标任务不变、选择刷新结果中的质检问题并只引用RAG白名单；Approval和Run原子进入等待确认，全流程不调用Java写接口。
+
+---
+
+## 2026-08-26 — `[T624-T633] M6.4 前端确认卡片`
+
+### 核心解决的问题
+
+让用户在授权前看清复核草稿的影响对象、目标版本、问题摘要和规范依据，并能修改最终意见与结论；通过二次确认和
+本地提交锁避免误触、空意见及连续点击把同一人工决定重复发送给后续接口。
+
+### 实现的核心代码
+
+- `web-console/src/types/agent.ts`：与后端Approval、ReviewDraft和状态枚举对齐的前端契约。
+- `web-console/src/components/ReviewApprovalCard.vue`：草稿展示、编辑、引用、二次确认和事件边界。
+- `web-console/src/components/ReviewApprovalCard.spec.ts`：内容展示、编辑归一化、结论联动和防重复交互测试。
+
+### 实现的核心功能
+
+- 展示任务ID、质检问题ID、目标版本、问题摘要和可展开的完整规范引用，用户只能编辑复核意见与最终结论。
+- 结论切换时确定性同步返工建议，确认事件携带去除首尾空格后的完整草稿，取消事件只携带Approval身份。
+- 非待确认状态、父级提交中和本地已触发操作都会禁用按钮；组件不调用HTTP或Java写接口。
+
+---
+
+## 2026-08-27 — `[T634-T646] M6.5 写 Tool`
+
+### 核心解决的问题
+
+防止模型或调用方在用户确认后重新指定任务、质检问题、版本或文案，并避免写接口重放产生重复业务记录；Java成功
+响应还必须留下可追溯、不可被不同结果覆盖的Approval执行证据。
+
+### 实现的核心代码
+
+- `agent-service/app/tools/write.py`、`app/schemas/write_tools.py`：两个高风险写Tool及其严格请求、响应契约。
+- `agent-service/app/services/approval_execution_store.py`、`app/repositories/approval.py`：执行快照读取和首次结果比较保存。
+- `agent-service/app/models/approval.py`、`migrations/versions/0009_approval_execution_result.py`：执行结果字段与数据库约束。
+- `business-service/src/main/java/com/productline/business/application/BusinessWriteService.java`：动态业务标识统一为大写安全格式。
+
+### 实现的核心功能
+
+- 写Tool只接收Approval身份和幂等键，业务请求完全映射自`EXECUTING`确认快照，并校验待执行Tool和当前确认人。
+- 复核回写核对问题、结论、意见和递增版本；返工创建还限制受支持类型，并保存Java返回的新资源身份。
+- 两个Tool均不自动重试且不暴露给动态模型；相同Java业务结果的幂等重放保留首次Trace，不同结果不能覆盖执行证据。

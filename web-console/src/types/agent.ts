@@ -72,14 +72,61 @@ export interface OrderDiagnosisErrorResponse {
   retryable: boolean;
   error_step: string | null;
 }
-
+// 规范引用：它表示一条可以追溯的规范依据
 export interface KnowledgeCitation {
-  document_id: string;
+  document_id: string; // 哪份规范引用
   document_name: string;
-  document_version: string;
-  section: string[];
-  chunk_id: string;
+  document_version: string; // 哪个版本的规范引用
+  section: string[]; // 哪个章节引用
+  chunk_id: string; //哪些原始分块
   chunk_ids: string[];
-  content: string;
-  relevance_score: number | null;
+  content: string; // 原文内容
+  relevance_score: number | null; // 检索相关性分数
+}
+// 复核结论 三个结果：通过、拒绝、需要返工
+export type ReviewConclusion = "APPROVED" | "REJECTED" | "REWORK_REQUIRED";
+// 返工建议 当前只实现了坐标系返工
+export type ReworkType = "COORDINATE_SYSTEM_FIX";
+
+export interface ReworkSuggestion {
+  required: boolean;
+  type: ReworkType | null;
+}
+// 用户最终准备确认的完整复核单
+export interface ReviewDraft {
+  task_id: string; // 复核哪个任务
+  issue_id: string; // 复核哪个质检问题
+  conclusion: ReviewConclusion; // 复核结论
+  problem_summary: string; // agent根据事实整理的问题摘要
+  review_comment: string; // 复核意见
+  specification_references: KnowledgeCitation[]; // 规范依据
+  suggested_rework: ReworkSuggestion; // 是否需要创建返工任务
+}
+
+export type ApprovalStatus =
+  | "DRAFT"
+  | "WAITING_CONFIRMATION"
+  | "CONFIRMED"
+  | "EXECUTING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "CANCELLED"
+  | "EXPIRED"
+  | "STALE";
+
+export type ApprovalOperationType = "SUBMIT_REVIEW" | "CREATE_REWORK";
+// 一张完整的“待确认单”
+export interface ReviewApproval {
+  approval_id: string; // 确认单身份
+  run_id: string | null; // 由哪个agent run 生成
+  status: ApprovalStatus; // 当前能不能确认
+  operation_type: ApprovalOperationType;
+  target_id: string; // 将影响哪个业务对象
+  target_version: number; // 生成草稿时看到的业务版本
+  draft: ReviewDraft; // 用户实际审查的内容
+}
+// 确认事件数据
+export interface ReviewApprovalDecision {
+  approval_id: string;
+  draft: ReviewDraft;
 }

@@ -124,6 +124,7 @@ def _specification_result(
 def _draft(*, citation: Citation | None = None) -> dict[str, object]:
     return {
         "task_id": "TASK-003",
+        "issue_id": "ISSUE-001",
         "conclusion": "REWORK_REQUIRED",
         "problem_summary": "存在未关闭的坐标系质量问题",
         "review_comment": "建议完成坐标系统处理后重新提交复核",
@@ -359,6 +360,7 @@ async def test_stops_when_current_specification_cannot_supply_citations() -> Non
     "draft_output",
     [
         {**_draft(), "task_id": "TASK-004"},
+        {**_draft(), "issue_id": "ISSUE-999"},
         _draft(citation=_citation(chunk_id="CHUNK-INVENTED")),
         {**_draft(), "review_comment": ""},
     ],

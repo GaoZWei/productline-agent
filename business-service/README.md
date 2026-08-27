@@ -34,6 +34,9 @@ PORT
 
 两个接口都必须携带 `X-User-Id`、`X-User-Role: REVIEWER` 和 `Idempotency-Key`。`expectedVersion` 来自任务查询响应的 `version`；状态已经变化或两个请求并发修改同一版本时返回 `409`。相同用户以相同幂等键和相同请求重试时返回第一次结果，不会重复写入；同一幂等键改作其他请求时返回 `409`。
 
+服务端生成的复核、返工和操作日志ID统一使用大写UUID片段，确保返回值满足Python侧业务标识契约，并可直接进入
+写Tool的强类型响应和Approval执行结果。
+
 M0.5 只建立 Java 侧最小权限上下文，Header 尚未连接真实认证系统。
 
 独立验收：

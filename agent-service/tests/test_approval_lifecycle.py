@@ -22,6 +22,7 @@ from app.services import (
 _NOW = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
 _ORIGINAL_DRAFT = {
     "task_id": "TASK-003",
+    "issue_id": "ISSUE-001",
     "conclusion": "REWORK_REQUIRED",
     "problem_summary": "存在未关闭的坐标系质量问题",
     "review_comment": "完成坐标系统处理后重新提交复核",
@@ -307,6 +308,13 @@ async def test_user_modification_must_remain_a_valid_draft_for_same_target() -> 
             modified_draft={**_ORIGINAL_DRAFT, "task_id": "TASK-004"},
         )
     assert changed_target.value.field_name == "modified_draft.task_id"
+
+    with pytest.raises(ApprovalLifecycleValidationError) as changed_issue:
+        await service.save_user_modification(
+            approval.approval_id,
+            modified_draft={**_ORIGINAL_DRAFT, "issue_id": "ISSUE-OTHER"},
+        )
+    assert changed_issue.value.field_name == "modified_draft.issue_id"
 
 
 @pytest.mark.unit

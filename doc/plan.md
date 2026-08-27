@@ -940,6 +940,8 @@ pytest tests/e2e/test_dynamic_agent.py -q
   "operation_type": "SUBMIT_REVIEW",
   "target_id": "TASK-003",
   "draft": {
+    "task_id": "TASK-003",
+    "issue_id": "ISSUE-001",
     "conclusion": "REWORK_REQUIRED",
     "problem_summary": "存在未关闭的坐标系质量问题",
     "review_comment": "建议完成坐标系统处理后重新提交复核",

@@ -11,7 +11,8 @@ Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与�
 固定1536维pgvector入库和索引版本记录，M4.5～M4.12已实现中文关键词、同版本余弦检索、统一元数据门禁、
 RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测，但尚无具体问答/Rerank供应商、统一路由HTTP
 入口或全目录执行入口。M5.1～M5.4已扩展动态诊断状态、实现结构化动作决策、可回环LangGraph执行图和
-确定性执行限制，但尚无具体动作模型供应商。
+确定性执行限制，但尚无具体动作模型供应商。M6.1～M6.5已加入Approval生命周期、严格复核草稿、安全草稿生成、
+执行结果持久化，以及不暴露给动态模型的复核回写和返工创建Tool；确认前重校验和对外确认执行接口仍待M6.6实现。
 
 ## 本地开发
 
@@ -51,7 +52,20 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 `ToolRegistry` 按稳定
 名称注册和获取 Tool，重复名称会被拒绝而不会静默覆盖。`max_retries` 表示首次调用之外允许的
 额外调用次数；只有显式提供 `RetryPolicy` 的 Tool 才会实际重试。M2.1 已建立 Run/Step
-持久化基础，但当前 Tool 调试链尚未写入这些表，也没有 Approval。
+持久化基础，但当前 Tool 调试链尚未写入这些表；M6 Approval由独立Workflow和存储服务管理，不经过调试API。
+
+## 人工确认与写 Tool
+
+`ReviewDraft`同时绑定`task_id`和`issue_id`。草稿生成Workflow会强制刷新Java任务和质检问题，只允许模型选择
+本次结果中真实存在的问题；用户修改仍需通过同一Schema，并且不能换掉Approval的目标任务。
+
+`write_review_result`和`create_rework_task`只接受`approval_id`与`idempotency_key`，任务、问题、结论、意见和
+期望版本全部读取已确认的Approval快照。Tool要求Approval处于`EXECUTING`、待执行名称匹配且调用人就是确认人，
+再以Java Client透传身份、Trace和幂等键；Java返回的资源归属、内容及递增版本必须与快照一致，成功摘要才会首次
+保存到`execution_result`。幂等重放返回相同业务结果时保留首次Trace，内容不同则拒绝覆盖审计证据。
+
+两个写Tool均为`HIGH`风险、`max_retries=0`，并放在单独的写Tool注册表中，不注册到动态Agent或开发调试API。
+M6.5只提供受控执行原语；Approval过期、最新权限/任务版本重校验、执行锁、成功/失败终态和HTTP入口属于M6.6。
 
 ## 只读业务 Tool
 

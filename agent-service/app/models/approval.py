@@ -96,6 +96,10 @@ class ApprovalRecord(Base):
             "pending_tool_name = 'create_rework_task'))",
             name="ck_approval_records_operation_tool_match",
         ),
+        CheckConstraint(
+            "execution_result IS NULL OR status IN ('EXECUTING', 'SUCCEEDED')",
+            name="ck_approval_records_execution_result_status",
+        ),
         Index("ix_approval_records_status_created", "status", "created_at"),
         Index("ix_approval_records_run", "run_id"),
     )
@@ -133,6 +137,8 @@ class ApprovalRecord(Base):
     # 确认事实（要求两个字段同时存在或同时不存在）
     confirmed_by_user_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Java成功响应的强类型摘要; 具体审计日志由M6.7单独保存。
+    execution_result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -56,6 +56,8 @@ class BusinessWriteApiIntegrationTest extends PostgresIntegrationTestSupport {
                         reviewBody("ISSUE-001", "REWORK_REQUIRED", "需要完成坐标系返工。", 0));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(data(response).path("review").path("reviewId").asText())
+                .matches("^REVIEW-WRITE-[A-Z0-9-]+$");
         assertThat(data(response).path("review").path("issueId").asText())
                 .isEqualTo("ISSUE-001");
         assertThat(data(response).path("review").path("status").asText())
@@ -247,6 +249,8 @@ class BusinessWriteApiIntegrationTest extends PostgresIntegrationTestSupport {
                         reworkBody("ISSUE-001", "修正坐标系统。", 0));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(data(response).path("reworkTask").path("reworkTaskId").asText())
+                .matches("^REWORK-WRITE-[A-Z0-9-]+$");
         assertThat(data(response).path("reworkTask").path("sourceIssueId").asText())
                 .isEqualTo("ISSUE-001");
         assertThat(data(response).path("reworkTask").path("status").asText())

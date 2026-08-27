@@ -78,3 +78,25 @@ class ApprovalRecordRepository:
             .returning(ApprovalRecord)
         )
         return (await self._session.scalars(statement)).one_or_none()
+
+    async def save_execution_result(
+        self,
+        approval_id: str,
+        *,
+        expected_status: ApprovalStatus,
+        result: dict[str, Any],
+        updated_at: datetime,
+    ) -> ApprovalRecord | None:
+        """只为执行中的Approval首次保存Java成功结果, 不覆盖既有证据。"""
+
+        statement = (
+            update(ApprovalRecord)
+            .where(
+                ApprovalRecord.approval_id == approval_id,
+                ApprovalRecord.status == expected_status,
+                ApprovalRecord.execution_result.is_(None),
+            )
+            .values(execution_result=result, updated_at=updated_at)
+            .returning(ApprovalRecord)
+        )
+        return (await self._session.scalars(statement)).one_or_none()

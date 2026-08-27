@@ -24,6 +24,7 @@ def _citation_values(*, chunk_id: str = "CHUNK-COORD-001") -> dict[str, Any]:
 def _draft_values(**changes: Any) -> dict[str, Any]:
     values: dict[str, Any] = {
         "task_id": "TASK-003",
+        "issue_id": "ISSUE-001",
         "conclusion": "REWORK_REQUIRED",
         "problem_summary": "存在未关闭的坐标系质量问题",
         "review_comment": "建议完成坐标系统处理后重新提交复核",
@@ -42,6 +43,7 @@ def test_review_draft_accepts_golden_contract_and_serializes_stable_values() -> 
     draft = ReviewDraft.model_validate(_draft_values())
 
     assert draft.task_id == "TASK-003"
+    assert draft.issue_id == "ISSUE-001"
     assert draft.conclusion is Conclusion.REWORK_REQUIRED
     assert draft.suggested_rework.type is ReworkType.COORDINATE_SYSTEM_FIX
     assert draft.specification_references == ()

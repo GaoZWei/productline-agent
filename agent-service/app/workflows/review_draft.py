@@ -21,6 +21,7 @@ from app.schemas.tools import QualityIssue, QualityIssueList, TaskDetail
 from app.schemas.workflow import DiagnosisResult
 from app.tools import ToolContext, ToolResult
 
+
 # 历史诊断Run的最小快照
 @dataclass(frozen=True, slots=True)
 class ReviewDraftRunSnapshot:
@@ -212,7 +213,12 @@ class ReviewDraftGenerationWorkflow:
         )
         # 第六步：生成草稿
         draft = self._parse_draft(await self._draft_model.generate(request))
-        self._validate_draft(draft, task=task, citations=specification.citations)
+        self._validate_draft(
+            draft,
+            task=task,
+            issues=issues.issues,
+            citations=specification.citations,
+        )
 
         approval_id = self._approval_id_factory()
         persisted = await self._store.save_waiting_approval(
@@ -304,11 +310,18 @@ class ReviewDraftGenerationWorkflow:
         draft: ReviewDraft,
         *,
         task: TaskDetail,
+        issues: list[QualityIssue],
         citations: tuple[Citation, ...],
     ) -> None:
         # 模型不能替换任务ID
         if draft.task_id != task.task_id:
             raise InvalidReviewDraftOutputError("review draft changed the target task")
+        # issue_id存在并且与任务ID匹配
+        if not any(
+            issue.issue_id == draft.issue_id and issue.task_id == task.task_id
+            for issue in issues
+        ):
+            raise InvalidReviewDraftOutputError("review draft referenced an unknown quality issue")
         # 草稿必须至少有一个现行规范引用
         if not draft.specification_references:
             raise InvalidReviewDraftOutputError(
