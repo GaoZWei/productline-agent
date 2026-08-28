@@ -156,12 +156,22 @@ async def test_confirmation_api_revalidates_writes_once_and_replays_result(
                     json={"draft": draft.model_dump(mode="json")},
                     headers=_headers("trace-e2e-confirm-replay"),
                 )
+                operation_log = await client.get(
+                    "/api/agent/approvals/approval-e2e-confirm/operation-log",
+                    headers=_headers("trace-e2e-confirm-operation-log"),
+                )
 
         assert first.status_code == 200
         assert replay.status_code == 200
         assert first.json()["status"] == "SUCCEEDED"
         assert replay.json()["result"] == first.json()["result"]
         assert first.json()["result"]["task_version"] == task.version + 1
+        assert operation_log.status_code == 200
+        assert operation_log.json()["approval_id"] == "approval-e2e-confirm"
+        assert operation_log.json()["after_summary"]["outcome"] == "SUCCEEDED"
+        assert operation_log.json()["java_trace_id"] == first.json()["result"][
+            "java_trace_id"
+        ]
 
         reviews_after = (
             await business_client.get(

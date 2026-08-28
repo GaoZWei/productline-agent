@@ -31,6 +31,12 @@ from app.services.order_diagnosis import (
     OrderDiagnosisExecutionError,
     OrderDiagnosisService,
 )
+from app.services.operation_log import (
+    DatabaseOperationLogService,
+    OperationFailure,
+    OperationLogAccessError,
+    build_operation_log_detail,
+)
 from app.services.review_draft_store import DatabaseReviewDraftStore
 from app.services.run_lifecycle import (
     InvalidRunTransitionError,
@@ -69,6 +75,7 @@ __all__ = [
     "ApprovalNotFoundError",
     "DatabaseApprovalConfirmationStore",
     "DatabaseApprovalExecutionStore",
+    "DatabaseOperationLogService",
     "DatabaseReviewDraftStore",
     "IntentRouter",
     "IntentRoutingModel",
@@ -80,6 +87,8 @@ __all__ = [
     "OrderDiagnosisExecution",
     "OrderDiagnosisExecutionError",
     "OrderDiagnosisService",
+    "OperationFailure",
+    "OperationLogAccessError",
     "RunLifecycleError",
     "RunLifecycleService",
     "RunLifecycleValidationError",
@@ -95,6 +104,7 @@ __all__ = [
     "StepLifecycleValidationError",
     "StepNotFoundError",
     "StepRunUnavailableError",
+    "build_operation_log_detail",
     "parse_router_result",
     "unknown_router_result",
     "validate_user_message_entity_evidence",

@@ -51,6 +51,7 @@ from app.repositories import (
     KnowledgeIndexRepository,
     KnowledgeSearchRepository,
     KnowledgeSearchValidationError,
+    OperationLogRepository,
 )
 from app.schemas import Conclusion, ReviewDraft
 from app.schemas.business import BusinessIdentity
@@ -67,6 +68,7 @@ from app.schemas.versioning import (
     ToolSchemaSnapshot,
     VersionCaptureStatus,
 )
+from app.schemas.write_tools import WriteReviewResultOutput
 from app.services import (
     ApprovalLifecycleService,
     DatabaseApprovalConfirmationStore,
@@ -82,6 +84,7 @@ from app.services import (
     StepLifecycleValidationError,
     StepNotFoundError,
     StepRunUnavailableError,
+    build_operation_log_detail,
 )
 from app.settings import Settings
 from app.workflows import DatabaseWorkflowStepRecorder
@@ -204,6 +207,7 @@ async def migrated_database_url() -> AsyncIterator[str]:
 def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
     assert set(Base.metadata.tables) == {
         "agent_messages",
+        "agent_operation_logs",
         "agent_runs",
         "agent_sessions",
         "agent_steps",
@@ -273,6 +277,20 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "created_at",
         "updated_at",
     }
+    assert set(Base.metadata.tables["agent_operation_logs"].columns.keys()) == {
+        "operation_log_id",
+        "approval_id",
+        "operation_type",
+        "outcome",
+        "target_id",
+        "target_version",
+        "confirmed_by_user_id",
+        "before_summary",
+        "after_summary",
+        "user_modification_diff",
+        "java_trace_id",
+        "created_at",
+    }
 
 
 @pytest.mark.integration
@@ -293,6 +311,7 @@ async def test_alembic_creates_agent_tables_and_repository_crud(
             "agent_sessions",
             "agent_steps",
             "approval_records",
+            "agent_operation_logs",
             "knowledge_chunks",
             "knowledge_documents",
         } <= table_names
@@ -1215,6 +1234,54 @@ async def test_confirmation_store_atomically_confirms_and_allows_one_execution_l
         assert current is not None
         assert current.status is ApprovalStatus.EXECUTING
         assert current.confirmed_by_user_id == "reviewer-001"
+
+        result = WriteReviewResultOutput(
+            approval_id="approval-confirm-cas",
+            task_id="TASK-003",
+            issue_id=modified.issue_id,
+            review_id="REVIEW-CONFIRM-CAS",
+            status="REWORK_REQUIRED",
+            review_comment=modified.review_comment,
+            task_version=8,
+            java_trace_id="trace-java-confirm-cas",
+        )
+        completed_at = datetime.now(UTC)
+        detail = build_operation_log_detail(
+            approval_id=current.approval_id,
+            operation_type=OperationType.SUBMIT_REVIEW,
+            target_id=current.target_id,
+            target_version=current.target_version,
+            confirmed_by_user_id="reviewer-001",
+            original_draft=ReviewDraft.model_validate(TEST_REVIEW_DRAFT),
+            effective_draft=modified,
+            outcome=ApprovalStatus.SUCCEEDED,
+            result=result,
+            failure=None,
+            created_at=completed_at,
+        )
+        completed = await store.finish_with_operation_log(
+            current.approval_id,
+            target_status=ApprovalStatus.SUCCEEDED,
+            detail=detail,
+            updated_at=completed_at,
+        )
+
+        assert completed is not None
+        assert completed.status is ApprovalStatus.SUCCEEDED
+        async with database.session() as session:
+            operation_log = await OperationLogRepository(session).get_by_approval(
+                current.approval_id
+            )
+            assert operation_log is not None
+            assert operation_log.outcome == ApprovalStatus.SUCCEEDED.value
+            assert operation_log.java_trace_id == "trace-java-confirm-cas"
+            assert operation_log.user_modification_diff == [
+                {
+                    "field_path": "review_comment",
+                    "before": TEST_REVIEW_DRAFT["review_comment"],
+                    "after": "用户确认意见",
+                }
+            ]
     finally:
         await database.dispose()
 

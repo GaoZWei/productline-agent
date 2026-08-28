@@ -50,4 +50,5 @@ PORT=5173 node web-console/server.mjs
 当前侧边栏可在同一订单内复用Session，但每轮仍执行确定性Workflow；尚未实现自然语言意图继承、澄清或
 SSE。M6.4已提供可复用的复核确认卡片，能够展示目标任务、质检问题、目标版本，编辑草稿、核对规范引用并进行二次确认；
 M6.6前端Client已支持调用Approval确认接口并校验Java复核或返工结果，也能识别`EXPIRED`、`STALE`等结构化错误。
-当前诊断侧边栏尚未取得和挂载Approval记录，卡片仍通过事件交给父级调用Client，而不是由组件直接写Java。
+M6.7又加入按Approval读取操作前后摘要、用户修改差异和Java Trace的只读Client及运行时校验。当前诊断侧边栏尚未
+取得和挂载Approval记录，也没有操作日志展示页；卡片仍通过事件交给父级调用Client，而不是由组件直接写Java。

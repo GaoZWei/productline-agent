@@ -12,6 +12,7 @@ from app.repositories.knowledge_search import (
     KnowledgeSearchRepository,
     KnowledgeSearchValidationError,
 )
+from app.repositories.operation_log import OperationLogRepository
 
 __all__ = [
     "AgentMessageRepository",
@@ -23,4 +24,5 @@ __all__ = [
     "KnowledgeIndexValidationError",
     "KnowledgeSearchRepository",
     "KnowledgeSearchValidationError",
+    "OperationLogRepository",
 ]

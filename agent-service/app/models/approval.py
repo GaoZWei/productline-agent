@@ -23,6 +23,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.agent_runtime import AgentRun
+    from app.models.operation_log import OperationLogRecord
 
 # 确认状态
 class ApprovalStatus(StrEnum):
@@ -152,3 +153,8 @@ class ApprovalRecord(Base):
     )
 
     run: Mapped[AgentRun | None] = relationship(back_populates="approvals")
+    operation_log: Mapped[OperationLogRecord | None] = relationship(
+        back_populates="approval",
+        uselist=False,
+        passive_deletes=True,
+    )

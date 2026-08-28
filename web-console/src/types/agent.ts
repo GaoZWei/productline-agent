@@ -169,3 +169,68 @@ export interface ApprovalConfirmationErrorResponse {
   message: string;
   retryable: boolean;
 }
+
+export interface OperationBeforeSummary {
+  task_id: string;
+  issue_id: string;
+  task_version: number;
+  conclusion: ReviewConclusion;
+  problem_summary: string;
+  review_comment: string;
+  rework_required: boolean;
+  rework_type: ReworkType | null;
+  specification_sources: string[];
+}
+
+export interface OperationFieldChange {
+  field_path: string;
+  before: string | boolean | string[] | null;
+  after: string | boolean | string[] | null;
+}
+
+export interface OperationFailureSummary {
+  code: string;
+  status_code: number;
+  retryable: boolean;
+}
+
+export interface ReviewOperationResultSummary {
+  operation_type: "SUBMIT_REVIEW";
+  task_id: string;
+  issue_id: string;
+  review_id: string;
+  status: ReviewConclusion;
+  review_comment: string;
+  task_version: number;
+}
+
+export interface ReworkOperationResultSummary {
+  operation_type: "CREATE_REWORK";
+  task_id: string;
+  source_issue_id: string;
+  rework_task_id: string;
+  rework_type: ReworkType;
+  status: "PENDING";
+  reason: string;
+  task_version: number;
+}
+
+export interface OperationAfterSummary {
+  outcome: "SUCCEEDED" | "FAILED" | "STALE";
+  result: ReviewOperationResultSummary | ReworkOperationResultSummary | null;
+  failure: OperationFailureSummary | null;
+}
+
+export interface OperationLogDetail {
+  operation_log_id: string;
+  approval_id: string;
+  operation_type: ApprovalOperationType;
+  target_id: string;
+  target_version: number;
+  confirmed_by_user_id: string;
+  before_summary: OperationBeforeSummary;
+  after_summary: OperationAfterSummary;
+  user_modification_diff: OperationFieldChange[];
+  java_trace_id: string | null;
+  created_at: string;
+}

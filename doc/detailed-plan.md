@@ -2347,6 +2347,30 @@ Approval。两个Tool均为高风险、无自动重试且使用不暴露给动�
 
 ## M6.7 操作日志
 
+### 解决的问题
+
+Approval执行结果只能说明“最后写成了什么”，却不能一次还原“模型原来建议什么、用户改了什么、实际授权什么以及Java最终返回什么”；出现争议时只能跨表拼接，失败写入也缺少稳定证据。本阶段新增Agent侧操作日志，在写Tool结束时保存受控操作前摘要、操作后摘要、字段级修改差异和Java Trace，并提供按Approval查询的详情接口。
+
+### 核心作用
+
+操作日志位于M6.6确认执行链的终态提交位置：接收原始草稿、最终草稿、目标版本和写Tool结果，将规范引用压缩为
+文档/版本/Chunk身份，将失败限制为错误码、HTTP状态和重试属性，再与`EXECUTING → SUCCEEDED/STALE/FAILED`放进
+同一Agent数据库事务。每个Approval最多一条日志，详情接口当前只允许原确认人以`REVIEWER`身份读取；日志不保存完整
+Java业务对象，也不取代Java在业务事务内写入的权威审计。由于Java已占用公共Schema的`operation_logs`，Agent物理表
+使用`agent_operation_logs`隔离职责，概念上仍对应本阶段的操作日志。
+
+
+步骤：
+1. 如果有成功结果，生成result_summary
+2. 如果有失败信息，生成failure_summary
+3. 根据最终草稿生成before_summary
+4. 根据结果/失败生成after_summary
+5. 比较原始草稿和最终草稿
+6. 从成功结果提取Java Trace
+7. 根据approval_id生成稳定日志ID
+8. 交给严格Schema做最终校验
+
+
 | ID | 任务 | 工时 |
 |---|---:|
 | T655 | 创建 `operation_logs` 表 | 2h |

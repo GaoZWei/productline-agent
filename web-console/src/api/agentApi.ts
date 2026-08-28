@@ -1,7 +1,12 @@
-import { requestApprovalConfirmation, requestOrderDiagnosis } from "./agentClient";
+import {
+  requestApprovalConfirmation,
+  requestApprovalOperationLog,
+  requestOrderDiagnosis,
+} from "./agentClient";
 import type {
   ApprovalConfirmationResponse,
   OrderDiagnosisResponse,
+  OperationLogDetail,
   PageContext,
   ReviewApprovalDecision,
 } from "../types/agent";
@@ -24,4 +29,8 @@ export function confirmReviewApproval(
   decision: ReviewApprovalDecision,
 ): Promise<ApprovalConfirmationResponse> {
   return requestApprovalConfirmation(decision);
+}
+
+export function getApprovalOperationLog(approvalId: string): Promise<OperationLogDetail> {
+  return requestApprovalOperationLog(approvalId);
 }

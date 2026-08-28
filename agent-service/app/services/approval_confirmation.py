@@ -12,10 +12,11 @@ from pydantic import ValidationError
 
 from app.database import Database
 from app.errors import ToolErrorCode
-from app.models import ApprovalRecord, ApprovalStatus, PendingToolName
-from app.repositories import ApprovalRecordRepository
+from app.models import ApprovalRecord, ApprovalStatus, OperationType, PendingToolName
+from app.repositories import ApprovalRecordRepository, OperationLogRepository
 from app.schemas import ReviewDraft
 from app.schemas.business import BusinessIdentity
+from app.schemas.operation_log import OperationLogDetail
 from app.schemas.tools import QualityIssue, QualityIssueList, TaskDetail
 from app.schemas.write_tools import (
     CreateReworkTaskOutput,
@@ -24,6 +25,11 @@ from app.schemas.write_tools import (
 from app.services.approval_lifecycle import (
     ApprovalLifecycleError,
     ApprovalLifecycleService,
+)
+from app.services.operation_log import (
+    OperationFailure,
+    build_operation_log_detail,
+    record_from_detail,
 )
 from app.tools import ToolContext, ToolResult
 
@@ -37,10 +43,12 @@ class ApprovalConfirmationSnapshot:
     approval_id: str
     status: ApprovalStatus
     pending_tool_name: PendingToolName
+    operation_type: OperationType
     target_id: str
     target_version: int
     confirmed_by_user_id: str | None
     created_at: datetime
+    original_draft: ReviewDraft
     draft: ReviewDraft
     execution_result: dict[str, Any] | None
 
@@ -77,6 +85,15 @@ class ApprovalConfirmationStore(Protocol):
         *,
         expected_status: ApprovalStatus,
         target_status: ApprovalStatus,
+        updated_at: datetime,
+    ) -> Awaitable[ApprovalConfirmationSnapshot | None]: ...
+
+    def finish_with_operation_log(
+        self,
+        approval_id: str,
+        *,
+        target_status: ApprovalStatus,
+        detail: OperationLogDetail,
         updated_at: datetime,
     ) -> Awaitable[ApprovalConfirmationSnapshot | None]: ...
 
@@ -179,6 +196,28 @@ class DatabaseApprovalConfirmationStore:
             )
             return None if transitioned is None else _snapshot_from_record(transitioned)
 
+    async def finish_with_operation_log(
+        self,
+        approval_id: str,
+        *,
+        target_status: ApprovalStatus,
+        detail: OperationLogDetail,
+        updated_at: datetime,
+    ) -> ApprovalConfirmationSnapshot | None:
+        if detail.approval_id != approval_id or detail.after_summary.outcome is not target_status:
+            raise ValueError("operation log must match the terminal approval transition")
+        async with self._database.session() as session, session.begin():
+            transitioned = await ApprovalRecordRepository(session).transition_status(
+                approval_id,
+                expected_status=ApprovalStatus.EXECUTING,
+                target_status=target_status,
+                changes={"updated_at": updated_at},
+            )
+            if transitioned is None:
+                return None
+            await OperationLogRepository(session).create(record_from_detail(detail))
+            return _snapshot_from_record(transitioned)
+
 
 class ApprovalConfirmationService:
     """把人工确认、最新事实校验和唯一写执行编排为确定性流程。"""
@@ -229,7 +268,7 @@ class ApprovalConfirmationService:
                 self._raise_current_conflict(await self._require_snapshot(approval_id))
             snapshot = confirmed
         elif snapshot.status is ApprovalStatus.CONFIRMED:
-            # 校验是不是同一个确认人、同一份草稿，继续重新校验
+            # 校验是不是同一个确认人、同一份草稿; 继续重新校验
             self._require_same_confirmation(snapshot, draft=draft, identity=identity)
         else:
             # 返回 APPROVAL_EXECUTION_IN_PROGRESS
@@ -271,6 +310,7 @@ class ApprovalConfirmationService:
             )
 
         write_result = await self._execute_write(locked, context)
+        # 处理写入失败
         if not write_result.success:
             assert write_result.error is not None
             target_status = (
@@ -279,17 +319,34 @@ class ApprovalConfirmationService:
                 and write_result.error.status_code == 409
                 else ApprovalStatus.FAILED
             )
-            await self._finish_locked(locked, target_status)
+            failure_status_code = _error_status_code(write_result.error.status_code)
+            # 保存失败日志
+            await self._finish_locked(
+                locked,
+                target_status,
+                result=None,
+                failure=OperationFailure(
+                    code=write_result.error.code.value,
+                    status_code=failure_status_code,
+                    retryable=write_result.error.retryable,
+                ),
+            )
             raise ApprovalConfirmationError(
                 code=write_result.error.code.value,
                 message=write_result.error.message,
-                status_code=write_result.error.status_code or 500,
+                status_code=failure_status_code,
                 retryable=write_result.error.retryable,
                 approval_status=target_status,
             )
 
         output = _parse_write_result(locked.pending_tool_name, write_result.data)
-        await self._finish_locked(locked, ApprovalStatus.SUCCEEDED)
+        # 解析成严格写结果
+        await self._finish_locked(
+            locked,
+            ApprovalStatus.SUCCEEDED,
+            result=output,
+            failure=None,
+        )
         return ApprovalConfirmationExecution(
             approval_id=locked.approval_id,
             status=ApprovalStatus.SUCCEEDED,
@@ -409,17 +466,35 @@ class ApprovalConfirmationService:
             },
             context,
         )
-
+    # 拿到原始草稿，拿到用户草稿，构造操作日志详情，调用数据库完成操作
     async def _finish_locked(
         self,
         snapshot: ApprovalConfirmationSnapshot,
         target_status: ApprovalStatus,
+        *,
+        result: ApprovalWriteResult | None,
+        failure: OperationFailure | None,
     ) -> None:
-        finished = await self._store.transition(
+        assert snapshot.confirmed_by_user_id is not None
+        timestamp = self._timestamp()
+        detail = build_operation_log_detail(
+            approval_id=snapshot.approval_id,
+            operation_type=snapshot.operation_type,
+            target_id=snapshot.target_id,
+            target_version=snapshot.target_version,
+            confirmed_by_user_id=snapshot.confirmed_by_user_id,
+            original_draft=snapshot.original_draft,
+            effective_draft=snapshot.draft,
+            outcome=target_status,
+            result=result,
+            failure=failure,
+            created_at=timestamp,
+        )
+        finished = await self._store.finish_with_operation_log(
             snapshot.approval_id,
-            expected_status=ApprovalStatus.EXECUTING,
             target_status=target_status,
-            updated_at=self._timestamp(),
+            detail=detail,
+            updated_at=timestamp,
         )
         if finished is None:
             raise ApprovalConfirmationError(
@@ -477,11 +552,14 @@ def _snapshot_from_record(approval: ApprovalRecord) -> ApprovalConfirmationSnaps
         approval_id=approval.approval_id,
         status=approval.status,
         pending_tool_name=approval.pending_tool_name,
+        operation_type=approval.operation_type,
         target_id=approval.target_id,
         target_version=approval.target_version,
         confirmed_by_user_id=approval.confirmed_by_user_id,
         created_at=approval.created_at,
-        draft=ApprovalLifecycleService.effective_review_draft(approval),  # 从数据库记录中提取当前有效草稿
+        original_draft=ReviewDraft.model_validate(approval.original_draft),
+        # 从数据库记录中提取当前有效草稿。
+        draft=ApprovalLifecycleService.effective_review_draft(approval),
         execution_result=approval.execution_result,
     )
 
@@ -588,3 +666,9 @@ def _confirmation_run_id(approval_id: str) -> str:
     """生成安全有界的确认执行ToolContext标识。"""
 
     return f"approval-confirm-{hashlib.sha256(approval_id.encode()).hexdigest()[:32]}"
+
+
+def _error_status_code(status_code: int | None) -> int:
+    """日志和HTTP错误只接受真实4xx/5xx; 拒绝把异常包装成200。"""
+
+    return status_code if status_code is not None and 400 <= status_code <= 599 else 500

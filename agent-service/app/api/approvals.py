@@ -15,11 +15,14 @@ from app.schemas.approval_execution import (
     ApprovalConfirmationRequest,
     ApprovalConfirmationResponse,
 )
+from app.schemas.operation_log import OperationLogDetail
 from app.schemas.write_tools import ApprovalIdentifier
 from app.services import (
     ApprovalConfirmationError,
     ApprovalConfirmationService,
     DatabaseApprovalConfirmationStore,
+    DatabaseOperationLogService,
+    OperationLogAccessError,
 )
 from app.tools import ToolRegistry
 
@@ -28,6 +31,48 @@ _USER_ROLE_HEADER = Annotated[str | None, Header(alias="X-User-Role")]
 _AUTHORIZATION_HEADER = Annotated[str | None, Header(alias="Authorization")]
 
 router = APIRouter(prefix="/api/agent/approvals", tags=["agent-approvals"])
+
+# 操作日志详情接口
+@router.get(
+    "/{approval_id}/operation-log",
+    response_model=OperationLogDetail,
+    summary="查询一次人工确认写操作的审计详情",
+    responses={
+        401: {"model": ApprovalConfirmationErrorResponse},
+        403: {"model": ApprovalConfirmationErrorResponse},
+        404: {"model": ApprovalConfirmationErrorResponse},
+    },
+)
+async def get_operation_log(
+    approval_id: ApprovalIdentifier,
+    request: Request,
+    user_id: _USER_ID_HEADER = None,
+    user_role: _USER_ROLE_HEADER = None,
+    authorization: _AUTHORIZATION_HEADER = None,
+) -> OperationLogDetail | JSONResponse:
+    """只向原确认人返回受控前后摘要、修改差异和Java Trace。"""
+
+    identity = resolve_business_identity(
+        user_id=user_id,
+        user_role=user_role,
+        authorization=authorization,
+    )
+    if identity is None:
+        return _operation_log_error_response(
+            approval_id=approval_id,
+            error=OperationLogAccessError(
+                code="PERMISSION_DENIED",
+                message="authenticated user identity is required",
+                status_code=401,
+            ),
+        )
+    try:
+        return await _operation_log_service(request).get_by_approval(
+            approval_id,
+            identity=identity,
+        )
+    except OperationLogAccessError as error:
+        return _operation_log_error_response(approval_id=approval_id, error=error)
 
 # http请求入口
 @router.post(
@@ -104,6 +149,12 @@ def _service(request: Request) -> ApprovalConfirmationService:
     )
 
 
+def _operation_log_service(request: Request) -> DatabaseOperationLogService:
+    """创建只依赖Agent数据库的操作日志查询服务。"""
+
+    return DatabaseOperationLogService(request.app.state.database)
+
+
 def _error_response(
     *,
     approval_id: str,
@@ -118,6 +169,25 @@ def _error_response(
         code=error.code,
         message=error.message,
         retryable=error.retryable,
+    )
+    return JSONResponse(
+        status_code=error.status_code,
+        content=response.model_dump(mode="json"),
+    )
+
+
+def _operation_log_error_response(
+    *,
+    approval_id: str,
+    error: OperationLogAccessError,
+) -> JSONResponse:
+    response = ApprovalConfirmationErrorResponse(
+        approval_id=approval_id,
+        status=None,
+        trace_id=get_trace_id(),
+        code=error.code,
+        message=error.message,
+        retryable=False,
     )
     return JSONResponse(
         status_code=error.status_code,

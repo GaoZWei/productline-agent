@@ -8,6 +8,7 @@ import type {
   OrderDiagnosisErrorResponse,
   OrderDiagnosisRequest,
   OrderDiagnosisResponse,
+  OperationLogDetail,
   ReviewApprovalDecision,
 } from "../types/agent";
 
@@ -91,6 +92,23 @@ export async function requestApprovalConfirmation(
       { draft: decision.draft },
     );
     if (!isApprovalConfirmationResponse(response.data)) {
+      throw responseValidationError(response.status, traceIdFrom(response.data));
+    }
+    return response.data;
+  } catch (reason) {
+    throw normalizeAgentError(reason);
+  }
+}
+
+export async function requestApprovalOperationLog(
+  approvalId: string,
+): Promise<OperationLogDetail> {
+  try {
+    const encodedApprovalId = encodeURIComponent(approvalId);
+    const response = await agentHttpClient.get<unknown>(
+      `/api/agent/approvals/${encodedApprovalId}/operation-log`,
+    );
+    if (!isOperationLogDetail(response.data)) {
       throw responseValidationError(response.status, traceIdFrom(response.data));
     }
     return response.data;
@@ -208,6 +226,107 @@ function isApprovalConfirmationErrorResponse(
     isNonEmptyString(value.code) &&
     isNonEmptyString(value.message) &&
     typeof value.retryable === "boolean"
+  );
+}
+
+function isOperationLogDetail(value: unknown): value is OperationLogDetail {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.operation_log_id) &&
+    isNonEmptyString(value.approval_id) &&
+    ["SUBMIT_REVIEW", "CREATE_REWORK"].includes(String(value.operation_type)) &&
+    isNonEmptyString(value.target_id) &&
+    Number.isInteger(value.target_version) &&
+    Number(value.target_version) >= 0 &&
+    isNonEmptyString(value.confirmed_by_user_id) &&
+    isOperationBeforeSummary(value.before_summary) &&
+    isOperationAfterSummary(value.after_summary) &&
+    Array.isArray(value.user_modification_diff) &&
+    value.user_modification_diff.every(isOperationFieldChange) &&
+    (value.java_trace_id === null || isNonEmptyString(value.java_trace_id)) &&
+    isNonEmptyString(value.created_at)
+  );
+}
+
+function isOperationBeforeSummary(value: unknown) {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.task_id) &&
+    isNonEmptyString(value.issue_id) &&
+    Number.isInteger(value.task_version) &&
+    ["APPROVED", "REJECTED", "REWORK_REQUIRED"].includes(String(value.conclusion)) &&
+    isNonEmptyString(value.problem_summary) &&
+    isNonEmptyString(value.review_comment) &&
+    typeof value.rework_required === "boolean" &&
+    (value.rework_type === null || value.rework_type === "COORDINATE_SYSTEM_FIX") &&
+    Array.isArray(value.specification_sources) &&
+    value.specification_sources.every(isNonEmptyString)
+  );
+}
+
+function isOperationAfterSummary(value: unknown) {
+  if (!isRecord(value) || !["SUCCEEDED", "FAILED", "STALE"].includes(String(value.outcome))) {
+    return false;
+  }
+  if (value.outcome === "SUCCEEDED") {
+    return isOperationResultSummary(value.result) && value.failure === null;
+  }
+  return value.result === null && isOperationFailureSummary(value.failure);
+}
+
+function isOperationResultSummary(value: unknown) {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.task_id) ||
+    !Number.isInteger(value.task_version) ||
+    Number(value.task_version) < 0
+  ) {
+    return false;
+  }
+  if (value.operation_type === "SUBMIT_REVIEW") {
+    return (
+      isNonEmptyString(value.issue_id) &&
+      isNonEmptyString(value.review_id) &&
+      ["APPROVED", "REJECTED", "REWORK_REQUIRED"].includes(String(value.status)) &&
+      isNonEmptyString(value.review_comment)
+    );
+  }
+  return (
+    value.operation_type === "CREATE_REWORK" &&
+    isNonEmptyString(value.source_issue_id) &&
+    isNonEmptyString(value.rework_task_id) &&
+    value.rework_type === "COORDINATE_SYSTEM_FIX" &&
+    value.status === "PENDING" &&
+    isNonEmptyString(value.reason)
+  );
+}
+
+function isOperationFailureSummary(value: unknown) {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.code) &&
+    Number.isInteger(value.status_code) &&
+    Number(value.status_code) >= 400 &&
+    Number(value.status_code) <= 599 &&
+    typeof value.retryable === "boolean"
+  );
+}
+
+function isOperationFieldChange(value: unknown) {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.field_path) &&
+    isOperationDiffValue(value.before) &&
+    isOperationDiffValue(value.after)
+  );
+}
+
+function isOperationDiffValue(value: unknown) {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (Array.isArray(value) && value.every(isNonEmptyString))
   );
 }
 

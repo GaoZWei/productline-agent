@@ -22,6 +22,15 @@ from app.schemas.knowledge import (
     DocumentType,
     PermissionScope,
 )
+from app.schemas.operation_log import (
+    OperationAfterSummary,
+    OperationBeforeSummary,
+    OperationFailureSummary,
+    OperationFieldChange,
+    OperationLogDetail,
+    ReviewOperationResultSummary,
+    ReworkOperationResultSummary,
+)
 from app.schemas.routing import (
     ClarificationReason,
     ClarificationRequest,
@@ -116,6 +125,11 @@ __all__ = [
     "OrderDiagnosisRequest",
     "OrderDiagnosisResponse",
     "OrderDiagnosisState",
+    "OperationAfterSummary",
+    "OperationBeforeSummary",
+    "OperationFailureSummary",
+    "OperationFieldChange",
+    "OperationLogDetail",
     "PageContext",
     "PageType",
     "PendingActionContext",
@@ -126,6 +140,8 @@ __all__ = [
     "ReworkSuggestion",
     "ReworkType",
     "RootCause",
+    "ReviewOperationResultSummary",
+    "ReworkOperationResultSummary",
     "RouterEntities",
     "RouterResult",
     "RoutingDecision",

@@ -1195,3 +1195,25 @@
 - 原子保存用户最终草稿与确认人，默认15分钟有效期；确认人、请求草稿或角色不一致时不读取Java、更不执行写Tool。
 - 强制刷新任务和质检问题，版本、任务状态、问题归属/状态或返工类型变化时以`STALE`关闭，不把旧确认用于新事实。
 - 数据库比较更新只允许一个请求进入`EXECUTING`；成功保存`SUCCEEDED`和执行结果，写冲突进入`STALE`，其他写失败进入`FAILED`，成功重放直接返回首次结果。
+
+---
+
+## 2026-08-27 — `[T655-T660] M6.7 操作日志`
+
+### 核心解决的问题
+
+补齐人工授权写操作的Agent侧审计证据，使模型原始草稿、用户最终修改、实际写结果或失败状态和Java Trace能够按
+一次Approval关联查询，同时避免与Java已有业务事务日志混表。
+
+### 实现的核心代码
+
+- `agent-service/app/models/operation_log.py`、`migrations/versions/0010_operation_logs.py`：隔离的Agent操作日志表和约束。
+- `agent-service/app/services/operation_log.py`、`app/schemas/operation_log.py`：受控摘要、字段差异构建和严格详情契约。
+- `agent-service/app/services/approval_confirmation.py`：日志创建与Approval终态的原子提交。
+- `agent-service/app/api/approvals.py`、`web-console/src/api/agentClient.ts`：按Approval读取日志及前端运行时校验。
+
+### 实现的核心功能
+
+- 每个Approval最多保存一条成功或失败操作日志，写前摘要来自最终授权草稿，写后摘要来自严格Tool结果或机器错误。
+- 用户修改按稳定字段路径比较；规范依据只保留文档、版本和Chunk身份，不把长篇引用正文复制到日志。
+- 日志与`SUCCEEDED`、`STALE`或`FAILED`终态同事务提交；详情接口只允许当前最小权限模型下的原确认人读取。

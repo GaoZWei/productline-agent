@@ -10,9 +10,10 @@ from typing import Any
 import pytest
 
 from app.errors import ToolErrorCode
-from app.models import ApprovalStatus, PendingToolName
+from app.models import ApprovalStatus, OperationType, PendingToolName
 from app.schemas import ReviewDraft
 from app.schemas.business import BusinessIdentity
+from app.schemas.operation_log import OperationLogDetail
 from app.schemas.tools import QualityIssueList, TaskDetail
 from app.schemas.write_tools import WriteReviewResultOutput
 from app.services.approval_confirmation import (
@@ -55,10 +56,12 @@ def _snapshot(
         approval_id="approval-confirm-003",
         status=status,
         pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
+        operation_type=OperationType.SUBMIT_REVIEW,
         target_id="TASK-003",
         target_version=target_version,
         confirmed_by_user_id=confirmed_by_user_id,
         created_at=created_at,
+        original_draft=_draft(),
         draft=draft or _draft(),
         execution_result=execution_result,
     )
@@ -111,6 +114,7 @@ class _FakeStore:
         self.transitions: list[tuple[ApprovalStatus, ApprovalStatus]] = []
         self.confirm_calls = 0
         self.execution_result_on_success: dict[str, Any] | None = None
+        self.operation_logs: list[OperationLogDetail] = []
         self._lock = asyncio.Lock()
 
     async def get_snapshot(self, approval_id: str) -> ApprovalConfirmationSnapshot | None:
@@ -134,10 +138,12 @@ class _FakeStore:
                 approval_id=current.approval_id,
                 status=ApprovalStatus.CONFIRMED,
                 pending_tool_name=current.pending_tool_name,
+                operation_type=current.operation_type,
                 target_id=current.target_id,
                 target_version=current.target_version,
                 confirmed_by_user_id=confirmed_by_user_id,
                 created_at=current.created_at,
+                original_draft=current.original_draft,
                 draft=draft,
                 execution_result=current.execution_result,
             )
@@ -160,10 +166,45 @@ class _FakeStore:
                 approval_id=current.approval_id,
                 status=target_status,
                 pending_tool_name=current.pending_tool_name,
+                operation_type=current.operation_type,
                 target_id=current.target_id,
                 target_version=current.target_version,
                 confirmed_by_user_id=current.confirmed_by_user_id,
                 created_at=current.created_at,
+                original_draft=current.original_draft,
+                draft=current.draft,
+                execution_result=(
+                    self.execution_result_on_success
+                    if target_status is ApprovalStatus.SUCCEEDED
+                    else current.execution_result
+                ),
+            )
+            return self.snapshot
+
+    async def finish_with_operation_log(
+        self,
+        approval_id: str,
+        *,
+        target_status: ApprovalStatus,
+        detail: OperationLogDetail,
+        updated_at: datetime,
+    ) -> ApprovalConfirmationSnapshot | None:
+        async with self._lock:
+            current = self.snapshot
+            if current is None or current.status is not ApprovalStatus.EXECUTING:
+                return None
+            self.transitions.append((ApprovalStatus.EXECUTING, target_status))
+            self.operation_logs.append(detail)
+            self.snapshot = ApprovalConfirmationSnapshot(
+                approval_id=current.approval_id,
+                status=target_status,
+                pending_tool_name=current.pending_tool_name,
+                operation_type=current.operation_type,
+                target_id=current.target_id,
+                target_version=current.target_version,
+                confirmed_by_user_id=current.confirmed_by_user_id,
+                created_at=current.created_at,
+                original_draft=current.original_draft,
                 draft=current.draft,
                 execution_result=(
                     self.execution_result_on_success
@@ -256,6 +297,9 @@ async def test_confirmation_refreshes_facts_locks_executes_and_marks_succeeded()
     assert str(write_tool.calls[0][0]["idempotency_key"]).startswith(
         "approval:write_review_result:"
     )
+    assert len(store.operation_logs) == 1
+    assert store.operation_logs[0].after_summary.outcome is ApprovalStatus.SUCCEEDED
+    assert store.operation_logs[0].java_trace_id == "trace-java-write"
 
 
 @pytest.mark.unit
@@ -445,6 +489,8 @@ async def test_write_conflict_marks_locked_approval_stale() -> None:
     assert conflict.value.code == ToolErrorCode.BUSINESS_CONFLICT.value
     assert store.snapshot is not None
     assert store.snapshot.status is ApprovalStatus.STALE
+    assert store.operation_logs[0].after_summary.failure is not None
+    assert store.operation_logs[0].after_summary.failure.code == "BUSINESS_CONFLICT"
 
 
 @pytest.mark.unit
@@ -474,6 +520,8 @@ async def test_non_conflict_write_failure_marks_locked_approval_failed() -> None
     assert unavailable.value.code == ToolErrorCode.UPSTREAM_UNAVAILABLE.value
     assert store.snapshot is not None
     assert store.snapshot.status is ApprovalStatus.FAILED
+    assert store.operation_logs[0].after_summary.failure is not None
+    assert store.operation_logs[0].after_summary.failure.retryable is True
 
 
 @pytest.mark.unit

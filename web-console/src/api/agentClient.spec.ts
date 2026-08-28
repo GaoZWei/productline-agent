@@ -5,6 +5,7 @@ import {
   AgentApiError,
   agentHttpClient,
   requestApprovalConfirmation,
+  requestApprovalOperationLog,
   requestOrderDiagnosis,
 } from "./agentClient";
 
@@ -154,7 +155,76 @@ describe("agent API client", () => {
       status: 410,
     });
   });
+
+  it("读取并校验Approval操作日志详情", async () => {
+    mock.onGet("/api/agent/approvals/approval-confirm-003/operation-log").reply(
+      200,
+      operationLogDetail(),
+    );
+
+    await expect(requestApprovalOperationLog("approval-confirm-003")).resolves.toMatchObject({
+      approval_id: "approval-confirm-003",
+      after_summary: { outcome: "SUCCEEDED" },
+      java_trace_id: "trace-java-write",
+    });
+  });
+
+  it("拒绝成功结果与失败摘要同时存在的操作日志", async () => {
+    const detail = operationLogDetail();
+    detail.after_summary.failure = {
+      code: "UPSTREAM_UNAVAILABLE",
+      status_code: 502,
+      retryable: true,
+    };
+    mock.onGet("/api/agent/approvals/approval-confirm-003/operation-log").reply(200, detail);
+
+    await expect(requestApprovalOperationLog("approval-confirm-003")).rejects.toMatchObject({
+      code: "RESPONSE_VALIDATION_ERROR",
+    });
+  });
 });
+
+function operationLogDetail() {
+  return {
+    operation_log_id: "operation-log-003",
+    approval_id: "approval-confirm-003",
+    operation_type: "SUBMIT_REVIEW",
+    target_id: "TASK-003",
+    target_version: 7,
+    confirmed_by_user_id: "reviewer-001",
+    before_summary: {
+      task_id: "TASK-003",
+      issue_id: "ISSUE-001",
+      task_version: 7,
+      conclusion: "REWORK_REQUIRED",
+      problem_summary: "存在未关闭的坐标系质量问题",
+      review_comment: "完成坐标系统处理后重新提交复核",
+      rework_required: true,
+      rework_type: "COORDINATE_SYSTEM_FIX",
+      specification_sources: [],
+    },
+    after_summary: {
+      outcome: "SUCCEEDED",
+      result: {
+        operation_type: "SUBMIT_REVIEW",
+        task_id: "TASK-003",
+        issue_id: "ISSUE-001",
+        review_id: "REVIEW-WRITE-003",
+        status: "REWORK_REQUIRED",
+        review_comment: "完成坐标系统处理后重新提交复核",
+        task_version: 8,
+      },
+      failure: null as null | {
+        code: string;
+        status_code: number;
+        retryable: boolean;
+      },
+    },
+    user_modification_diff: [],
+    java_trace_id: "trace-java-write",
+    created_at: "2026-08-27T13:00:00Z",
+  };
+}
 
 function reviewDraft() {
   return {
