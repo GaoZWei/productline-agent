@@ -1,13 +1,13 @@
 # 当前开发状态
 
-- 当前里程碑：M6 人工确认和业务回写（进行中）
-- 当前子阶段：M6.7 操作日志（T655～T660，已完成）
-- 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T660
-- 当前场景：写Tool返回成功或失败后，确认服务把最终授权摘要、Java业务结果或失败机器摘要、用户相对模型草稿的字段差异和Java Trace构造成唯一日志，并与Approval的`SUCCEEDED`、`STALE`或`FAILED`终态在同一事务提交；原确认人可按`approval_id`查询严格详情，前端只读Client会再次校验响应结构
-- 通过测试：`make test-approval`Python单元64/64、隔离PostgreSQL 5/5、前端13/13通过；`make test-agent-e2e`真实Java和PostgreSQL跨服务E2E 10/10通过；完整持久化回归43/43、Python回归502/502（另46条外部环境测试按条件跳过）、mypy strict（145个源文件）、M6.7定向Ruff和`git diff --check`均通过；`make test-web`Web 27/27及生产构建通过
-- 失败测试：测试先行阶段因操作日志模块和详情路由尚不存在按预期失败；首次跨服务E2E发现Java已占用公共Schema的`operation_logs`，Agent迁移同名冲突，现以`agent_operation_logs`物理前缀隔离并通过真实E2E。完整回归随后发现ORM精确表清单和一个测试类型未同步，补齐后全部通过；全量Ruff仍受既有文件注释标点/行长问题影响
+- 当前里程碑：M6 人工确认和业务回写（已完成）
+- 当前子阶段：M6.8 安全测试（T661～T670，已完成）
+- 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670
+- 当前场景：十场景安全矩阵把确认服务、写Tool、Approval状态和模拟Java HTTP写接口串联，直接验证未确认、取消、过期、事实变化和无权限时写调用为零，正常与修改后确认按最终草稿写入，并发重复确认只写一次；Java 409进入`STALE`，Java 500不重试并进入`FAILED`
+- 通过测试：M6.8定向安全矩阵10/10、Ruff和mypy通过；`make test-approval`Python单元74/74、隔离PostgreSQL 5/5、前端13/13通过；`make test-agent-e2e`真实Java和PostgreSQL跨服务E2E 10/10通过；Python完整回归512/512（另46条外部环境测试按条件跳过），mypy strict（146个源文件）通过；既有`make test-web`Web 27/27及生产构建结果保持有效
+- 失败测试：M6.8首轮T670因模拟Java 500把`retryable`写成`true`而被严格Client识别为响应契约错误；对照Java真实六字段错误信封修正为`false`后十场景全部通过。全量Ruff仍受既有文件注释标点/行长问题影响
 - 当前阻塞：无
 - 开发环境：OpenJDK 21.0.12、Maven 3.9.16、Python 3.12.13（uv 管理）、uv 0.12.0、Node.js 22.22.2、npm 10.9.7、Docker Desktop 29.6.2
-- 最近更新：M6.7新增`agent_operation_logs`迁移、严格前后摘要与字段差异、成功/失败日志构建、日志和Approval终态原子提交、原确认人详情接口及前端只读Client；Java业务日志和Agent授权日志通过物理表名与数据所有权隔离
+- 最近更新：M6.8新增T661～T670安全验收矩阵并纳入`make test-approval`，M6停止线“未经确认绝不写入、确认后只写入一次”已由模拟Java调用计数和真实跨服务E2E共同验证；路线图同步标记M6完成
 - 已知非阻塞问题：诊断侧边栏尚未取得和挂载Approval卡片，前端虽已有确认与日志Client但没有页面生产入口或日志展示页；日志详情当前只允许原确认人读取，尚无审计主管角色或完整RBAC；只有写Tool实际开始执行后的成功、Java 409或其他写失败会生成操作日志，确认前过期或事实重校验产生的`STALE`仍只保留Approval终态；Agent与Java日志尚无统一聚合接口，只能通过Java Trace关联；当前草稿Workflow只创建`SUBMIT_REVIEW` Approval，`CREATE_REWORK` Approval的生产编排尚未接线；确认服务不重新运行RAG，引用适用性仍以草稿生成时的检索结果为准；Approval截止时间由`created_at`和当前`APPROVAL_TTL_SECONDS`计算，修改配置会影响尚未完成的旧Approval；写请求发生非业务冲突失败后进入终态`FAILED`，需要新建Approval再次授权；若进程在Java成功后、保存日志和`SUCCEEDED`前崩溃，Approval可能停在`EXECUTING`，Java幂等可防重复写但目前没有自动恢复任务；首个返工类型只覆盖黄金场景`COORDINATE_SYSTEM_FIX`；当前只有内部Workflow和可替换模型协议，尚无具体草稿模型Provider；应用内浏览器无可用实例，M6.4只有DOM交互测试和生产构建验证，尚缺真实视觉检查；M5.4尚无具体动作模型供应商，M5.7因此诚实记录`configured=false`；当前快照表示Run创建时的进程配置，不是逐Step模型调用统计，具体调用模型、Token等字段仍由M7.1补齐；默认6轮不足以完成ORDER-003所需的订单、任务、质检、复核、交付、规范检索及FINISH全链路，M5.6通过显式10轮配置完成该路径；8次Tool预算当前通常不可达，但作为独立外部调用上限保留；规范问答的安全无结论响应视为已完成检索尝试但不会形成规范结论，M6.3会拒绝据此生成Approval；全量Ruff和格式检查仍受既有文件问题影响；M4.12可控Subject用于验证数据契约、策略执行和指标数学，不代表尚未接入的真实Embedding/Reranker质量，默认低相关阈值0.5和RRF`k=60`仍需真实Provider评测校准；规范问答仍是内部组件，尚未接入统一路由HTTP、页面问答交互、Run/Step持久化或具体问答/Rerank模型客户端；当前Query Rewrite只做NFKC和空白规范化，不处理别名、缩写或多轮指代；页面产品/卫星元数据只作为收窄提示且未由Java事实重校验契约；权限和生效日期仍必须显式提供；回答模型引用ID经过白名单校验，但尚无自动事实一致性或声明级引用覆盖评测；当前权限枚举只有`INTERNAL_REVIEWER`，50条评测均为DOM/GF-2/内部复核范围，尚无第二产品、卫星或权限范围的标注对比；当前检索只返回`ACTIVE`规范，不支持历史审计as-of查询；M4.5双字词元可能产生词义无关共同双字召回，M4.6 HNSW尚无大规模召回率和延迟评测；尚未提供全目录入库CLI、定时任务或HTTP管理入口；当前token数是不绑定供应商的确定性近似值，重复检测只判断规范化正文完全相同，第一版不支持PDF；路由组件仍无FastAPI统一入口、持久化路由Run/Step或真实自然语言分发；TTL无后台物理清理，Session无归档策略；任务与质检页面尚未建设，`batch_id`和`satellite_type`缺少Java事实重校验契约；演示身份Header不是完整认证；诊断没有SSE，未预期节点异常可能遗留RUNNING Step；没有Step重试次数/Trace持久化或跨实例调用账本；本地Java/Python数据库角色未隔离；Java测试仍有Mockito动态Agent的未来JDK兼容警告
-- 下一任务：T661～T670 开发M6.8安全测试，统一验证未确认、取消、过期、业务变化、无权限、重复点击以及Java 409/500均不会越过写安全边界
+- 下一任务：T701～T710 开发M7.1 Run完整字段，补齐页面上下文、路由、模型/Prompt/Tool/RAG版本、Token、Tool调用、耗时和终止原因记录

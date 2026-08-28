@@ -11,8 +11,9 @@ Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与�
 固定1536维pgvector入库和索引版本记录，M4.5～M4.12已实现中文关键词、同版本余弦检索、统一元数据门禁、
 RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测，但尚无具体问答/Rerank供应商、统一路由HTTP
 入口或全目录执行入口。M5.1～M5.4已扩展动态诊断状态、实现结构化动作决策、可回环LangGraph执行图和
-确定性执行限制，但尚无具体动作模型供应商。M6.1～M6.7已加入Approval生命周期、严格复核草稿、安全草稿生成、
-执行结果持久化、不暴露给动态模型的复核/返工写Tool、确认HTTP接口及与终态原子提交的Agent操作日志。
+确定性执行限制，但尚无具体动作模型供应商。M6.1～M6.8已加入Approval生命周期、严格复核草稿、安全草稿生成、
+执行结果持久化、不暴露给动态模型的复核/返工写Tool、确认HTTP接口、与终态原子提交的Agent操作日志，以及覆盖
+未确认、修改、重复、取消、过期、事实变化、无权限和Java异常的安全验收矩阵。
 
 ## 本地开发
 
@@ -80,6 +81,10 @@ Java Trace写入`agent_operation_logs`。日志创建与Approval从`EXECUTING`�
 
 原确认人可通过`GET /api/agent/approvals/{approval_id}/operation-log`读取严格详情；其他用户、非`REVIEWER`角色和
 不存在的日志分别返回结构化权限或资源错误。前端已有只读Client和运行时响应校验，但尚未建设日志展示页面。
+
+`make test-approval`会统一运行Approval生命周期、草稿、写Tool、确认执行、操作日志和前端契约测试；其中
+`tests/test_approval_security.py`把T661～T670连接到模拟Java HTTP写接口，直接断言允许写入的次数、最终提交内容和
+`SUCCEEDED`、`STALE`、`FAILED`等终态。该安全矩阵只验证Agent门禁，真实Java权限、版本与幂等边界仍由跨服务E2E验证。
 
 ## 只读业务 Tool
 
