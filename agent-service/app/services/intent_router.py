@@ -9,9 +9,11 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
+from app.eventing import RunEventSink
 from app.routing import Intent
 from app.routing.prompt import RoutingPrompt, build_routing_prompt
 from app.schemas.context import PageContext
+from app.schemas.events import RunEventType
 from app.schemas.routing import RouterEntities, RouterResult
 from app.schemas.session import SessionContext
 
@@ -70,8 +72,16 @@ def unknown_router_result() -> RouterResult:
 class IntentRouter:
     """执行最多两次模型结构化路由, 失败时不抛出模型内容。"""
 
-    def __init__(self, model: IntentRoutingModel) -> None:
+    def __init__(
+        self,
+        model: IntentRoutingModel,
+        *,
+        event_sink: RunEventSink | None = None,
+        run_id: str | None = None,
+    ) -> None:
         self._model = model
+        self._event_sink = event_sink
+        self._run_id = run_id
 
     async def route(
         self,
@@ -100,17 +110,42 @@ class IntentRouter:
                         "error_type": type(error).__name__,
                     },
                 )
-                return unknown_router_result()
+                return await self._publish_result(unknown_router_result())
 
             try:
                 parsed = parse_router_result(raw_output)
-                return validate_user_message_entity_evidence(user_message, parsed)
+                validated = validate_user_message_entity_evidence(user_message, parsed)
+                return await self._publish_result(validated)
             except InvalidRouterOutputError:
                 _LOGGER.warning(
                     "intent_router_output_invalid",
                     extra={"attempt": attempt, "prompt_version": prompt.version},
                 )
                 if attempt == 2:
-                    return unknown_router_result()  # 二次失败回退UNKNOWN
+                    return await self._publish_result(
+                        unknown_router_result()
+                    )  # 二次失败回退UNKNOWN
 
-        return unknown_router_result()
+        return await self._publish_result(unknown_router_result())
+
+    async def _publish_result(self, result: RouterResult) -> RouterResult:
+        """发布路由结论和澄清缺口, 不发送用户原文或模型原始输出。"""
+
+        if self._event_sink is None:
+            return result
+        await self._event_sink.publish(
+            RunEventType.INTENT_DETECTED,
+            run_id=self._run_id,
+            data={
+                "intent": result.intent.value,
+                "confidence": result.confidence,
+                "need_clarification": result.need_clarification,
+            },
+        )
+        if result.need_clarification:
+            await self._event_sink.publish(
+                RunEventType.CLARIFICATION_REQUIRED,
+                run_id=self._run_id,
+                data={"missing_fields": list(result.missing_fields)},
+            )
+        return result

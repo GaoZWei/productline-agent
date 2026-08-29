@@ -73,7 +73,7 @@ async def test_confirm_api_requires_identity_before_service_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = _FakeConfirmationService(_execution())
-    monkeypatch.setattr(approvals_api, "_service", lambda _: service)
+    monkeypatch.setattr(approvals_api, "_service", lambda _, **__: service)
     application = create_app(Settings(environment="test"))
 
     async with AsyncClient(
@@ -97,7 +97,7 @@ async def test_confirm_api_returns_strict_success_and_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = _FakeConfirmationService(_execution())
-    monkeypatch.setattr(approvals_api, "_service", lambda _: service)
+    monkeypatch.setattr(approvals_api, "_service", lambda _, **__: service)
     application = create_app(Settings(environment="test"))
 
     async with AsyncClient(
@@ -138,7 +138,7 @@ async def test_confirm_api_maps_expired_and_rejects_extra_request_fields(
             approval_status=ApprovalStatus.EXPIRED,
         )
     )
-    monkeypatch.setattr(approvals_api, "_service", lambda _: service)
+    monkeypatch.setattr(approvals_api, "_service", lambda _, **__: service)
     application = create_app(Settings(environment="test"))
     headers = {
         "X-Trace-Id": "trace-confirm-expired",

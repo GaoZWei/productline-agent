@@ -8,14 +8,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn, Protocol
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from app.database import Database
 from app.errors import ToolErrorCode
+from app.eventing import RunEventSink
 from app.models import ApprovalRecord, ApprovalStatus, OperationType, PendingToolName
 from app.repositories import ApprovalRecordRepository, OperationLogRepository
 from app.schemas import ReviewDraft
 from app.schemas.business import BusinessIdentity
+from app.schemas.events import RunEventType
 from app.schemas.operation_log import OperationLogDetail
 from app.schemas.tools import QualityIssue, QualityIssueList, TaskDetail
 from app.schemas.write_tools import (
@@ -230,6 +232,7 @@ class ApprovalConfirmationService:
         *,
         approval_ttl_seconds: int,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        event_sink: RunEventSink | None = None,
     ) -> None:
         if approval_ttl_seconds < 60 or approval_ttl_seconds > 86400:
             raise ValueError("approval_ttl_seconds must be between 60 and 86400")
@@ -238,6 +241,7 @@ class ApprovalConfirmationService:
         self._write_tools = write_tools
         self._ttl = timedelta(seconds=approval_ttl_seconds)
         self._now = now
+        self._event_sink = event_sink
     # 主流程
     async def confirm_and_execute(
         self,
@@ -251,10 +255,21 @@ class ApprovalConfirmationService:
         # 权限检查
         permissions = self._permissions(identity)
         snapshot = await self._require_snapshot(approval_id)
+        run_id = _confirmation_run_id(approval_id)
         # 根据当前状态决定如何处理
         if snapshot.status is ApprovalStatus.SUCCEEDED:
             # 校验确认人和草稿,直接返回历史 execution_result
-            return self._completed_replay(snapshot, draft=draft, identity=identity)
+            execution = self._completed_replay(snapshot, draft=draft, identity=identity)
+            await self._publish_event(
+                RunEventType.WRITEBACK_COMPLETED,
+                run_id=run_id,
+                data={
+                    "approval_id": snapshot.approval_id,
+                    "status": snapshot.status.value,
+                    "replayed": True,
+                },
+            )
+            return execution
         if snapshot.status is ApprovalStatus.WAITING_CONFIRMATION:
             # 检查过期、保存最终草稿、保存确认人、改为Confirmed
             await self._expire_if_needed(snapshot)
@@ -309,6 +324,15 @@ class ApprovalConfirmationService:
                 approval_status=(await self._require_snapshot(approval_id)).status,
             )
 
+        await self._publish_event(
+            RunEventType.WRITEBACK_STARTED,
+            run_id=run_id,
+            data={
+                "approval_id": locked.approval_id,
+                "tool_name": locked.pending_tool_name.value,
+                "target_id": locked.target_id,
+            },
+        )
         write_result = await self._execute_write(locked, context)
         # 处理写入失败
         if not write_result.success:
@@ -331,6 +355,16 @@ class ApprovalConfirmationService:
                     retryable=write_result.error.retryable,
                 ),
             )
+            await self._publish_event(
+                RunEventType.WRITEBACK_COMPLETED,
+                run_id=run_id,
+                data={
+                    "approval_id": locked.approval_id,
+                    "status": target_status.value,
+                    "error_code": write_result.error.code.value,
+                    "replayed": False,
+                },
+            )
             raise ApprovalConfirmationError(
                 code=write_result.error.code.value,
                 message=write_result.error.message,
@@ -347,11 +381,33 @@ class ApprovalConfirmationService:
             result=output,
             failure=None,
         )
+        await self._publish_event(
+            RunEventType.WRITEBACK_COMPLETED,
+            run_id=run_id,
+            data={
+                "approval_id": locked.approval_id,
+                "status": ApprovalStatus.SUCCEEDED.value,
+                "replayed": False,
+            },
+        )
         return ApprovalConfirmationExecution(
             approval_id=locked.approval_id,
             status=ApprovalStatus.SUCCEEDED,
             result=output,
         )
+
+    async def _publish_event(
+        self,
+        event_type: RunEventType,
+        *,
+        run_id: str,
+        data: dict[str, JsonValue],
+    ) -> None:
+        """只发布确认阶段状态摘要, 不暴露草稿、幂等键或Java写结果。"""
+
+        if self._event_sink is None:
+            return
+        await self._event_sink.publish(event_type, run_id=run_id, data=data)
     # 权限检查
     def _permissions(self, identity: BusinessIdentity) -> frozenset[str]:
         if identity.role != "REVIEWER":
@@ -466,7 +522,7 @@ class ApprovalConfirmationService:
             },
             context,
         )
-    # 拿到原始草稿，拿到用户草稿，构造操作日志详情，调用数据库完成操作
+    # 拿到原始草稿、用户草稿和写入结果后, 构造操作日志详情并完成数据库终态保存。
     async def _finish_locked(
         self,
         snapshot: ApprovalConfirmationSnapshot,

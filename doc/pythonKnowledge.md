@@ -563,6 +563,15 @@ Run 状态是 `PENDING/RUNNING/SUCCEEDED/FAILED/WAITING_APPROVAL/CANCELLED`，St
 私有 enum。这样 Python 仍有明确类型，类型扩展可通过普通 Alembic 约束迁移演进；
 M7.2升级时已将旧`RULE`记录转为语义更完整的`WORKFLOW`。
 
+### 13.4 SSE事件流的短期回放与持久审计分层
+
+M7.3使用异步队列把执行事件发送给在线订阅者，同时用有界`deque`保留最近事件。每条事件都有流内递增ID，浏览器短暂
+断开后可用`Last-Event-ID`只回放缺失部分；空闲时发送SSE注释心跳，生成器的`finally`负责移除断开的订阅队列。
+
+这类内存流适合页面实时反馈，却不等同于消息队列或审计存储：进程重启、保留期结束或历史超过上限后不能继续回放。
+因此Run/Step仍写PostgreSQL，Java仍保存业务事实；SSE只携带受控进度摘要，并对敏感键、嵌套深度、元素数量和字节大小
+设置硬边界。
+
 [`agent-service/app/repositories/agent_runtime.py`](../agent-service/app/repositories/agent_runtime.py)
 类似 Spring Data Repository 或 TypeORM Repository，只封装 Run/Step 的增、删、查：
 

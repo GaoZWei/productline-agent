@@ -12,8 +12,9 @@ from typing import Any, Literal, NotRequired, Protocol, TypedDict, cast
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
+from app.eventing import RunEventSink
 from app.knowledge import (
     KnowledgeRetriever,
     Reranker,
@@ -28,6 +29,7 @@ from app.knowledge.reranking import (
 )
 from app.routing import BusinessSkill, Intent, skill_for_intent
 from app.schemas.context import PageContext
+from app.schemas.events import RunEventType
 from app.schemas.knowledge import Citation, KnowledgeSearchFilter, PermissionScope
 from app.schemas.routing import RoutingDecision
 from app.schemas.specification import (
@@ -88,12 +90,16 @@ class SpecificationQaWorkflow:
         answer_model: SpecificationAnswerModel,
         rerank_timeout_seconds: float = DEFAULT_RERANK_TIMEOUT_SECONDS,
         min_relevance_score: float = DEFAULT_MIN_RELEVANCE_SCORE,
+        event_sink: RunEventSink | None = None,
+        run_id: str | None = None,
     ) -> None:
         self._retriever = retriever
         self._reranker = reranker
         self._answer_model = answer_model
         self._rerank_timeout_seconds = rerank_timeout_seconds
         self._min_relevance_score = min_relevance_score
+        self._event_sink = event_sink
+        self._run_id = run_id
         self.graph = self._build_graph()
 
     async def ainvoke(
@@ -158,9 +164,19 @@ class SpecificationQaWorkflow:
     async def retrieve(self, state: _SpecificationQaState) -> dict[str, object]:
         """执行Query Embedding、关键词/向量召回和RRF融合入口。"""
 
+        filters = state["filters"]
+        await self._publish_event(
+            RunEventType.RETRIEVAL_STARTED,
+            data={
+                "permission_scope": filters.permission_scope.value,
+                "effective_at": filters.effective_at.isoformat(),
+                "product_type": filters.product_type,
+                "satellite_type": filters.satellite_type,
+            },
+        )
         results = await self._retriever.retrieve(
             state["rewritten_query"],
-            filters=state["filters"],
+            filters=filters,
         )
         return {"retrieval_results": tuple(results)}
     # 重排函数
@@ -174,7 +190,31 @@ class SpecificationQaWorkflow:
             timeout_seconds=self._rerank_timeout_seconds,
             min_score=self._min_relevance_score,
         )
+        await self._publish_event(
+            RunEventType.RETRIEVAL_COMPLETED,
+            data={
+                "retrieved_count": len(state["retrieval_results"]),
+                "selected_count": len(outcome.results),
+                "rerank_degraded": outcome.degraded,
+            },
+        )
         return {"rerank_outcome": outcome}
+
+    async def _publish_event(
+        self,
+        event_type: RunEventType,
+        *,
+        data: dict[str, JsonValue],
+    ) -> None:
+        """仅在调用方绑定事件流时发布不含问题和规范正文的进度摘要。"""
+
+        if self._event_sink is None:
+            return
+        await self._event_sink.publish(
+            event_type,
+            run_id=self._run_id,
+            data=data,
+        )
     # 充足性检查函数
     async def check_relevance(self, state: _SpecificationQaState) -> dict[str, object]:
         """只有完成重排且仍有候选时才允许模型形成规范结论。"""

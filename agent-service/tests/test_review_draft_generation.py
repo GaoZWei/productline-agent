@@ -8,9 +8,11 @@ from datetime import date
 from typing import Any
 
 import pytest
+from pydantic import JsonValue
 
 from app.errors import ToolErrorCode
 from app.models import AgentRunStatus, ApprovalStatus
+from app.schemas import RunEventType
 from app.schemas.business import BusinessIdentity
 from app.schemas.knowledge import Citation, PermissionScope
 from app.schemas.specification import SpecificationQaResult, SpecificationQaStatus
@@ -27,6 +29,22 @@ from app.workflows.review_draft import (
     ReviewDraftSourceError,
     ReviewDraftSpecificationError,
 )
+
+
+class _CaptureEventSink:
+    def __init__(self) -> None:
+        self.events: list[tuple[RunEventType, str | None, dict[str, JsonValue]]] = []
+
+    async def publish(
+        self,
+        event_type: RunEventType,
+        *,
+        run_id: str | None = None,
+        step_id: str | None = None,
+        data: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        del step_id
+        self.events.append((event_type, run_id, dict(data or {})))
 
 
 def _diagnosis() -> DiagnosisResult:
@@ -225,6 +243,7 @@ def _workflow(
     task: TaskDetail | None = None,
     specification_result: SpecificationQaResult | None = None,
     draft_output: object | None = None,
+    event_sink: _CaptureEventSink | None = None,
 ) -> tuple[
     ReviewDraftGenerationWorkflow,
     _FakeStore,
@@ -261,6 +280,7 @@ def _workflow(
         effective_at=date(2026, 8, 26),
         permission_scope=PermissionScope.INTERNAL_REVIEWER,
         approval_id_factory=lambda: "approval-draft-003",
+        event_sink=event_sink,
     )
     return (
         workflow,
@@ -276,7 +296,10 @@ def _workflow(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_generates_waiting_approval_from_refreshed_facts_without_write_tool() -> None:
-    workflow, store, task_tool, issue_tool, write_tool, specification, model = _workflow()
+    events = _CaptureEventSink()
+    workflow, store, task_tool, issue_tool, write_tool, specification, model = _workflow(
+        event_sink=events
+    )
 
     result = await workflow.ainvoke(session_id="session-003", task_id="TASK-003")
 
@@ -295,6 +318,17 @@ async def test_generates_waiting_approval_from_refreshed_facts_without_write_too
     assert model.requests[0].citations == (_citation(),)
     assert store.saved[0]["target_version"] == 7
     assert store.saved[0]["draft"] == result.draft
+    assert events.events == [
+        (
+            RunEventType.APPROVAL_REQUIRED,
+            "run-diagnosis-003",
+            {
+                "approval_id": "approval-draft-003",
+                "status": "WAITING_CONFIRMATION",
+                "target_id": "TASK-003",
+            },
+        )
+    ]
 
 
 @pytest.mark.unit

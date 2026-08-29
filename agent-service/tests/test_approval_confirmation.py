@@ -8,10 +8,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from pydantic import JsonValue
 
 from app.errors import ToolErrorCode
 from app.models import ApprovalStatus, OperationType, PendingToolName
-from app.schemas import ReviewDraft
+from app.schemas import ReviewDraft, RunEventType
 from app.schemas.business import BusinessIdentity
 from app.schemas.operation_log import OperationLogDetail
 from app.schemas.tools import QualityIssueList, TaskDetail
@@ -24,6 +25,22 @@ from app.services.approval_confirmation import (
 from app.tools import ToolContext, ToolError, ToolResult
 
 _NOW = datetime(2026, 8, 27, 10, 0, tzinfo=UTC)
+
+
+class _CaptureEventSink:
+    def __init__(self) -> None:
+        self.events: list[tuple[RunEventType, str | None, dict[str, JsonValue]]] = []
+
+    async def publish(
+        self,
+        event_type: RunEventType,
+        *,
+        run_id: str | None = None,
+        step_id: str | None = None,
+        data: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        del step_id
+        self.events.append((event_type, run_id, dict(data or {})))
 
 
 def _draft(**changes: object) -> ReviewDraft:
@@ -246,6 +263,7 @@ def _service(
     issues: QualityIssueList | None = None,
     task_result: ToolResult[Any] | None = None,
     write_result: ToolResult[Any] | None = None,
+    event_sink: _CaptureEventSink | None = None,
 ) -> tuple[ApprovalConfirmationService, _FakeTool, _FakeTool, _FakeTool]:
     task_tool = _FakeTool(task_result or ToolResult(success=True, data=task or _task()))
     issue_tool = _FakeTool(ToolResult(success=True, data=issues or _issues()))
@@ -265,6 +283,7 @@ def _service(
         _FakeRegistry({"write_review_result": write_tool}),
         approval_ttl_seconds=900,
         now=lambda: _NOW,
+        event_sink=event_sink,
     )
     return service, task_tool, issue_tool, write_tool
 
@@ -273,7 +292,8 @@ def _service(
 @pytest.mark.asyncio
 async def test_confirmation_refreshes_facts_locks_executes_and_marks_succeeded() -> None:
     store = _FakeStore(_snapshot())
-    service, task_tool, issue_tool, write_tool = _service(store)
+    events = _CaptureEventSink()
+    service, task_tool, issue_tool, write_tool = _service(store, event_sink=events)
 
     execution = await service.confirm_and_execute(
         approval_id="approval-confirm-003",
@@ -300,6 +320,16 @@ async def test_confirmation_refreshes_facts_locks_executes_and_marks_succeeded()
     assert len(store.operation_logs) == 1
     assert store.operation_logs[0].after_summary.outcome is ApprovalStatus.SUCCEEDED
     assert store.operation_logs[0].java_trace_id == "trace-java-write"
+    assert [event[0] for event in events.events] == [
+        RunEventType.WRITEBACK_STARTED,
+        RunEventType.WRITEBACK_COMPLETED,
+    ]
+    assert len({event[1] for event in events.events}) == 1
+    assert events.events[-1][2] == {
+        "approval_id": "approval-confirm-003",
+        "status": "SUCCEEDED",
+        "replayed": False,
+    }
 
 
 @pytest.mark.unit

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import date
 from typing import Any, cast
 
 import httpx
 import pytest
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, JsonValue
 
 from app.clients.business import BusinessHttpClient
 from app.errors import ToolErrorCode
@@ -20,6 +20,7 @@ from app.schemas import (
     PageContext,
     PageType,
     PermissionScope,
+    RunEventType,
     SpecificationQaResult,
     SpecificationQaStatus,
     StepError,
@@ -71,6 +72,22 @@ class StubSpecificationWorkflow:
             answer="未检索到足够的当前有效规范依据, 无法给出规范结论。",
             citations=(),
         )
+
+
+class CaptureEventSink:
+    def __init__(self) -> None:
+        self.events: list[tuple[RunEventType, dict[str, JsonValue]]] = []
+
+    async def publish(
+        self,
+        event_type: RunEventType,
+        *,
+        run_id: str | None = None,
+        step_id: str | None = None,
+        data: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        del run_id, step_id
+        self.events.append((event_type, dict(data or {})))
 
 
 def _settings() -> Settings:
@@ -231,6 +248,7 @@ async def test_dynamic_graph_collects_facts_and_generates_order_003_diagnosis() 
         ]
     )
     specification = StubSpecificationWorkflow()
+    events = CaptureEventSink()
     workflow = DynamicDiagnosisWorkflow(
         action_decider=ActionDecider(model=model, registry=registry),
         tool_registry=registry,
@@ -239,6 +257,7 @@ async def test_dynamic_graph_collects_facts_and_generates_order_003_diagnosis() 
         effective_at=date(2026, 8, 22),
         permission_scope=PermissionScope.INTERNAL_REVIEWER,
         limits=AgentExecutionLimits(max_decision_rounds=10),
+        event_sink=events,
     )
 
     try:
@@ -282,6 +301,19 @@ async def test_dynamic_graph_collects_facts_and_generates_order_003_diagnosis() 
         "OPEN_COORDINATE_SYSTEM_ISSUE",
         "REVIEW_PENDING",
     ]
+    assert [event[0] for event in events.events] == [
+        RunEventType.AGENT_ACTION_SELECTED
+    ] * 8
+    assert events.events[0][1] == {
+        "action": "QUERY_ORDER",
+        "tool_name": "get_order_detail",
+        "decision_round": 1,
+    }
+    assert events.events[-1][1] == {
+        "action": "FINISH",
+        "tool_name": None,
+        "decision_round": 8,
+    }
 
 
 @pytest.mark.asyncio

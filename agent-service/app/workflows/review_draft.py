@@ -11,10 +11,12 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from app.eventing import RunEventSink
 from app.models import AgentRunStatus, ApprovalStatus
 from app.schemas.approval import ReviewDraft
 from app.schemas.business import BusinessIdentity
 from app.schemas.context import PageContext
+from app.schemas.events import RunEventType
 from app.schemas.knowledge import Citation, PermissionScope
 from app.schemas.specification import SpecificationQaResult, SpecificationQaStatus
 from app.schemas.tools import QualityIssue, QualityIssueList, TaskDetail
@@ -160,6 +162,7 @@ class ReviewDraftGenerationWorkflow:
         permission_scope: PermissionScope,
         page_context: PageContext | None = None,
         approval_id_factory: Callable[[], str] = _new_approval_id,
+        event_sink: RunEventSink | None = None,
     ) -> None:
         self._store = store
         self._tool_registry = tool_registry
@@ -170,6 +173,7 @@ class ReviewDraftGenerationWorkflow:
         self._permission_scope = permission_scope
         self._page_context = page_context
         self._approval_id_factory = approval_id_factory
+        self._event_sink = event_sink
         self._invoked = False
     # 主流程
     async def ainvoke(
@@ -179,11 +183,11 @@ class ReviewDraftGenerationWorkflow:
         task_id: str,
     ) -> ReviewDraftGenerationResult:
         """生成并保存一份WAITING_CONFIRMATION草稿, 过程中不调用写Tool。"""
-        # 第一步：限制一个Workflow实例只能运行一次
+        # 第一步: 限制一个Workflow实例只能运行一次。
         if self._invoked:
             raise RuntimeError("one review draft workflow instance can only execute once")
         self._invoked = True
-        # 第二步：读取最近诊断Run的快照
+        # 第二步: 读取最近诊断Run的快照。
         source = await self._store.latest_diagnosis(  # 定位最近一个带结果的Run
             session_id,
             identity=self._tool_context.identity,
@@ -193,17 +197,17 @@ class ReviewDraftGenerationWorkflow:
             raise AssertionError("source diagnosis must exist")
         if self._tool_context.run_id != source.run_id:
             raise ReviewDraftSourceError("ToolContext run_id must match recent diagnosis run")
-        # 第三步：必须重新调用Java Tool   
+        # 第三步: 必须重新调用Java Tool。
         task = await self._read_task(task_id)
         issues = await self._read_quality_issues(task_id)
-        # 查询完成后还会校验，防止串线问题
+        # 查询完成后还会校验, 防止串线问题。
         if task.order_id != diagnosis.order_id:
             raise ReviewDraftBusinessFactError(
                 "latest task order does not match the recent diagnosis order"
             )
-        # 第四步：规范检索
+        # 第四步: 规范检索。
         specification = await self._retrieve_specification(task, issues.issues)
-        # 第五步：构造草稿请求
+        # 第五步: 构造草稿请求。
         request = ReviewDraftGenerationModelRequest(
             diagnosis=diagnosis,
             task=task,
@@ -211,7 +215,7 @@ class ReviewDraftGenerationWorkflow:
             specification_answer=specification.answer,
             citations=specification.citations,
         )
-        # 第六步：生成草稿
+        # 第六步: 生成草稿。
         draft = self._parse_draft(await self._draft_model.generate(request))
         self._validate_draft(
             draft,
@@ -227,6 +231,16 @@ class ReviewDraftGenerationWorkflow:
             draft=draft,
             target_version=task.version,
         )
+        if self._event_sink is not None:
+            await self._event_sink.publish(
+                RunEventType.APPROVAL_REQUIRED,
+                run_id=source.run_id,
+                data={
+                    "approval_id": persisted.approval_id,
+                    "status": persisted.approval_status.value,
+                    "target_id": task.task_id,
+                },
+            )
         return ReviewDraftGenerationResult(
             approval_id=persisted.approval_id,
             run_id=source.run_id,
@@ -304,7 +318,7 @@ class ReviewDraftGenerationWorkflow:
             return ReviewDraft.model_validate(raw_output)
         except ValidationError as error:
             raise InvalidReviewDraftOutputError("review draft schema validation failed") from error
-    # 第二层校验：任务和Citation白名单
+    # 第二层校验: 任务和Citation白名单。
     @staticmethod
     def _validate_draft(
         draft: ReviewDraft,

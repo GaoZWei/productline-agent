@@ -167,6 +167,11 @@ M7.2将Step类型固化为`CONTEXT/ROUTER/WORKFLOW/AGENT/TOOL/RAG/LLM/APPROVAL/W
 生命周期的受控摘要入口：压缩空白、遮盖Authorization、密码、API Key以及常见Token/Secret标签，并统一截断到1000字符，但调用方仍不得传入完整
 Token、密钥或未经筛选的业务载荷。类型只用于可观测分类，不改变Tool权限或Java业务裁决。
 
+M7.3提供`GET /api/agent/events/{stream_id}`事件流。客户端先生成至少8字符的`stream_id`并建立SSE连接，收到
+`connected`注释后，在诊断或Approval确认请求中携带`X-Event-Stream-Id`；服务按流内序号发送Run、路由、Agent动作、
+Tool、RAG、Approval和写回状态摘要。连接支持心跳及`Last-Event-ID`短期回放，流按用户隔离并在断开、空闲或终态保留期后
+清理。事件历史只保存在当前进程的有界内存中，Run/Step数据库记录仍是持久审计证据，Java Tool仍是业务事实来源。
+
 `RunLifecycleService`实现以下最小状态机：
 
 ```text

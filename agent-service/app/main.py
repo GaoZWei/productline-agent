@@ -12,13 +12,14 @@ from pydantic import BaseModel
 
 from app.api.approvals import router as approvals_router
 from app.api.order_diagnosis import router as order_diagnosis_router
+from app.api.run_events import router as run_events_router
 from app.api.sessions import router as sessions_router
 from app.api.tool_debug import ToolDebugRunContextStore
 from app.api.tool_debug import router as tool_debug_router
 from app.clients.business import BusinessHttpClient
 from app.database import Database
 from app.observability import TraceIdMiddleware, configure_logging
-from app.services import DatabaseApprovalExecutionStore
+from app.services import DatabaseApprovalExecutionStore, RunEventService
 from app.settings import Settings, get_settings
 from app.tools import create_read_tool_registry, create_write_tool_registry
 from app.versioning import build_run_version_snapshot
@@ -48,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # FastAPI 应用级共享状态供路由处理访问数据库和业务客户端。
         application.state.database = database
         application.state.business_client = business_client
+        application.state.run_event_service = RunEventService()
         # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。
         application.state.tool_registry = create_read_tool_registry(business_client)
         application.state.write_tool_registry = create_write_tool_registry(
@@ -71,9 +73,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             try:
-                await business_client.aclose()
+                await application.state.run_event_service.close()
             finally:
-                await database.dispose()
+                try:
+                    await business_client.aclose()
+                finally:
+                    await database.dispose()
             logger.info("service_stopped", extra={"service": resolved_settings.service_name})
 
     application = FastAPI(
@@ -83,6 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = resolved_settings
     application.include_router(order_diagnosis_router)
+    application.include_router(run_events_router)
     application.include_router(sessions_router)
     application.include_router(approvals_router)
     # 根据环境决定是否注册路由

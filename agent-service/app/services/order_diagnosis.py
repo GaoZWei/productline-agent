@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from pydantic import JsonValue
+
 from app.database import Database
+from app.eventing import RunEventSink
 from app.models import AgentMessage, AgentMessageRole, AgentSession
 from app.repositories import (
     AgentMessageRepository,
@@ -17,6 +21,7 @@ from app.repositories import (
 from app.routing import Intent
 from app.schemas.business import BusinessIdentity
 from app.schemas.context import PageContext
+from app.schemas.events import RunEventType
 from app.schemas.run_observability import RunTokenUsage
 from app.schemas.session import (
     context_from_page,
@@ -31,7 +36,12 @@ from app.services.session_context import (
     SessionContextService,
 )
 from app.tools import ToolContext, ToolRegistry
-from app.workflows import DatabaseWorkflowStepRecorder, OrderDiagnosisWorkflow
+from app.workflows import (
+    DatabaseWorkflowStepRecorder,
+    EventPublishingWorkflowStepRecorder,
+    OrderDiagnosisWorkflow,
+    WorkflowStepRecorder,
+)
 
 _LOGGER = logging.getLogger("agent-service.order-diagnosis")
 _ORDER_DIAGNOSIS_PERMISSIONS = frozenset(
@@ -85,12 +95,14 @@ class OrderDiagnosisService:
         *,
         session_ttl_seconds: int,
         version_snapshot: RunVersionSnapshot,
+        event_sink: RunEventSink | None = None,
     ) -> None:
         self._database = database
         self._tool_registry = tool_registry
         self._session_ttl = timedelta(seconds=session_ttl_seconds)
         # 诊断服务在构造时保存运行版本快照
         self._version_snapshot = version_snapshot
+        self._event_sink = event_sink
 
     async def diagnose(
         self,
@@ -120,6 +132,13 @@ class OrderDiagnosisService:
                 )
             )
         except SessionContextError as context_error:
+            await self._publish_event(
+                RunEventType.RUN_FAILED,
+                data={
+                    "error_code": context_error.code,
+                    "retryable": False,
+                },
+            )
             raise OrderDiagnosisExecutionError(
                 run_id=None,
                 code=context_error.code,
@@ -128,6 +147,13 @@ class OrderDiagnosisService:
                 error_step=None,
             ) from context_error
         except ValueError as context_error:
+            await self._publish_event(
+                RunEventType.RUN_FAILED,
+                data={
+                    "error_code": "SESSION_CONTEXT_INCOMPLETE",
+                    "retryable": False,
+                },
+            )
             raise OrderDiagnosisExecutionError(
                 run_id=None,
                 code="SESSION_CONTEXT_INCOMPLETE",
@@ -142,12 +168,31 @@ class OrderDiagnosisService:
             trace_id=trace_id,
             run_id=run_id,
         )
-        # workflow接入数据库Step
+        await self._publish_event(
+            RunEventType.RUN_STARTED,
+            run_id=run_id,
+            data={"session_id": resolved_session_id},
+        )
+        await self._publish_event(
+            RunEventType.CONTEXT_LOADED,
+            run_id=run_id,
+            data={
+                "order_id": resolved_order_id,
+                "current_page": resolved_page_context.current_page.value,
+            },
+        )
+        # workflow接入数据库Step和可选实时事件
+        step_recorder: WorkflowStepRecorder = DatabaseWorkflowStepRecorder(self._database)
+        if self._event_sink is not None:
+            step_recorder = EventPublishingWorkflowStepRecorder(
+                step_recorder,
+                self._event_sink,
+            )
         workflow = OrderDiagnosisWorkflow(
             tool_registry=self._tool_registry,  # 找到七个只读Tool节点
             tool_context=context,  # 提供身份、权限、Trace和RunID
             # 把每个Workflow节点记录为数据库Step
-            step_recorder=DatabaseWorkflowStepRecorder(self._database),
+            step_recorder=step_recorder,
         )
         # 执行Workflow
         try:
@@ -161,6 +206,15 @@ class OrderDiagnosisService:
                 error_code=_WORKFLOW_EXECUTION_ERROR,
                 error_step="order_diagnosis_workflow",
                 tool_call_count=context.tool_call_ledger.recorded_call_count,
+            )
+            await self._publish_event(
+                RunEventType.RUN_FAILED,
+                run_id=run_id,
+                data={
+                    "error_code": _WORKFLOW_EXECUTION_ERROR,
+                    "error_step": "order_diagnosis_workflow",
+                    "retryable": False,
+                },
             )
             raise OrderDiagnosisExecutionError(
                 run_id=run_id,
@@ -178,6 +232,15 @@ class OrderDiagnosisService:
                 error_step=error.step_name,
                 tool_call_count=context.tool_call_ledger.recorded_call_count,
             )
+            await self._publish_event(
+                RunEventType.RUN_FAILED,
+                run_id=run_id,
+                data={
+                    "error_code": error.code.value,
+                    "error_step": error.step_name,
+                    "retryable": error.retryable,
+                },
+            )
             raise self._execution_error(run_id, error)
         # 成功时 保存Run成功结果
         diagnosis = state["diagnosis"]
@@ -188,6 +251,15 @@ class OrderDiagnosisService:
                 error_step="generate_diagnosis",
                 tool_call_count=context.tool_call_ledger.recorded_call_count,
             )
+            await self._publish_event(
+                RunEventType.RUN_FAILED,
+                run_id=run_id,
+                data={
+                    "error_code": _WORKFLOW_EXECUTION_ERROR,
+                    "error_step": "generate_diagnosis",
+                    "retryable": False,
+                },
+            )
             raise OrderDiagnosisExecutionError(
                 run_id=run_id,
                 code=_WORKFLOW_EXECUTION_ERROR,
@@ -196,6 +268,16 @@ class OrderDiagnosisService:
                 error_step="generate_diagnosis",
             )
 
+        await self._publish_event(
+            RunEventType.DIAGNOSIS_GENERATED,
+            run_id=run_id,
+            data={
+                "blocking_stage": diagnosis.blocking_stage.value,
+                "root_cause_count": len(diagnosis.root_causes),
+                "evidence_count": len(diagnosis.evidence),
+                "suggestion_count": len(diagnosis.suggestions),
+            },
+        )
         async with self._database.session() as session, session.begin():
             lifecycle = RunLifecycleService(AgentRunRepository(session))
             # 新事务结束Run
@@ -206,6 +288,16 @@ class OrderDiagnosisService:
                 tool_call_count=context.tool_call_ledger.recorded_call_count,
                 termination_reason="COMPLETED",
             )
+        await self._publish_event(
+            RunEventType.RUN_COMPLETED,
+            run_id=run_id,
+            data={
+                "session_id": resolved_session_id,
+                "status": "SUCCEEDED",
+                "tool_call_count": context.tool_call_ledger.recorded_call_count,
+                "blocking_stage": diagnosis.blocking_stage.value,
+            },
+        )
         # 最后返回诊断结果
         return OrderDiagnosisExecution(
             run_id=run_id,
@@ -349,6 +441,25 @@ class OrderDiagnosisService:
                 "order_diagnosis_run_finalization_failed",
                 extra={"run_id": run_id, "error_code": error_code},
             )
+
+    async def _publish_event(
+        self,
+        event_type: RunEventType,
+        *,
+        run_id: str | None = None,
+        step_id: str | None = None,
+        data: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        """仅在请求建立事件流时发布, 不让无流请求承担额外状态。"""
+
+        if self._event_sink is None:
+            return
+        await self._event_sink.publish(
+            event_type,
+            run_id=run_id,
+            step_id=step_id,
+            data=data,
+        )
 
     @staticmethod
     def _execution_error(run_id: str, error: StepError) -> OrderDiagnosisExecutionError:

@@ -11,6 +11,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field, ValidationError
 
 from app.errors import ToolErrorCode
+from app.eventing import RunEventSink
 from app.schemas.action import (
     ACTION_TOOL_NAMES,
     ActionDecision,
@@ -18,6 +19,7 @@ from app.schemas.action import (
     action_argument_model,
 )
 from app.schemas.context import PageContext, PageType
+from app.schemas.events import RunEventType
 from app.schemas.knowledge import PermissionScope
 from app.schemas.specification import SpecificationQaResult
 from app.schemas.tools import (
@@ -107,6 +109,7 @@ class DynamicDiagnosisWorkflow:
         limits: AgentExecutionLimits | None = None,
         # 缺口怎样进入动态Workflow
         information_gap_detector: InformationGapDetector | None = None,
+        event_sink: RunEventSink | None = None,
     ) -> None:
         self._action_decider = action_decider
         self._tool_registry = tool_registry
@@ -117,6 +120,7 @@ class DynamicDiagnosisWorkflow:
         self._limits = limits or AgentExecutionLimits()
         # 默认创建真实探测器
         self._information_gap_detector = information_gap_detector or InformationGapDetector()
+        self._event_sink = event_sink
         self._invoked = False
         self.graph = self._build_graph()
 
@@ -267,6 +271,16 @@ class DynamicDiagnosisWorkflow:
                     self._step_error("plan_next_action", ToolErrorCode.UNKNOWN_TOOL_ERROR),
                 ],
             }
+        if self._event_sink is not None:
+            await self._event_sink.publish(
+                RunEventType.AGENT_ACTION_SELECTED,
+                run_id=self._tool_context.run_id,
+                data={
+                    "action": decision.action.value,
+                    "tool_name": decision.tool_name,
+                    "decision_round": state["iteration_count"] + 1,
+                },
+            )
         return {
             "current_decision": decision,
             "current_call_fingerprint": None,

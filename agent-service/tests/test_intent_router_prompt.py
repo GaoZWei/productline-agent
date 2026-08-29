@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from app.routing import Intent
 from app.routing.prompt import (
@@ -17,7 +17,7 @@ from app.routing.prompt import (
     build_routing_prompt,
     router_result_json_schema,
 )
-from app.schemas import PageContext, PageType, RouterResult, SessionContext
+from app.schemas import PageContext, PageType, RouterResult, RunEventType, SessionContext
 from app.services import IntentRouter, parse_router_result
 
 
@@ -32,6 +32,22 @@ class StubRoutingModel:
         if isinstance(output, Exception):
             raise output
         return output
+
+
+class CaptureEventSink:
+    def __init__(self) -> None:
+        self.events: list[tuple[RunEventType, dict[str, JsonValue]]] = []
+
+    async def publish(
+        self,
+        event_type: RunEventType,
+        *,
+        run_id: str | None = None,
+        step_id: str | None = None,
+        data: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        del run_id, step_id
+        self.events.append((event_type, dict(data or {})))
 
 
 def _page_context() -> PageContext:
@@ -137,8 +153,13 @@ def test_parser_accepts_object_and_plain_json_but_rejects_markdown() -> None:
 @pytest.mark.asyncio
 async def test_router_returns_first_valid_structured_result_without_retry() -> None:
     model = StubRoutingModel([_valid_result()])
+    events = CaptureEventSink()
 
-    result = await IntentRouter(model).route(
+    result = await IntentRouter(
+        model,
+        event_sink=events,
+        run_id="run-router-001",
+    ).route(
         user_message="ORDER-003 为什么没有交付",
         page_context=_page_context(),
         session_context=_session_context(),
@@ -147,6 +168,16 @@ async def test_router_returns_first_valid_structured_result_without_retry() -> N
     assert result.intent is Intent.ORDER_DIAGNOSIS
     assert result.can_dispatch is True
     assert [prompt.attempt for prompt in model.prompts] == [1]
+    assert events.events == [
+        (
+            RunEventType.INTENT_DETECTED,
+            {
+                "intent": "ORDER_DIAGNOSIS",
+                "confidence": 0.93,
+                "need_clarification": False,
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -179,8 +210,11 @@ async def test_router_retries_one_schema_failure_with_correction_instruction() -
 @pytest.mark.asyncio
 async def test_second_schema_failure_falls_back_to_safe_unknown() -> None:
     model = StubRoutingModel([{"intent": "BAD"}, "not-json"])
+    events = CaptureEventSink()
 
-    result = await IntentRouter(model).route(user_message="随便处理一下")
+    result = await IntentRouter(model, event_sink=events).route(
+        user_message="随便处理一下"
+    )
 
     assert [prompt.attempt for prompt in model.prompts] == [1, 2]
     assert result.intent is Intent.UNKNOWN
@@ -188,6 +222,10 @@ async def test_second_schema_failure_falls_back_to_safe_unknown() -> None:
     assert result.entities.model_dump(exclude_none=True) == {}
     assert result.need_clarification is True
     assert result.can_dispatch is False
+    assert [event[0] for event in events.events] == [
+        RunEventType.INTENT_DETECTED,
+        RunEventType.CLARIFICATION_REQUIRED,
+    ]
 
 
 @pytest.mark.asyncio

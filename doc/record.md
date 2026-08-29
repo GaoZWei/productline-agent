@@ -1259,3 +1259,25 @@
 - Step可按`CONTEXT/ROUTER/WORKFLOW/AGENT/TOOL/RAG/LLM/APPROVAL/WRITEBACK`稳定落库，并保留原有Run关联、序号、状态、错误和耗时语义。
 - 旧`RULE`在升级时转为`WORKFLOW`；降级时不受旧约束支持的新类型收敛为`RULE`，避免迁移被历史数据阻断。
 - 所有类型的输入与输出均复用同一摘要保护边界；类型是可观测语义，不会给模型增加执行权限或代替Java业务校验。
+
+---
+
+## 2026-08-29 — `[T721-T730] M7.3 SSE 事件服务`
+
+### 核心解决的问题
+
+让页面可以在诊断、规范检索、人工确认和写回执行期间看到有序进度，并在短暂断线后从最后事件继续，而不是只能等待
+同步HTTP最终结果或把网络中断误判成业务失败。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/events.py`、`app/services/run_events.py`：严格事件契约、有界流历史、回放、心跳和订阅清理。
+- `agent-service/app/api/run_events.py`、`app/api/order_diagnosis.py`、`app/api/approvals.py`：用户隔离SSE入口及请求与事件流绑定。
+- `agent-service/app/workflows/recording.py`、`app/workflows/specification_qa.py`：Tool与RAG阶段的安全事件发布。
+- `agent-service/app/services/order_diagnosis.py`、`app/workflows/review_draft.py`、`app/services/approval_confirmation.py`：Run、诊断、Approval和写回终态发布。
+
+### 实现的核心功能
+
+- 15种稳定事件共用流内递增身份、Trace、可选Run/Step身份和受限JSON数据，拒绝常见凭据键、过深结构和超大内容。
+- 客户端先连接自生成流标识，再通过请求头绑定诊断或确认；不同用户不能订阅或发布到对方事件流。
+- 心跳维持空闲连接，`Last-Event-ID`回放有界历史，终态与断开会清理订阅；事件只提供进度，不替代Run/Step或Java事实。

@@ -33,7 +33,7 @@ from app.schemas import (
     SessionContext,
 )
 from app.schemas.business import BusinessIdentity
-from app.services import SessionContextService
+from app.services import RunEventService, SessionContextService
 from app.settings import Settings
 from app.tools import create_read_tool_registry
 from app.workflows import OrderDiagnosisWorkflow
@@ -509,6 +509,53 @@ async def test_order_diagnosis_api_persists_successful_run_and_returns_golden_re
         assert agent_session.user_id == "reviewer-001"
         assert [step.sequence_number for step in steps] == list(range(1, 11))
         assert all(step.status is AgentStepStatus.SUCCEEDED for step in steps)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_order_diagnosis_api_publishes_ordered_sse_progress_without_raw_facts(
+    diagnosis_application: tuple[FastAPI, BusinessHttpClient],
+) -> None:
+    application, _ = diagnosis_application
+    stream_id = "stream-diagnosis-003"
+    event_service: RunEventService = application.state.run_event_service
+    await event_service.open_stream(stream_id, owner_user_id="reviewer-001")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="http://test",
+    ) as client:
+        diagnosis = await client.post(
+            "/api/agent/order-diagnosis",
+            json=_request_body(),
+            headers={
+                **_headers("trace-diagnosis-events-003"),
+                "X-Event-Stream-Id": stream_id,
+            },
+        )
+        event_stream = await client.get(
+            f"/api/agent/events/{stream_id}",
+            headers=_headers("trace-diagnosis-events-subscribe-003"),
+        )
+
+    assert diagnosis.status_code == 200
+    assert event_stream.status_code == 200
+    event_names = [
+        line.removeprefix("event: ")
+        for line in event_stream.text.splitlines()
+        if line.startswith("event: ")
+    ]
+    assert event_names == [
+        "run_started",
+        "context_loaded",
+        *[name for _ in range(6) for name in ("tool_started", "tool_completed")],
+        "diagnosis_generated",
+        "run_completed",
+    ]
+    assert "coordinate system mismatch" not in event_stream.text
+    user_message = _request_body()["user_message"]
+    assert isinstance(user_message, str)
+    assert user_message not in event_stream.text
 
 
 @pytest.mark.integration

@@ -15,6 +15,7 @@ from app.schemas.approval_execution import (
     ApprovalConfirmationRequest,
     ApprovalConfirmationResponse,
 )
+from app.schemas.events import EventStreamIdentifier, RunEventType
 from app.schemas.operation_log import OperationLogDetail
 from app.schemas.write_tools import ApprovalIdentifier
 from app.services import (
@@ -22,13 +23,21 @@ from app.services import (
     ApprovalConfirmationService,
     DatabaseApprovalConfirmationStore,
     DatabaseOperationLogService,
+    EventStreamAccessDeniedError,
+    EventStreamNotFoundError,
     OperationLogAccessError,
+    RunEventPublisher,
+    RunEventService,
 )
 from app.tools import ToolRegistry
 
 _USER_ID_HEADER = Annotated[str | None, Header(alias="X-User-Id")]
 _USER_ROLE_HEADER = Annotated[str | None, Header(alias="X-User-Role")]
 _AUTHORIZATION_HEADER = Annotated[str | None, Header(alias="Authorization")]
+_EVENT_STREAM_HEADER = Annotated[
+    EventStreamIdentifier | None,
+    Header(alias="X-Event-Stream-Id"),
+]
 
 router = APIRouter(prefix="/api/agent/approvals", tags=["agent-approvals"])
 
@@ -97,6 +106,7 @@ async def confirm_approval(
     user_id: _USER_ID_HEADER = None,  # 从请求头获取用户ID
     user_role: _USER_ROLE_HEADER = None,  # 从请求头获取用户角色
     authorization: _AUTHORIZATION_HEADER = None,  # 从请求头获取授权信息
+    event_stream_id: _EVENT_STREAM_HEADER = None,
 ) -> ApprovalConfirmationResponse | JSONResponse:
     """记录当前用户的最终草稿并在最新事实校验后执行唯一写Tool。"""
     # 取得Trace ID
@@ -117,8 +127,34 @@ async def confirm_approval(
             ),
         )
     try:
+        event_publisher = await _event_publisher(
+            request,
+            stream_id=event_stream_id,
+            owner_user_id=identity.user_id,
+            trace_id=trace_id,
+        )
+    except EventStreamAccessDeniedError:
+        return _error_response(
+            approval_id=approval_id,
+            error=ApprovalConfirmationError(
+                code="EVENT_STREAM_ACCESS_DENIED",
+                message="event stream belongs to another user",
+                status_code=403,
+            ),
+        )
+    except EventStreamNotFoundError:
+        return _error_response(
+            approval_id=approval_id,
+            error=ApprovalConfirmationError(
+                code="EVENT_STREAM_NOT_READY",
+                message="event stream must be connected before approval confirmation",
+                status_code=409,
+                retryable=True,
+            ),
+        )
+    try:
         # 调用ApprovalConfirmationService.confirm_and_execute()
-        execution = await _service(request).confirm_and_execute(
+        execution = await _service(request, event_sink=event_publisher).confirm_and_execute(
             approval_id=approval_id,
             draft=confirmation.draft,
             identity=identity,
@@ -126,6 +162,20 @@ async def confirm_approval(
         )
     # 把领域错误转换成稳定HTTP错误响应
     except ApprovalConfirmationError as error:
+        if event_publisher is not None and not event_publisher.terminal:
+            await event_publisher.publish(
+                RunEventType.RUN_FAILED,
+                data={
+                    "approval_id": approval_id,
+                    "status": (
+                        error.approval_status.value
+                        if error.approval_status is not None
+                        else None
+                    ),
+                    "error_code": error.code,
+                    "retryable": error.retryable,
+                },
+            )
         return _error_response(approval_id=approval_id, error=error)
     return ApprovalConfirmationResponse(
         approval_id=execution.approval_id,
@@ -135,7 +185,11 @@ async def confirm_approval(
     )
 
 
-def _service(request: Request) -> ApprovalConfirmationService:
+def _service(
+    request: Request,
+    *,
+    event_sink: RunEventPublisher | None = None,
+) -> ApprovalConfirmationService:
     """从应用状态创建一次无跨请求可变状态的确认服务。"""
 
     database: Database = request.app.state.database
@@ -146,6 +200,26 @@ def _service(request: Request) -> ApprovalConfirmationService:
         read_tools,
         write_tools,
         approval_ttl_seconds=request.app.state.settings.approval_ttl_seconds,
+        event_sink=event_sink,
+    )
+
+
+async def _event_publisher(
+    request: Request,
+    *,
+    stream_id: str | None,
+    owner_user_id: str,
+    trace_id: str,
+) -> RunEventPublisher | None:
+    """把可选事件流标识绑定到当前确认用户。"""
+
+    if stream_id is None:
+        return None
+    service: RunEventService = request.app.state.run_event_service
+    return await service.publisher(
+        stream_id,
+        owner_user_id=owner_user_id,
+        trace_id=trace_id,
     )
 
 

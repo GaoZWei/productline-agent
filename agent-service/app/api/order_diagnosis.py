@@ -16,12 +16,24 @@ from app.schemas.agent import (
     OrderDiagnosisResponse,
 )
 from app.schemas.business import BusinessIdentity
-from app.services import OrderDiagnosisExecutionError, OrderDiagnosisService
+from app.schemas.events import EventStreamIdentifier
+from app.services import (
+    EventStreamAccessDeniedError,
+    EventStreamNotFoundError,
+    OrderDiagnosisExecutionError,
+    OrderDiagnosisService,
+    RunEventPublisher,
+    RunEventService,
+)
 from app.tools import ToolRegistry
 
 _USER_ID_HEADER = Annotated[str | None, Header(alias="X-User-Id")]
 _USER_ROLE_HEADER = Annotated[str | None, Header(alias="X-User-Role")]
 _AUTHORIZATION_HEADER = Annotated[str | None, Header(alias="Authorization")]
+_EVENT_STREAM_HEADER = Annotated[
+    EventStreamIdentifier | None,
+    Header(alias="X-Event-Stream-Id"),
+]
 
 _ERROR_HTTP_STATUS = {
     "PARAM_VALIDATION_ERROR": 400,
@@ -66,6 +78,7 @@ async def diagnose_order(
     user_id: _USER_ID_HEADER = None,
     user_role: _USER_ROLE_HEADER = None,
     authorization: _AUTHORIZATION_HEADER = None,
+    event_stream_id: _EVENT_STREAM_HEADER = None,
 ) -> OrderDiagnosisResponse | JSONResponse:
     """创建 Run、执行固定 Workflow 并返回诊断或安全错误。"""
 
@@ -110,11 +123,43 @@ async def diagnose_order(
 
     database: Database = request.app.state.database
     registry: ToolRegistry = request.app.state.tool_registry
+    try:
+        event_publisher = await _event_publisher(
+            request,
+            stream_id=event_stream_id,
+            owner_user_id=identity.user_id,
+            trace_id=trace_id,
+        )
+    except EventStreamAccessDeniedError:
+        return _error_response(
+            status_code=403,
+            error=OrderDiagnosisErrorResponse(
+                run_id=None,
+                trace_id=trace_id,
+                code="EVENT_STREAM_ACCESS_DENIED",
+                message="event stream belongs to another user",
+                retryable=False,
+                error_step=None,
+            ),
+        )
+    except EventStreamNotFoundError:
+        return _error_response(
+            status_code=409,
+            error=OrderDiagnosisErrorResponse(
+                run_id=None,
+                trace_id=trace_id,
+                code="EVENT_STREAM_NOT_READY",
+                message="event stream must be connected before diagnosis starts",
+                retryable=True,
+                error_step=None,
+            ),
+        )
     service = OrderDiagnosisService(
         database,
         registry,
         session_ttl_seconds=request.app.state.settings.session_ttl_seconds,
         version_snapshot=request.app.state.run_version_snapshot,  # API 从应用状态取出运行版本快照
+        event_sink=event_publisher,
     )
     try:
         execution = await service.diagnose(
@@ -143,6 +188,25 @@ async def diagnose_order(
         session_id=execution.session_id,
         trace_id=trace_id,
         diagnosis=execution.diagnosis,
+    )
+
+
+async def _event_publisher(
+    request: Request,
+    *,
+    stream_id: str | None,
+    owner_user_id: str,
+    trace_id: str,
+) -> RunEventPublisher | None:
+    """把可选请求头解析为已建立且属于当前用户的事件发布器。"""
+
+    if stream_id is None:
+        return None
+    service: RunEventService = request.app.state.run_event_service
+    return await service.publisher(
+        stream_id,
+        owner_user_id=owner_user_id,
+        trace_id=trace_id,
     )
 
 

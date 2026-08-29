@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date
 
 import pytest
+from pydantic import JsonValue
 
 from app.knowledge import (
     EmbeddingIndexDescriptor,
@@ -28,6 +29,7 @@ from app.schemas import (
     RouterEntities,
     RouterResult,
     RoutingDecision,
+    RunEventType,
     SpecificationQaStatus,
 )
 from app.workflows import (
@@ -36,6 +38,22 @@ from app.workflows import (
     SpecificationSkill,
     SpecificationSkillDispatchError,
 )
+
+
+class _CaptureEventSink:
+    def __init__(self) -> None:
+        self.events: list[tuple[RunEventType, str | None, dict[str, JsonValue]]] = []
+
+    async def publish(
+        self,
+        event_type: RunEventType,
+        *,
+        run_id: str | None = None,
+        step_id: str | None = None,
+        data: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        del step_id
+        self.events.append((event_type, run_id, dict(data or {})))
 
 
 def _retrieval(
@@ -143,10 +161,13 @@ async def test_specification_skill_runs_full_qa_flow_with_page_metadata_and_cita
             "citation_ids": ["CHUNK-B"],
         }
     )
+    events = _CaptureEventSink()
     workflow = SpecificationQaWorkflow(
         retriever=retriever,
         reranker=_StaticReranker({"CHUNK-A": 0.65, "CHUNK-B": 0.95}),
         answer_model=answer_model,
+        event_sink=events,
+        run_id="run-specification-001",
     )
     skill = SpecificationSkill(workflow)
 
@@ -176,6 +197,22 @@ async def test_specification_skill_runs_full_qa_flow_with_page_metadata_and_cita
         "CHUNK-B",
         "CHUNK-A",
     ]
+    assert [event[0] for event in events.events] == [
+        RunEventType.RETRIEVAL_STARTED,
+        RunEventType.RETRIEVAL_COMPLETED,
+    ]
+    assert all(event[1] == "run-specification-001" for event in events.events)
+    assert events.events[0][2] == {
+        "permission_scope": "INTERNAL_REVIEWER",
+        "effective_at": "2026-08-20",
+        "product_type": "DOM",
+        "satellite_type": "GF-2",
+    }
+    assert events.events[1][2] == {
+        "retrieved_count": 2,
+        "selected_count": 2,
+        "rerank_degraded": False,
+    }
 
 
 @pytest.mark.unit
