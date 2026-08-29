@@ -42,8 +42,8 @@ test-run-lifecycle: ## 验证Run生命周期、完整字段和隔离PostgreSQL�
 	cd agent-service && uv run --frozen pytest -q tests/test_run_observability.py
 	./scripts/test-agent-persistence.sh -k "run_lifecycle or run_observability"
 
-test-step-lifecycle: ## 在隔离 PostgreSQL 上单独验证 M2.3 Step 记录
-	./scripts/test-agent-persistence.sh -k step_lifecycle
+test-step-lifecycle: ## 在隔离 PostgreSQL 上验证 M2.3/M7.2 Step 记录、完整类型和安全摘要
+	./scripts/test-agent-persistence.sh -k "step_lifecycle or step_type_migration"
 
 test-workflow-schemas: ## 单独验证 M2.4 Workflow 状态与诊断 Schema
 	cd agent-service && uv run --frozen pytest -q tests/test_workflow_schemas.py

@@ -11,9 +11,14 @@ from app.repositories import AgentRunRepository, AgentStepRepository
 STEP_SUMMARY_MAX_LENGTH = 1000
 _SUMMARY_REDACTION = "[REDACTED]"
 _CREDENTIAL_PATTERNS = (
-    re.compile(r"(?i)\b(authorization\s*[:=]\s*bearer\s+)([^\s,;]+)"),
+    # 保留Authorization头
     re.compile(
-        r"(?i)\b((?:access[_-]?token|api[_-]?key|password|secret)\s*[:=]\s*)([^\s,;]+)"
+        r"(?i)\b(authorization\s*[:=]\s*(?:bearer|basic)\s+)([^\s,;]+)"
+    ),
+    # 保留其他敏感字段
+    re.compile(
+        r"(?i)\b((?:[a-z0-9]{1,32}[_-](?:token|secret)|token|secret|"
+        r"api[_-]?key|password)\s*[:=]\s*)([^\s,;]+)"
     ),
 )
 
@@ -87,7 +92,7 @@ class StepLifecycleService:
         self._step_repository = step_repository
         self._run_repository = run_repository
         self._now = now
-
+    # 完整流程
     async def start_step(
         self,
         *,
@@ -99,7 +104,7 @@ class StepLifecycleService:
         input_summary: str | None = None,
     ) -> AgentStep:
         """在 RUNNING Run下创建并自动关联一个已开始的 Step。"""
-        # 第一步: 校验参数
+        # 第一步: 校验技术字段
         normalized_step_id = self._require_identifier(step_id, "step_id", 128)
         normalized_run_id = self._require_identifier(run_id, "run_id", 128)
         normalized_step_name = self._require_identifier(step_name, "step_name", 128)
@@ -118,15 +123,16 @@ class StepLifecycleService:
                 field_name="step_type",
                 message="must be an AgentStepType",
             )
+        # 第二步: 处理输入摘要
         normalized_input_summary = self._normalize_summary(input_summary, "input_summary")
-        # 第二步: 锁定并校验父Run
+        # 第三步: 锁定并校验父Run
         run = await self._run_repository.get_for_update(normalized_run_id)
         if run is None or run.status is not AgentRunStatus.RUNNING:
             raise StepRunUnavailableError(
                 run_id=normalized_run_id,
                 current_status=run.status if run is not None else None,
             )
-        # 第三步: 创建RUNNING Step
+        # 第四步: 创建RUNNING Step
         return await self._step_repository.create(
             AgentStep(
                 step_id=normalized_step_id,

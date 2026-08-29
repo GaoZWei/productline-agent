@@ -379,7 +379,7 @@ class OrderDiagnosisWorkflow:
 
         step_id = await self._start_step(
             step_name="diagnose_by_rules",
-            step_type=AgentStepType.RULE,
+            step_type=AgentStepType.WORKFLOW,
             input_summary=(
                 f"order_id={state['order_id']}; task_count={len(state['tasks'])}"
             ),
@@ -399,10 +399,10 @@ class OrderDiagnosisWorkflow:
             raise ValueError("rule decision is required before diagnosis generation")
         step_id = await self._start_step(
             step_name="generate_diagnosis",
-            step_type=AgentStepType.RULE,
+            step_type=AgentStepType.WORKFLOW,
             input_summary=f"blocking_stage={decision.blocking_stage.value}",
         )
-        # 执行规则文案生成, 并记录一个 RULE Step
+        # 执行规则文案生成, 并记录一个 WORKFLOW Step
         diagnosis = generate_rule_diagnosis(state)
         # 输出摘要只记录阻塞阶段和来源
         await self._step_recorder.mark_succeeded(
@@ -537,6 +537,7 @@ class OrderDiagnosisWorkflow:
 
         sequence_number = self._next_sequence_number
         self._next_sequence_number += 1
+        # 生成Step ID
         digest = sha256(
             f"{self._tool_context.run_id}:{sequence_number}:{step_name}".encode()
         ).hexdigest()[:32]

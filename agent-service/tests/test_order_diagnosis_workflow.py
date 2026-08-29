@@ -306,7 +306,7 @@ async def test_fixed_workflow_loads_order_003_in_declared_order_and_merges_state
         "generate_diagnosis",
     ]
     assert recorder.steps[-2].output_summary == "blocking_stage=QUALITY_REVIEW"
-    assert recorder.steps[-1].step_type is AgentStepType.RULE
+    assert recorder.steps[-1].step_type is AgentStepType.WORKFLOW
     assert recorder.steps[-1].output_summary == ("blocking_stage=QUALITY_REVIEW; source=rule")
     assert all(step.status == "SUCCEEDED" for step in recorder.steps)
 

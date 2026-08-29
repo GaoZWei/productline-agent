@@ -149,7 +149,7 @@ M2.1 只保存 Agent 自有运行元数据，不复制 Java 订单、任务、�
 agent_sessions  一段连续对话及其用户归属
     ├── agent_messages  用户/助手消息和会话内稳定序号
     └── agent_runs      一次请求、上下文、版本、用量、终止原因与最终结果
-            └── agent_steps  CONTEXT/TOOL/RULE/LLM 步骤、摘要和耗时
+            └── agent_steps  上下文、路由、Workflow、Agent、Tool、RAG、LLM、确认和写回步骤
 ```
 
 `AgentRunRepository` 和 `AgentStepRepository` 提供异步增、删、查。Repository 会 `flush` 以便
@@ -162,8 +162,10 @@ M7.1在Run创建时保存严格`page_context_snapshot`，执行中可通过`reco
 字段分别为`null`和0；迁移前Run也只回填非负计数，不补造历史上下文、耗时或结束原因。模型配置、Router/Agent Prompt、
 Tool Schema摘要和RAG策略继续由不可变`version_snapshot`提供，不重复保存第二份版本事实。
 
-Run 状态和 Step 类型已按 M2 计划固化为字符串 Check Constraint。Step 输入/输出只预留受控
-摘要字段，不能写入完整 Token、密钥或未经脱敏的业务载荷。
+M7.2将Step类型固化为`CONTEXT/ROUTER/WORKFLOW/AGENT/TOOL/RAG/LLM/APPROVAL/WRITEBACK`
+九种字符串Check Constraint，历史`RULE`记录会在迁移时转为`WORKFLOW`。所有类型共用Step
+生命周期的受控摘要入口：压缩空白、遮盖Authorization、密码、API Key以及常见Token/Secret标签，并统一截断到1000字符，但调用方仍不得传入完整
+Token、密钥或未经筛选的业务载荷。类型只用于可观测分类，不改变Tool权限或Java业务裁决。
 
 `RunLifecycleService`实现以下最小状态机：
 

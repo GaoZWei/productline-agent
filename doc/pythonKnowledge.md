@@ -558,9 +558,10 @@ AgentSession
   耗时。
 
 Run 状态是 `PENDING/RUNNING/SUCCEEDED/FAILED/WAITING_APPROVAL/CANCELLED`，Step 类型是
-`CONTEXT/TOOL/RULE/LLM`。代码使用 Python `StrEnum` 表达类型，并在数据库使用 VARCHAR 加
-Check Constraint，而不是 PostgreSQL 私有 enum。这样 Python 仍有明确类型，后续增加状态时也
-能通过普通 Alembic 约束迁移演进。
+`CONTEXT/ROUTER/WORKFLOW/AGENT/TOOL/RAG/LLM/APPROVAL/WRITEBACK`。代码使用 Python
+`StrEnum` 表达类型，并在数据库使用 VARCHAR 加 Check Constraint，而不是 PostgreSQL
+私有 enum。这样 Python 仍有明确类型，类型扩展可通过普通 Alembic 约束迁移演进；
+M7.2升级时已将旧`RULE`记录转为语义更完整的`WORKFLOW`。
 
 [`agent-service/app/repositories/agent_runtime.py`](../agent-service/app/repositories/agent_runtime.py)
 类似 Spring Data Repository 或 TypeORM Repository，只封装 Run/Step 的增、删、查：
@@ -649,7 +650,7 @@ Java HTTP或模型调用长期持有。
 输入输出不是原始请求/响应，而是由Workflow以后主动选择的摘要字符串。当前最小策略会：
 
 - 合并换行和连续空白；
-- 将常见`Authorization: Bearer`、`api_key`、`access_token`、`password`和`secret`值替换为
+- 将常见`Authorization: Bearer/Basic`、`api_key`、`*_token`、`*_secret`和`password`值替换为
   `[REDACTED]`；
 - 超过1000字符时截断并追加`...`；
 - 空白摘要按`None`保存。
@@ -1774,7 +1775,7 @@ async def lifespan(...):
 - PENDING→RUNNING→SUCCEEDED/FAILED最小Run生命周期；
 - 最终结果JSON快照、错误码/错误步骤和带时区起止时间；
 - 基于期望旧状态的原子条件更新和并发终态竞争保护；
-- CONTEXT/TOOL/RULE/LLM Step开始、成功和失败记录；
+- 九种CONTEXT到WRITEBACK Step的开始、成功和失败记录；
 - 父Run行锁门禁、Step自动Run关联和原子终态竞争保护；
 - 输入输出摘要空白压缩、常见凭据遮盖、1000字符截断和毫秒耗时；
 - 固定诊断`OrderDiagnosisState`十一个必需状态通道；
@@ -1784,7 +1785,7 @@ async def lifespan(...):
 - 多任务稳定排序与按任务ID聚合、标准Tool错误到StepError及失败条件路由；
 - Workflow调用Step生命周期的Protocol边界和数据库短事务适配；
 - 七值`BlockingStage`枚举和只承载机器决策的`RuleDecision`；
-- 五订单确定性阶段规则、信息完整性/归属门禁、最早业务阶段优先级和RULE Step；
+- 五订单确定性阶段规则、信息完整性/归属门禁、最早业务阶段优先级和WORKFLOW Step；
 - 七类裁决的规则文案、稳定根因、Tool字段证据、建议和置信度装配；
 - `DiagnosisNarrative`结构化模型边界、稳定code校验和规则结果回退；
 - 诊断请求/响应/错误Schema和`POST /api/agent/order-diagnosis`；

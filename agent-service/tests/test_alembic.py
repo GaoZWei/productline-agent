@@ -27,3 +27,4 @@ def test_alembic_configuration_points_to_migrations() -> None:
     ).is_file()
     assert (project_root / "migrations" / "versions" / "0010_operation_logs.py").is_file()
     assert (project_root / "migrations" / "versions" / "0011_run_observability.py").is_file()
+    assert (project_root / "migrations" / "versions" / "0012_step_types.py").is_file()

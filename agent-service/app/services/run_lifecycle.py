@@ -294,6 +294,7 @@ class RunLifecycleService:
                     field_name="timestamp",
                     message="finish timestamp must not precede start timestamp",
                 )
+        # 返回统一更新字典
         return {
             "finished_at": finished_at,
             "input_token_count": usage.input_tokens,

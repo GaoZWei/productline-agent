@@ -1064,6 +1064,78 @@ async def test_version_migration_marks_existing_runs_as_unavailable_legacy(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_step_type_migration_converts_legacy_rule_and_supports_downgrade(
+    migrated_database_url: str,
+) -> None:
+    database_name = _database_name(migrated_database_url)
+    _, alembic_url = _database_urls(migrated_database_url, database_name)
+    _run_alembic(alembic_url, "downgrade", "0011_run_observability")
+
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "INSERT INTO agent_sessions "
+                    "(session_id, user_id, context, expires_at) "
+                    "VALUES ('session-step-type-legacy', 'user-001', "
+                    "CAST('{}' AS JSON), CURRENT_TIMESTAMP + INTERVAL '30 minutes')"
+                )
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO agent_runs (run_id, session_id, version_snapshot) "
+                    "VALUES ('run-step-type-legacy', 'session-step-type-legacy', "
+                    "CAST('{}' AS JSON))"
+                )
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO agent_steps "
+                    "(step_id, run_id, sequence_number, step_type, step_name) "
+                    "VALUES ('step-type-legacy', 'run-step-type-legacy', 1, "
+                    "'RULE', 'diagnose_by_rules')"
+                )
+            )
+
+        _run_alembic(alembic_url, "upgrade", "head")
+        async with database.session() as session, session.begin():
+            upgraded_type = await session.scalar(
+                text(
+                    "SELECT step_type FROM agent_steps "
+                    "WHERE step_id = 'step-type-legacy'"
+                )
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO agent_steps "
+                    "(step_id, run_id, sequence_number, step_type, step_name) "
+                    "VALUES ('step-type-router', 'run-step-type-legacy', 2, "
+                    "'ROUTER', 'route_intent')"
+                )
+            )
+        assert upgraded_type == "WORKFLOW"
+
+        _run_alembic(alembic_url, "downgrade", "0011_run_observability")
+        async with database.engine.connect() as connection:
+            downgraded_types = tuple(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT step_type FROM agent_steps "
+                            "WHERE run_id = 'run-step-type-legacy' "
+                            "ORDER BY sequence_number"
+                        )
+                    )
+                ).scalars()
+            )
+        assert downgraded_types == ("RULE", "RULE")
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_approval_lifecycle_persists_drafts_confirmation_and_run_detachment(
     migrated_database_url: str,
 ) -> None:
@@ -1502,7 +1574,7 @@ async def test_step_sequence_is_unique_inside_one_run(migrated_database_url: str
                         step_id="step-b",
                         run=run,
                         sequence_number=1,
-                        step_type=AgentStepType.RULE,
+                        step_type=AgentStepType.WORKFLOW,
                         step_name="diagnose_blocker",
                     ),
                 ]
@@ -1851,6 +1923,81 @@ async def test_step_lifecycle_persists_success_summaries_and_duration(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_step_lifecycle_persists_all_complete_types_with_safe_summaries(
+    migrated_database_url: str,
+) -> None:
+    expected_types = (
+        AgentStepType.CONTEXT,
+        AgentStepType.ROUTER,
+        AgentStepType.WORKFLOW,
+        AgentStepType.AGENT,
+        AgentStepType.TOOL,
+        AgentStepType.RAG,
+        AgentStepType.LLM,
+        AgentStepType.APPROVAL,
+        AgentStepType.WRITEBACK,
+    )
+    assert tuple(AgentStepType) == expected_types
+
+    timestamp = datetime(2026, 8, 29, 2, 0, tzinfo=UTC)
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session, session.begin():
+            session.add(AgentSession(session_id="session-step-types", user_id="user-001"))
+            run_repository = AgentRunRepository(session)
+            run_service = RunLifecycleService(run_repository, now=lambda: timestamp)
+            await run_service.create_run(
+                run_id="run-step-types",
+                session_id="session-step-types",
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            )
+            await run_service.mark_running("run-step-types")
+            step_service = StepLifecycleService(
+                AgentStepRepository(session),
+                run_repository,
+                now=lambda: timestamp,
+            )
+
+            for sequence_number, step_type in enumerate(expected_types, start=1):
+                step_id = f"step-type-{step_type.value.lower()}"
+                started = await step_service.start_step(
+                    step_id=step_id,
+                    run_id="run-step-types",
+                    sequence_number=sequence_number,
+                    step_type=step_type,
+                    step_name=f"record_{step_type.value.lower()}",
+                    input_summary=(
+                        f"type={step_type.value}; password=input-secret; "
+                        "refresh_token=refresh-secret"
+                    ),
+                )
+                succeeded = await step_service.mark_succeeded(
+                    step_id,
+                    output_summary=(
+                        "Authorization: Bearer output-secret " + "x" * 1200
+                    ),
+                )
+
+                assert started.input_summary == (
+                    f"type={step_type.value}; password=[REDACTED]; "
+                    "refresh_token=[REDACTED]"
+                )
+                assert succeeded.output_summary is not None
+                assert "output-secret" not in succeeded.output_summary
+                assert len(succeeded.output_summary) == 1000
+
+        async with database.session() as verification_session:
+            stored_steps = await AgentStepRepository(verification_session).list_by_run(
+                "run-step-types"
+            )
+        assert tuple(step.step_type for step in stored_steps) == expected_types
+        assert all(step.status is AgentStepStatus.SUCCEEDED for step in stored_steps)
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_step_lifecycle_persists_failure_details(migrated_database_url: str) -> None:
     started_at = datetime(2026, 8, 9, 5, 0, tzinfo=UTC)
     finished_at = datetime(2026, 8, 9, 5, 0, 0, 750000, tzinfo=UTC)
@@ -2023,7 +2170,7 @@ async def test_step_lifecycle_allows_only_one_concurrent_terminal_transition(
                     step_id="step-race",
                     run_id="run-step-race",
                     sequence_number=1,
-                    step_type=AgentStepType.RULE,
+                    step_type=AgentStepType.WORKFLOW,
                     step_name="diagnose_blocker",
                 )
 

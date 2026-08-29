@@ -45,12 +45,17 @@ class AgentRunStatus(StrEnum):
 
 # Step类型
 class AgentStepType(StrEnum):
-    """M2 确定性 Workflow 首批可观测步骤类型。"""
+    """Run内部从上下文到写回的稳定可观测步骤类型。"""
 
-    CONTEXT = "CONTEXT"  # 获取页面、用户、订单等上下文
-    TOOL = "TOOL"  # 调用Java业务Tool
-    RULE = "RULE"  # 执行确定性业务规则
-    LLM = "LLM"  # 调用模型
+    CONTEXT = "CONTEXT"  # 读取、解析、校验执行上下文
+    ROUTER = "ROUTER"  # 判断用户意图和后续路径
+    WORKFLOW = "WORKFLOW"  # 确定性流程节点或规则计算
+    AGENT = "AGENT"  # 动态Agent选择下一个动作
+    TOOL = "TOOL"  # 调用外部业务Tool
+    RAG = "RAG"  # 规范检索、融合、重排
+    LLM = "LLM"  # 单独的一次模型调用
+    APPROVAL = "APPROVAL"  # 人工确认相关动作
+    WRITEBACK = "WRITEBACK"  # 确认后的真实业务写入
 
 # Step状态
 class AgentStepStatus(StrEnum):
@@ -206,9 +211,9 @@ class AgentRun(Base):
     )
     # 页面和路由只保存经过严格Schema校验的安全快照, 不保存用户消息或Java业务响应.
     page_context_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    # 保存本次路由结果 （当前固定订单诊断接口没有经过统一Router，因此路由结果为null）
+    # 保存本次路由结果(当前固定订单诊断未经过统一Router, 因此路由结果为null)
     router_result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    # Token统计 （当前固定诊断没有装配文案模型，因此三个值都是0）
+    # Token统计(当前固定诊断没有装配文案模型, 因此三个值都是0)
     input_token_count: Mapped[int] = mapped_column(
         Integer,
         default=0,
@@ -291,7 +296,7 @@ class AgentStep(Base):
     )
     # 在Run里的执行顺序
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 表示步骤类型  CONTEXT/TOOL/RULE/LLM
+    # 表示步骤在Agent整体执行链路中的职责分类
     step_type: Mapped[AgentStepType] = mapped_column(
         _enum_column(AgentStepType, "ck_agent_steps_type", 16), nullable=False
     )

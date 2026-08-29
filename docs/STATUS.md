@@ -1,13 +1,13 @@
 # 当前开发状态
 
 - 当前里程碑：M7 Run/Step、SSE与统一评测（进行中）
-- 当前子阶段：M7.1 Run完整字段（T701～T710，已完成）
-- 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T710
-- 当前场景：Run创建时冻结最终PageContext，活动期可保存严格Router结果，成功或失败终态原子保存输入/输出/总Token、Tool逻辑调用次数、总耗时和稳定终止原因；固定诊断当前记录实际页面、空Router、0 Token及实际Tool计数，模型/Prompt/Tool/RAG版本继续来自M5.7不可变快照
-- 通过测试：`make test-run-lifecycle`Schema 4/4、隔离PostgreSQL 5/5通过；`make test-diagnosis-api`13/13、完整持久化43/43通过；`make test-agent-e2e`真实Java和PostgreSQL跨服务E2E 10/10通过；Python完整回归516/516（另46条外部环境测试按条件跳过），mypy strict（148个源文件）、M7.1定向Ruff和`git diff --check`通过
-- 失败测试：无；全量Ruff仍受既有文件注释标点/行长问题影响
+- 当前子阶段：M7.2 Step完整类型（T711～T720，已完成）
+- 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T720
+- 当前场景：Run保存页面/路由快照、版本、用量、总耗时和终止原因；Step现可以`CONTEXT/ROUTER/WORKFLOW/AGENT/TOOL/RAG/LLM/APPROVAL/WRITEBACK`九种稳定类型落库，共用父Run状态校验、输入输出脱敏、1000字符截断和原子终态；固定诊断已实际记录CONTEXT/WORKFLOW/TOOL，可选模型路径记录LLM
+- 通过测试：`make test-step-lifecycle`8/8、`make test-agent-persistence`隔离PostgreSQL 45/45、`make test-agent-e2e`真实Java和PostgreSQL跨服务E2E 10/10通过；Python完整回归516/516（另48条外部环境测试按条件跳过），mypy strict（91个应用源文件）、M7.2定向Ruff和`git diff --check`通过
+- 失败测试：无；Ruff格式检查仍会报告既有文件未统一格式化，本次未做跨阶段机械改写
 - 当前阻塞：无
 - 开发环境：OpenJDK 21.0.12、Maven 3.9.16、Python 3.12.13（uv 管理）、uv 0.12.0、Node.js 22.22.2、npm 10.9.7、Docker Desktop 29.6.2
-- 最近更新：M7.1新增`0011_run_observability`迁移、严格Token契约、页面/路由快照、终态用量与耗时计算，并把固定诊断接入实际Run指标；迁移前Run保持空上下文和空终止字段，不补造历史事实
+- 最近更新：M7.2新增`0012_step_types`迁移和九种Step分类，历史`RULE`升级为`WORKFLOW`且可安全降级；固定诊断的规则节点已使用WORKFLOW，九种类型均通过真实数据库约束、脱敏和截断验证
 - 已知非阻塞问题：诊断侧边栏尚未取得和挂载Approval卡片，前端虽已有确认与日志Client但没有页面生产入口或日志展示页；日志详情当前只允许原确认人读取，尚无审计主管角色或完整RBAC；只有写Tool实际开始执行后的成功、Java 409或其他写失败会生成操作日志，确认前过期或事实重校验产生的`STALE`仍只保留Approval终态；Agent与Java日志尚无统一聚合接口，只能通过Java Trace关联；当前草稿Workflow只创建`SUBMIT_REVIEW` Approval，`CREATE_REWORK` Approval的生产编排尚未接线；确认服务不重新运行RAG，引用适用性仍以草稿生成时的检索结果为准；Approval截止时间由`created_at`和当前`APPROVAL_TTL_SECONDS`计算，修改配置会影响尚未完成的旧Approval；写请求发生非业务冲突失败后进入终态`FAILED`，需要新建Approval再次授权；若进程在Java成功后、保存日志和`SUCCEEDED`前崩溃，Approval可能停在`EXECUTING`，Java幂等可防重复写但目前没有自动恢复任务；首个返工类型只覆盖黄金场景`COORDINATE_SYSTEM_FIX`；当前只有内部Workflow和可替换模型协议，尚无具体草稿模型Provider；应用内浏览器无可用实例，M6.4只有DOM交互测试和生产构建验证，尚缺真实视觉检查；M5.4尚无具体动作模型供应商，M5.7因此诚实记录`configured=false`；Run Token是调用方汇总值，尚无逐LLM Step的模型名、输入输出Token和重试明细；默认6轮不足以完成ORDER-003所需的订单、任务、质检、复核、交付、规范检索及FINISH全链路，M5.6通过显式10轮配置完成该路径；8次Tool预算当前通常不可达，但作为独立外部调用上限保留；规范问答的安全无结论响应视为已完成检索尝试但不会形成规范结论，M6.3会拒绝据此生成Approval；全量Ruff和格式检查仍受既有文件问题影响；M4.12可控Subject用于验证数据契约、策略执行和指标数学，不代表尚未接入的真实Embedding/Reranker质量，默认低相关阈值0.5和RRF`k=60`仍需真实Provider评测校准；规范问答仍是内部组件，尚未接入统一路由HTTP、页面问答交互、Run/Step持久化或具体问答/Rerank模型客户端；当前Query Rewrite只做NFKC和空白规范化，不处理别名、缩写或多轮指代；页面产品/卫星元数据只作为收窄提示且未由Java事实重校验契约；权限和生效日期仍必须显式提供；回答模型引用ID经过白名单校验，但尚无自动事实一致性或声明级引用覆盖评测；当前权限枚举只有`INTERNAL_REVIEWER`，50条评测均为DOM/GF-2/内部复核范围，尚无第二产品、卫星或权限范围的标注对比；当前检索只返回`ACTIVE`规范，不支持历史审计as-of查询；M4.5双字词元可能产生词义无关共同双字召回，M4.6 HNSW尚无大规模召回率和延迟评测；尚未提供全目录入库CLI、定时任务或HTTP管理入口；当前token数是不绑定供应商的确定性近似值，重复检测只判断规范化正文完全相同，第一版不支持PDF；路由组件仍无FastAPI统一入口、持久化路由Run/Step或真实自然语言分发；TTL无后台物理清理，Session无归档策略；任务与质检页面尚未建设，`batch_id`和`satellite_type`缺少Java事实重校验契约；演示身份Header不是完整认证；诊断没有SSE，未预期节点异常可能遗留RUNNING Step；没有Step重试次数/Trace持久化或跨实例调用账本；本地Java/Python数据库角色未隔离；Java测试仍有Mockito动态Agent的未来JDK兼容警告
-- 下一任务：T711～T720 开发M7.2 Step完整类型，扩展CONTEXT/ROUTER/WORKFLOW/AGENT/TOOL/RAG/LLM/APPROVAL/WRITEBACK并统一输入输出脱敏与截断
+- 下一任务：T721～T730 开发M7.3 SSE事件服务，定义事件Schema、连接、发布、心跳、断线清理和集成测试

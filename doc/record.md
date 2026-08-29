@@ -1239,3 +1239,23 @@
 - Run创建时冻结最终解析后的PageContext，活动Run可保存严格Router结果，不记录用户消息或Java响应作为上下文快照。
 - 成功和失败终态统一保存自洽Token计数、Tool逻辑调用数、非负毫秒耗时和大写稳定终止原因，并继续使用数据库CAS裁决唯一终态。
 - 模型、Prompt、Tool Schema与RAG版本复用M5.7不可变快照；无Router/模型路径和迁移前历史Run明确保留空值或零计数。
+
+---
+
+## 2026-08-29 — `[T711-T720] M7.2 Step 完整类型`
+
+### 核心解决的问题
+
+将只能表达四类早期Workflow动作的Step扩展为九种稳定执行分类，使路由、动态决策、规范检索、人工确认和写回不再被混入模型、Tool或模糊的RULE记录。
+
+### 实现的核心代码
+
+- `agent-service/app/models/agent_runtime.py`、`migrations/versions/0012_step_types.py`：九种Step枚举、数据库约束和新旧分类转换。
+- `agent-service/app/workflows/order_diagnosis.py`：固定诊断的规则裁决与文案生成改用`WORKFLOW` Step。
+- `agent-service/app/services/step_lifecycle.py`：九种类型共用的父Run校验、摘要脱敏、长度截断和原子终态入口。
+
+### 实现的核心功能
+
+- Step可按`CONTEXT/ROUTER/WORKFLOW/AGENT/TOOL/RAG/LLM/APPROVAL/WRITEBACK`稳定落库，并保留原有Run关联、序号、状态、错误和耗时语义。
+- 旧`RULE`在升级时转为`WORKFLOW`；降级时不受旧约束支持的新类型收敛为`RULE`，避免迁移被历史数据阻断。
+- 所有类型的输入与输出均复用同一摘要保护边界；类型是可观测语义，不会给模型增加执行权限或代替Java业务校验。
