@@ -157,6 +157,12 @@ class AgentRunRepository:
             "final_result",
             "error_code",
             "error_step",
+            "input_token_count",
+            "output_token_count",
+            "total_token_count",
+            "tool_call_count",
+            "duration_ms",
+            "termination_reason",
         }
         unexpected_changes = set(changes) - allowed_changes
         if unexpected_changes:
@@ -171,6 +177,26 @@ class AgentRunRepository:
                 AgentRun.status == expected_status,
             )
             .values(values)
+            .returning(AgentRun)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def save_router_result(
+        self,
+        run_id: str,
+        *,
+        router_result: dict[str, Any],
+    ) -> AgentRun | None:
+        """只允许未结束Run保存当前最终路由结果。"""
+
+        statement = (
+            update(AgentRun)
+            .where(
+                AgentRun.run_id == run_id,
+                # 只允许未结束Run保存路由结果
+                AgentRun.status.in_((AgentRunStatus.PENDING, AgentRunStatus.RUNNING)),
+            )
+            .values(router_result=router_result)
             .returning(AgentRun)
         )
         return (await self._session.scalars(statement)).one_or_none()

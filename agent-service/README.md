@@ -148,7 +148,7 @@ M2.1 只保存 Agent 自有运行元数据，不复制 Java 订单、任务、�
 ```text
 agent_sessions  一段连续对话及其用户归属
     ├── agent_messages  用户/助手消息和会话内稳定序号
-    └── agent_runs      一次请求、状态、最终结果与错误定位
+    └── agent_runs      一次请求、上下文、版本、用量、终止原因与最终结果
             └── agent_steps  CONTEXT/TOOL/RULE/LLM 步骤、摘要和耗时
 ```
 
@@ -156,6 +156,11 @@ agent_sessions  一段连续对话及其用户归属
 尽早发现外键、唯一序号等数据库约束，但不会隐式 `commit`；事务边界由 Run 生命周期调用方
 统一控制。删除 Session 会级联其 Message、Run 和 Step，删除 Run 会级联 Step；删除请求消息
 只把 Run 的 `request_message_id` 置空，保留已发生的运行记录。
+
+M7.1在Run创建时保存严格`page_context_snapshot`，执行中可通过`record_router_result`保存最终路由对象，终态会原子
+写入输入/输出/总Token、Tool逻辑调用次数、毫秒总耗时和稳定终止原因。固定诊断当前不经过统一Router或模型，因此对应
+字段分别为`null`和0；迁移前Run也只回填非负计数，不补造历史上下文、耗时或结束原因。模型配置、Router/Agent Prompt、
+Tool Schema摘要和RAG策略继续由不可变`version_snapshot`提供，不重复保存第二份版本事实。
 
 Run 状态和 Step 类型已按 M2 计划固化为字符串 Check Constraint。Step 输入/输出只预留受控
 摘要字段，不能写入完整 Token、密钥或未经脱敏的业务载荷。
@@ -165,14 +170,14 @@ Run 状态和 Step 类型已按 M2 计划固化为字符串 Check Constraint。S
 ```text
 create_run       → PENDING
 mark_running     → PENDING → RUNNING
-mark_succeeded   → RUNNING → SUCCEEDED，并保存标准JSON结果快照
-mark_failed      → RUNNING → FAILED，并保存error_code和error_step
+mark_succeeded   → RUNNING → SUCCEEDED，并保存结果、用量、耗时和终止原因
+mark_failed      → RUNNING → FAILED，并保存错误定位、用量、耗时和终止原因
 ```
 
 状态更新使用`WHERE run_id=? AND status=?`的原子条件更新。并发成功/失败请求只有一个能修改
 `RUNNING` Run，另一个得到`InvalidRunTransitionError`，避免最后写入者覆盖先完成的终态。
 Repository和Service仍不隐式commit，事务由调用方统一提交。M2.5 Workflow已通过
-`DatabaseWorkflowStepRecorder`复用Step生命周期；`WAITING_APPROVAL`和`CANCELLED`操作未提前实现。
+`DatabaseWorkflowStepRecorder`复用Step生命周期；M6已在独立Approval链中接入`WAITING_APPROVAL`。
 
 `StepLifecycleService`仅允许在`RUNNING` Run下开始Step，并在创建时自动写入`run_id`、序号、
 类型、名称、输入摘要和`started_at`。父Run使用`SELECT ... FOR UPDATE`校验，避免Run正在进入终态

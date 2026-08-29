@@ -53,7 +53,13 @@ from app.repositories import (
     KnowledgeSearchValidationError,
     OperationLogRepository,
 )
-from app.schemas import Conclusion, ReviewDraft
+from app.schemas import (
+    Conclusion,
+    PageContext,
+    ReviewDraft,
+    RouterResult,
+    RunTokenUsage,
+)
 from app.schemas.business import BusinessIdentity
 from app.schemas.knowledge import (
     DocumentLifecycle,
@@ -238,6 +244,14 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "request_message_id",
         "status",
         "version_snapshot",
+        "page_context_snapshot",
+        "router_result",
+        "input_token_count",
+        "output_token_count",
+        "total_token_count",
+        "tool_call_count",
+        "duration_ms",
+        "termination_reason",
         "final_result",
         "error_code",
         "error_step",
@@ -1013,18 +1027,32 @@ async def test_version_migration_marks_existing_runs_as_unavailable_legacy(
 
         _run_alembic(alembic_url, "upgrade", "head")
         async with database.engine.connect() as connection:
-            snapshot = await connection.scalar(
-                text(
-                    "SELECT version_snapshot FROM agent_runs "
-                    "WHERE run_id = 'run-legacy'"
+            legacy_run = (
+                await connection.execute(
+                    text(
+                        "SELECT version_snapshot, page_context_snapshot, router_result, "
+                        "input_token_count, output_token_count, total_token_count, "
+                        "tool_call_count, duration_ms, termination_reason "
+                        "FROM agent_runs "
+                        "WHERE run_id = 'run-legacy'"
+                    )
                 )
-            )
+            ).mappings().one()
             columns = await connection.run_sync(
                 lambda sync_connection: inspect(sync_connection).get_columns("agent_runs")
             )
 
+        snapshot = legacy_run["version_snapshot"]
         assert snapshot["capture_status"] == "UNAVAILABLE_LEGACY"
         assert snapshot["router_prompt_version"] is None
+        assert legacy_run["page_context_snapshot"] is None
+        assert legacy_run["router_result"] is None
+        assert legacy_run["input_token_count"] == 0
+        assert legacy_run["output_token_count"] == 0
+        assert legacy_run["total_token_count"] == 0
+        assert legacy_run["tool_call_count"] == 0
+        assert legacy_run["duration_ms"] is None
+        assert legacy_run["termination_reason"] is None
         version_column = next(
             column for column in columns if column["name"] == "version_snapshot"
         )
@@ -1505,6 +1533,14 @@ async def test_run_lifecycle_persists_success_result(migrated_database_url: str)
                     run_id="run-success",
                     session_id="session-success",
                     version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+                    page_context_snapshot=PageContext.model_validate(
+                        {
+                            "current_system": "production-system",
+                            "current_page": "order-detail",
+                            "order_id": "ORDER-003",
+                            "user_role": "REVIEWER",
+                        }
+                    ),
                 )
                 assert created.status is AgentRunStatus.PENDING
                 assert created.started_at is None
@@ -1513,22 +1549,64 @@ async def test_run_lifecycle_persists_success_result(migrated_database_url: str)
                 running = await service.mark_running("run-success")
                 assert running.status is AgentRunStatus.RUNNING
                 assert running.started_at == started_at
+                routed = await service.record_router_result(
+                    "run-success",
+                    router_result=RouterResult.model_validate(
+                        {
+                            "intent": "ORDER_DIAGNOSIS",
+                            "confidence": 0.98,
+                            "entities": {"order_id": "ORDER-003"},
+                            "missing_fields": [],
+                            "need_clarification": False,
+                        }
+                    ),
+                )
+                assert routed.router_result is not None
 
                 succeeded = await service.mark_succeeded(
                     "run-success",
                     final_result={"blocking_stage": "QUALITY_REVIEW"},
+                    token_usage=RunTokenUsage.from_counts(
+                        input_tokens=120,
+                        output_tokens=30,
+                    ),
+                    tool_call_count=6,
+                    termination_reason="SUFFICIENT_INFORMATION",
                 )
                 assert succeeded.status is AgentRunStatus.SUCCEEDED
                 assert succeeded.final_result == {"blocking_stage": "QUALITY_REVIEW"}
                 assert succeeded.finished_at == finished_at
                 assert succeeded.error_code is None
                 assert succeeded.error_step is None
+                assert succeeded.input_token_count == 120
+                assert succeeded.output_token_count == 30
+                assert succeeded.total_token_count == 150
+                assert succeeded.tool_call_count == 6
+                assert succeeded.duration_ms == 2000
+                assert succeeded.termination_reason == "SUFFICIENT_INFORMATION"
 
         async with database.session() as verification_session:
             stored = await AgentRunRepository(verification_session).get("run-success")
             assert stored is not None
             assert stored.status is AgentRunStatus.SUCCEEDED
             assert stored.final_result == {"blocking_stage": "QUALITY_REVIEW"}
+            assert stored.page_context_snapshot == {
+                "current_system": "production-system",
+                "current_page": "order-detail",
+                "order_id": "ORDER-003",
+                "task_id": None,
+                "issue_id": None,
+                "batch_id": None,
+                "product_type": None,
+                "satellite_type": None,
+                "user_role": "REVIEWER",
+            }
+            assert stored.router_result is not None
+            assert stored.router_result["intent"] == "ORDER_DIAGNOSIS"
+            assert stored.version_snapshot["model"]["configured"] is False
+            assert stored.version_snapshot["router_prompt_version"] == "router-test-v1"
+            assert stored.version_snapshot["tool_schema"]["version"] == "tool-test-v1"
+            assert stored.version_snapshot["rag_strategy"]["version"] == "rag-test-v1"
     finally:
         await database.dispose()
 
@@ -1565,6 +1643,12 @@ async def test_run_lifecycle_persists_failure_details(migrated_database_url: str
                 assert failed.final_result is None
                 assert failed.error_code == "TOOL_TIMEOUT"
                 assert failed.error_step == "get_quality_issues"
+                assert failed.input_token_count == 0
+                assert failed.output_token_count == 0
+                assert failed.total_token_count == 0
+                assert failed.tool_call_count == 0
+                assert failed.duration_ms == 1000
+                assert failed.termination_reason == "EXECUTION_ERROR"
     finally:
         await database.dispose()
 

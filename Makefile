@@ -38,8 +38,9 @@ test-tools: test-agent-tool-protocol ## 验证 M1.4-M1.8 Tool 协议、调用策
 test-agent-persistence: ## 在隔离 PostgreSQL 上验证 M2.1-M2.5 运行记录持久化
 	./scripts/test-agent-persistence.sh
 
-test-run-lifecycle: ## 在隔离 PostgreSQL 上单独验证 M2.2 Run 生命周期
-	./scripts/test-agent-persistence.sh -k run_lifecycle
+test-run-lifecycle: ## 验证Run生命周期、完整字段和隔离PostgreSQL持久化
+	cd agent-service && uv run --frozen pytest -q tests/test_run_observability.py
+	./scripts/test-agent-persistence.sh -k "run_lifecycle or run_observability"
 
 test-step-lifecycle: ## 在隔离 PostgreSQL 上单独验证 M2.3 Step 记录
 	./scripts/test-agent-persistence.sh -k step_lifecycle

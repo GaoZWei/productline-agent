@@ -190,6 +190,7 @@ async def test_force_refresh_explicitly_allows_the_same_call_again() -> None:
     assert blocked_again.error is not None
     assert blocked_again.error.code is ToolErrorCode.DUPLICATE_CALL
     assert tool.calls == 2
+    assert context.tool_call_ledger.recorded_call_count == 2
 
 
 @pytest.mark.unit

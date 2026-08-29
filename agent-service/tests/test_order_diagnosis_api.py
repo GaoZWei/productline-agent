@@ -18,7 +18,13 @@ from sqlalchemy import select
 
 from app.clients.business import BusinessHttpClient
 from app.main import create_app
-from app.models import AgentMessage, AgentRunStatus, AgentSession, AgentStepStatus
+from app.models import (
+    AgentMessage,
+    AgentRunStatus,
+    AgentSession,
+    AgentStepStatus,
+    AgentStepType,
+)
 from app.repositories import AgentRunRepository, AgentSessionRepository, AgentStepRepository
 from app.routing import Intent
 from app.schemas import (
@@ -484,6 +490,16 @@ async def test_order_diagnosis_api_persists_successful_run_and_returns_golden_re
             "get_task_detail",
         ]
         assert run.version_snapshot["rag_strategy"]["version"] == "hybrid-rrf-rerank-v1"
+        assert run.page_context_snapshot == _page_context()
+        assert run.router_result is None
+        assert run.input_token_count == 0
+        assert run.output_token_count == 0
+        assert run.total_token_count == 0
+        assert run.tool_call_count == sum(
+            step.step_type is AgentStepType.TOOL for step in steps
+        )
+        assert run.duration_ms is not None and run.duration_ms >= 0
+        assert run.termination_reason == "COMPLETED"
         assert run.request_message_id is not None
         message = await session.get(AgentMessage, run.request_message_id)
         assert message is not None

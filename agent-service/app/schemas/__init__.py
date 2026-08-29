@@ -47,6 +47,7 @@ from app.schemas.routing import (
     RoutingEntityName,
     SourcedEntity,
 )
+from app.schemas.run_observability import RunTokenUsage
 from app.schemas.session import (
     PendingActionContext,
     SessionContext,
@@ -150,6 +151,7 @@ __all__ = [
     "RoutingParameter",
     "RuleDecision",
     "RunVersionSnapshot",
+    "RunTokenUsage",
     "SessionContext",
     "SessionCreateRequest",
     "SessionErrorResponse",

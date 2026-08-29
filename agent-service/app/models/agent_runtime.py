@@ -163,6 +163,23 @@ class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
         CheckConstraint("char_length(run_id) > 0", name="ck_agent_runs_id_not_blank"),
+        CheckConstraint(
+            "input_token_count >= 0 AND output_token_count >= 0 "
+            "AND total_token_count = input_token_count + output_token_count",
+            name="ck_agent_runs_token_counts",
+        ),
+        CheckConstraint(
+            "tool_call_count >= 0",
+            name="ck_agent_runs_tool_call_count_nonnegative",
+        ),
+        CheckConstraint(
+            "duration_ms IS NULL OR duration_ms >= 0",
+            name="ck_agent_runs_duration_nonnegative",
+        ),
+        CheckConstraint(
+            "termination_reason IS NULL OR char_length(termination_reason) > 0",
+            name="ck_agent_runs_termination_not_blank",
+        ),
         Index("ix_agent_runs_session_created", "session_id", "created_at"),
     )
 
@@ -187,6 +204,40 @@ class AgentRun(Base):
         JSON,
         nullable=False,  # 所有新 Run 必须有关联版本信息
     )
+    # 页面和路由只保存经过严格Schema校验的安全快照, 不保存用户消息或Java业务响应.
+    page_context_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # 保存本次路由结果 （当前固定订单诊断接口没有经过统一Router，因此路由结果为null）
+    router_result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Token统计 （当前固定诊断没有装配文案模型，因此三个值都是0）
+    input_token_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+    output_token_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+    total_token_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+    # 表示本次Run中真正获准执行的逻辑Tool调用次数
+    tool_call_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+    # 表示整个Run的耗时
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 为什么这次Run结束
+    termination_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 保存的是“本次Run当时得到的诊断结果”, 订单最新状态仍要重新调用Java Tool获取
     final_result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # 错误字段

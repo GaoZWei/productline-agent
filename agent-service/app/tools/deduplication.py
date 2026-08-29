@@ -42,6 +42,7 @@ class RunToolCallLedger:
 
     run_id: str
     _fingerprints: set[str] = field(default_factory=set, init=False, repr=False)
+    _recorded_call_count: int = field(default=0, init=False, repr=False)
     _lock: Lock = field(default_factory=Lock, init=False, repr=False)
     # 尝试占位调用指纹, 不包含 I/O。
     # 指纹已存在且 force_refresh 为 False 时返回 False。
@@ -59,11 +60,12 @@ class RunToolCallLedger:
             if fingerprint in self._fingerprints and not force_refresh:
                 return False
             self._fingerprints.add(fingerprint)
+            self._recorded_call_count += 1
             return True
         
     @property
     def recorded_call_count(self) -> int:
-        """返回当前 Run 已记录的不同逻辑调用数量。"""
+        """返回当前Run已获准执行的逻辑Tool调用数量。"""
 
         with self._lock:
-            return len(self._fingerprints)
+            return self._recorded_call_count

@@ -1217,3 +1217,25 @@
 - 每个Approval最多保存一条成功或失败操作日志，写前摘要来自最终授权草稿，写后摘要来自严格Tool结果或机器错误。
 - 用户修改按稳定字段路径比较；规范依据只保留文档、版本和Chunk身份，不把长篇引用正文复制到日志。
 - 日志与`SUCCEEDED`、`STALE`或`FAILED`终态同事务提交；详情接口只允许当前最小权限模型下的原确认人读取。
+
+---
+
+## 2026-08-28 — `[T701-T710] M7.1 Run 完整字段`
+
+### 核心解决的问题
+
+补齐一次Run实际使用的页面上下文、最终路由、Token与Tool调用统计、总耗时和终止原因，使成功与失败运行都能直接
+回答“带着什么上下文、经过什么决策、用了多少资源以及为什么结束”，同时不为历史记录补造原本不存在的执行事实。
+
+### 实现的核心代码
+
+- `agent-service/app/models/agent_runtime.py`、`migrations/versions/0011_run_observability.py`：Run运行字段、约束和兼容迁移。
+- `agent-service/app/schemas/run_observability.py`：输入、输出和总Token的严格一致性契约。
+- `agent-service/app/services/run_lifecycle.py`、`repositories/agent_runtime.py`：页面/路由快照保存及终态用量、耗时原子更新。
+- `agent-service/app/services/order_diagnosis.py`：固定诊断Run接入实际页面、Tool调用和终止摘要。
+
+### 实现的核心功能
+
+- Run创建时冻结最终解析后的PageContext，活动Run可保存严格Router结果，不记录用户消息或Java响应作为上下文快照。
+- 成功和失败终态统一保存自洽Token计数、Tool逻辑调用数、非负毫秒耗时和大写稳定终止原因，并继续使用数据库CAS裁决唯一终态。
+- 模型、Prompt、Tool Schema与RAG版本复用M5.7不可变快照；无Router/模型路径和迁移前历史Run明确保留空值或零计数。

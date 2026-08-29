@@ -17,6 +17,7 @@ from app.repositories import (
 from app.routing import Intent
 from app.schemas.business import BusinessIdentity
 from app.schemas.context import PageContext
+from app.schemas.run_observability import RunTokenUsage
 from app.schemas.session import (
     context_from_page,
     page_context_from_session,
@@ -159,6 +160,7 @@ class OrderDiagnosisService:
                 run_id,
                 error_code=_WORKFLOW_EXECUTION_ERROR,
                 error_step="order_diagnosis_workflow",
+                tool_call_count=context.tool_call_ledger.recorded_call_count,
             )
             raise OrderDiagnosisExecutionError(
                 run_id=run_id,
@@ -174,6 +176,7 @@ class OrderDiagnosisService:
                 run_id,
                 error_code=error.code.value,
                 error_step=error.step_name,
+                tool_call_count=context.tool_call_ledger.recorded_call_count,
             )
             raise self._execution_error(run_id, error)
         # 成功时 保存Run成功结果
@@ -183,6 +186,7 @@ class OrderDiagnosisService:
                 run_id,
                 error_code=_WORKFLOW_EXECUTION_ERROR,
                 error_step="generate_diagnosis",
+                tool_call_count=context.tool_call_ledger.recorded_call_count,
             )
             raise OrderDiagnosisExecutionError(
                 run_id=run_id,
@@ -198,6 +202,9 @@ class OrderDiagnosisService:
             await lifecycle.mark_succeeded(
                 run_id,
                 final_result=diagnosis.model_dump(mode="json"),
+                token_usage=RunTokenUsage(),
+                tool_call_count=context.tool_call_ledger.recorded_call_count,
+                termination_reason="COMPLETED",
             )
         # 最后返回诊断结果
         return OrderDiagnosisExecution(
@@ -288,11 +295,13 @@ class OrderDiagnosisService:
                 )
             )
             lifecycle = RunLifecycleService(AgentRunRepository(session))
+            # 创建Run时保存最终页面上下文
             await lifecycle.create_run(
                 run_id=run_id,
                 session_id=resolved_session_id,
                 request_message_id=message_id,
                 version_snapshot=self._version_snapshot,
+                page_context_snapshot=resolved_page_context,
             )
             await lifecycle.mark_running(run_id)
         return resolved_session_id, resolved_order_id, resolved_page_context
@@ -303,6 +312,7 @@ class OrderDiagnosisService:
         *,
         error_code: str,
         error_step: str,
+        tool_call_count: int,
     ) -> None:
         """在独立事务中保存可预期 Workflow 失败。"""
 
@@ -312,6 +322,9 @@ class OrderDiagnosisService:
                 run_id,
                 error_code=error_code,
                 error_step=error_step,
+                token_usage=RunTokenUsage(),
+                tool_call_count=tool_call_count,  # 失败时也保存实际Tool调用数
+                termination_reason="EXECUTION_ERROR",
             )
 
     async def _mark_failed_safely(
@@ -320,6 +333,7 @@ class OrderDiagnosisService:
         *,
         error_code: str,
         error_step: str,
+        tool_call_count: int,
     ) -> None:
         """异常路径尽力结束 Run, 但不让二次持久化异常覆盖原始故障。"""
 
@@ -328,6 +342,7 @@ class OrderDiagnosisService:
                 run_id,
                 error_code=error_code,
                 error_step=error_step,
+                tool_call_count=tool_call_count,
             )
         except Exception:
             _LOGGER.exception(
