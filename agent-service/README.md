@@ -172,6 +172,11 @@ M7.3提供`GET /api/agent/events/{stream_id}`事件流。客户端先生成至�
 Tool、RAG、Approval和写回状态摘要。连接支持心跳及`Last-Event-ID`短期回放，流按用户隔离并在断开、空闲或终态保留期后
 清理。事件历史只保存在当前进程的有界内存中，Run/Step数据库记录仍是持久审计证据，Java Tool仍是业务事实来源。
 
+M7.5提供`GET /api/agent/runs?page=1&page_size=20`、`GET /api/agent/runs/{run_id}`和
+`GET /api/agent/runs/{run_id}/steps`。三个入口都通过Run所属Session校验当前`REVIEWER`，他人Run与不存在Run共用404；列表最大页大小100，
+按`created_at DESC, run_id DESC`稳定排序。详情只恢复符合严格Schema的历史诊断和Approval原稿/最终稿差异，Step按执行序号返回落库前已经
+脱敏截断的输入输出摘要；接口不返回用户消息、完整页面上下文、Router结果、版本快照或Tool原始载荷，也不把历史记录解释成当前Java业务事实。
+
 `RunLifecycleService`实现以下最小状态机：
 
 ```text

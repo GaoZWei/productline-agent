@@ -8,7 +8,8 @@ M3.2 订单业务与诊断页面，使用 Vue 3、TypeScript、Vite、Pinia、Ax
 其余两个供后续对应页面复用。
 同一订单抽屉会保存首次响应的`session_id`并在后续诊断中复用；切换订单时清除本地会话引用，避免跨订单
 继承。每次诊断先建立带用户身份的SSE事件流，再将同一`stream_id`随诊断请求提交；页面实时展示Run和
-Tool步骤、失败位置及耗时，服务端仍会重新校验每轮携带的页面上下文。
+Tool步骤、失败位置及耗时，服务端仍会重新校验每轮携带的页面上下文。顶部“运行历史”入口按当前用户分页展示Run，
+选择记录后会并行读取详情和Step时间线，并展示受控Tool摘要、规范引用、Approval修改差异和错误定位。
 
 ## 本地开发
 
@@ -31,12 +32,14 @@ npm --prefix web-console run dev
 
 ```bash
 make test-run-timeline
+make test-run-history
 make test-web
 make build-web
 ```
 
 `test-run-timeline`定向覆盖SSE分块解析、连接确认、有限重连、`Last-Event-ID`续接、事件归并、时间线、
-诊断抽屉绑定和生产代理错误；`test-web`覆盖全部页面测试，`build-web`同时执行Vue TypeScript检查和Vite构建。
+诊断抽屉绑定和生产代理错误；`test-run-history`覆盖列表/详情Client、页面选择、历史Step、引用、Approval差异和失败展示，
+并联动后端隔离数据库测试；`test-web`覆盖全部页面测试，`build-web`同时执行Vue TypeScript检查和Vite构建。
 
 ## 生产运行
 

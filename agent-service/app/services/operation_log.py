@@ -124,7 +124,7 @@ def build_operation_log_detail(
             result=result_summary,
             failure=failure_summary,
         ),
-        user_modification_diff=_draft_diff(original_draft, effective_draft),
+        user_modification_diff=draft_diff(original_draft, effective_draft),
         java_trace_id=result.java_trace_id if result is not None else None,
         created_at=created_at,
     )
@@ -212,10 +212,12 @@ def _result_summary(
     )
 
 # 用户修改差异计算逻辑
-def _draft_diff(
+def draft_diff(
     original: ReviewDraft,  # 模型生成的原始草稿
     effective: ReviewDraft,  # 用户最终确认的草稿
 ) -> tuple[OperationFieldChange, ...]:
+    """比较允许用户修改的草稿字段, 供审计日志和Run历史复用。"""
+
     # 把允许比较的字段转换成稳定字典
     original_values = _diff_values(original)
     effective_values = _diff_values(effective)

@@ -2,7 +2,7 @@ import asyncio
 import os
 import subprocess
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -80,11 +80,13 @@ from app.services import (
     DatabaseApprovalConfirmationStore,
     DatabaseApprovalExecutionStore,
     DatabaseReviewDraftStore,
+    DatabaseRunHistoryService,
     InvalidRunTransitionError,
     InvalidStepTransitionError,
     RunLifecycleService,
     RunLifecycleValidationError,
     RunNotFoundError,
+    RunHistoryAccessError,
     SessionAccessDeniedError,
     StepLifecycleService,
     StepLifecycleValidationError,
@@ -143,6 +145,150 @@ TEST_REVIEW_DRAFT = {
         "type": "COORDINATE_SYSTEM_FIX",
     },
 }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_run_history_lists_only_owner_with_stable_pagination(
+    migrated_database_url: str,
+) -> None:
+    """Run列表按用户隔离、倒序稳定分页且总数不受其他用户影响。"""
+
+    database = Database(migrated_database_url)
+    base_time = datetime(2026, 8, 30, 1, 0, tzinfo=UTC)
+    try:
+        async with database.session() as session, session.begin():
+            session.add_all(
+                [
+                    AgentSession(
+                        session_id="session-history-owner",
+                        user_id="reviewer-001",
+                        context={},
+                        expires_at=base_time + timedelta(hours=1),
+                    ),
+                    AgentSession(
+                        session_id="session-history-other",
+                        user_id="reviewer-002",
+                        context={},
+                        expires_at=base_time + timedelta(hours=1),
+                    ),
+                ]
+            )
+            await session.flush()
+            session.add_all(
+                [
+                    AgentRun(
+                        run_id="run-history-001",
+                        session_id="session-history-owner",
+                        status=AgentRunStatus.SUCCEEDED,
+                        version_snapshot=TEST_RUN_VERSION_SNAPSHOT.model_dump(mode="json"),
+                        page_context_snapshot={"order_id": "ORDER-001"},
+                        created_at=base_time,
+                    ),
+                    AgentRun(
+                        run_id="run-history-002",
+                        session_id="session-history-owner",
+                        status=AgentRunStatus.FAILED,
+                        version_snapshot=TEST_RUN_VERSION_SNAPSHOT.model_dump(mode="json"),
+                        page_context_snapshot={"order_id": "ORDER-002"},
+                        created_at=base_time + timedelta(minutes=2),
+                    ),
+                    AgentRun(
+                        run_id="run-history-003",
+                        session_id="session-history-owner",
+                        status=AgentRunStatus.RUNNING,
+                        version_snapshot=TEST_RUN_VERSION_SNAPSHOT.model_dump(mode="json"),
+                        page_context_snapshot={"order_id": "ORDER-003"},
+                        created_at=base_time + timedelta(minutes=2),
+                    ),
+                    AgentRun(
+                        run_id="run-history-other",
+                        session_id="session-history-other",
+                        status=AgentRunStatus.SUCCEEDED,
+                        version_snapshot=TEST_RUN_VERSION_SNAPSHOT.model_dump(mode="json"),
+                        page_context_snapshot={"order_id": "ORDER-005"},
+                        created_at=base_time + timedelta(minutes=3),
+                    ),
+                ]
+            )
+            await session.flush()
+            session.add_all(
+                [
+                    AgentStep(
+                        step_id="step-history-003",
+                        run_id="run-history-003",
+                        sequence_number=1,
+                        step_type=AgentStepType.TOOL,
+                        step_name="get_order",
+                        status=AgentStepStatus.SUCCEEDED,
+                        input_summary="order_id=ORDER-003",
+                        output_summary="status=IN_PROGRESS",
+                        duration_ms=8,
+                        created_at=base_time + timedelta(minutes=2),
+                    ),
+                    ApprovalRecord(
+                        approval_id="approval-history-003",
+                        run_id="run-history-003",
+                        status=ApprovalStatus.WAITING_CONFIRMATION,
+                        operation_type=OperationType.SUBMIT_REVIEW,
+                        original_draft=TEST_REVIEW_DRAFT,
+                        pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
+                        target_id="TASK-003",
+                        target_version=7,
+                        created_at=base_time + timedelta(minutes=2),
+                        updated_at=base_time + timedelta(minutes=2),
+                    ),
+                ]
+            )
+
+        async with database.session() as session:
+            repository = AgentRunRepository(session)
+            first_page, total = await repository.list_for_user(
+                "reviewer-001", offset=0, limit=2
+            )
+            second_page, second_total = await repository.list_for_user(
+                "reviewer-001", offset=2, limit=2
+            )
+            other_page, other_total = await repository.list_for_user(
+                "reviewer-002", offset=0, limit=20
+            )
+            owner_detail = await repository.get_for_user("run-history-003", "reviewer-001")
+            hidden_detail = await repository.get_for_user("run-history-003", "reviewer-002")
+
+        assert [run.run_id for run in first_page] == [
+            "run-history-003",
+            "run-history-002",
+        ]
+        assert [run.run_id for run in second_page] == ["run-history-001"]
+        assert total == second_total == 3
+        assert [run.run_id for run in other_page] == ["run-history-other"]
+        assert other_total == 1
+        assert owner_detail is not None
+        assert hidden_detail is None
+
+        service = DatabaseRunHistoryService(database)
+        detail = await service.get_run_detail(
+            identity=BusinessIdentity(user_id="reviewer-001", role="REVIEWER"),
+            run_id="run-history-003",
+        )
+        steps = await service.list_steps(
+            identity=BusinessIdentity(user_id="reviewer-001", role="REVIEWER"),
+            run_id="run-history-003",
+        )
+        assert detail.approvals[0].approval_id == "approval-history-003"
+        assert detail.approvals[0].effective_draft.specification_references[0].chunk_id == (
+            "CHUNK-COORD-001"
+        )
+        assert steps.items[0].input_summary == "order_id=ORDER-003"
+
+        with pytest.raises(RunHistoryAccessError) as hidden:
+            await service.get_run_detail(
+                identity=BusinessIdentity(user_id="reviewer-002", role="REVIEWER"),
+                run_id="run-history-003",
+            )
+        assert hidden.value.status_code == 404
+    finally:
+        await database.dispose()
 
 
 def _configured_url() -> str:

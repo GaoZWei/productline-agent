@@ -31,6 +31,7 @@ from app.services.operation_log import (
     OperationFailure,
     OperationLogAccessError,
     build_operation_log_detail,
+    draft_diff,
 )
 from app.services.order_diagnosis import (
     OrderDiagnosisExecution,
@@ -48,6 +49,13 @@ from app.services.run_events import (
     RunEventServiceError,
     RunEventSubscription,
     encode_sse_event,
+)
+from app.services.run_history import (
+    DatabaseRunHistoryService,
+    RunHistoryAccessError,
+    approval_history_from_record,
+    run_summary_from_record,
+    step_summary_from_record,
 )
 from app.services.run_lifecycle import (
     InvalidRunTransitionError,
@@ -88,6 +96,7 @@ __all__ = [
     "DatabaseApprovalExecutionStore",
     "DatabaseOperationLogService",
     "DatabaseReviewDraftStore",
+    "DatabaseRunHistoryService",
     "EventReplayUnavailableError",
     "EventStreamAccessDeniedError",
     "EventStreamCapacityError",
@@ -108,6 +117,7 @@ __all__ = [
     "RunEventService",
     "RunEventServiceError",
     "RunEventSubscription",
+    "RunHistoryAccessError",
     "RunLifecycleError",
     "RunLifecycleService",
     "RunLifecycleValidationError",
@@ -123,9 +133,13 @@ __all__ = [
     "StepLifecycleValidationError",
     "StepNotFoundError",
     "StepRunUnavailableError",
+    "approval_history_from_record",
     "build_operation_log_detail",
+    "draft_diff",
     "encode_sse_event",
     "parse_router_result",
+    "run_summary_from_record",
+    "step_summary_from_record",
     "unknown_router_result",
     "validate_user_message_entity_evidence",
 ]

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ApprovalRecord, ApprovalStatus
@@ -27,6 +27,16 @@ class ApprovalRecordRepository:
         """按审批标识查询记录。"""
 
         return await self._session.get(ApprovalRecord, approval_id)
+
+    async def list_by_run(self, run_id: str) -> list[ApprovalRecord]:
+        """按创建时间稳定返回Run产生的人工确认记录。"""
+
+        statement = (
+            select(ApprovalRecord)
+            .where(ApprovalRecord.run_id == run_id)
+            .order_by(ApprovalRecord.created_at, ApprovalRecord.approval_id)
+        )
+        return list((await self._session.scalars(statement)).all())
     # 防止重复确认或重复执行
     async def transition_status(
         self,

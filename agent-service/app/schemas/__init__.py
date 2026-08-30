@@ -53,6 +53,15 @@ from app.schemas.routing import (
     RoutingEntityName,
     SourcedEntity,
 )
+from app.schemas.run_history import (
+    ApprovalHistory,
+    RunDetailResponse,
+    RunHistoryErrorResponse,
+    RunListResponse,
+    RunSummary,
+    StepListResponse,
+    StepSummary,
+)
 from app.schemas.run_observability import RunTokenUsage
 from app.schemas.session import (
     PendingActionContext,
@@ -104,6 +113,7 @@ __all__ = [
     "ApprovalConfirmationErrorResponse",
     "ApprovalConfirmationRequest",
     "ApprovalConfirmationResponse",
+    "ApprovalHistory",
     "BlockingStage",
     "BusinessSkill",
     "Citation",
@@ -157,9 +167,13 @@ __all__ = [
     "RoutingEntityName",
     "RoutingParameter",
     "RuleDecision",
+    "RunDetailResponse",
     "RunEvent",
     "RunEventStreamErrorResponse",
     "RunEventType",
+    "RunHistoryErrorResponse",
+    "RunListResponse",
+    "RunSummary",
     "RunTokenUsage",
     "RunVersionSnapshot",
     "SessionContext",
@@ -172,6 +186,8 @@ __all__ = [
     "SpecificationQaStatus",
     "SpecificationRetrievalArguments",
     "StepError",
+    "StepListResponse",
+    "StepSummary",
     "Suggestion",
     "ToolSchemaSnapshot",
     "VersionCaptureStatus",

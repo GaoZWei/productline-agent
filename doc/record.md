@@ -1302,3 +1302,24 @@
 - 浏览器使用Fetch流读取SSE，以便同时发送用户身份和`Last-Event-ID`；连接确认后才发诊断请求，避免遗漏最早事件。
 - 重连回放按序号去重并拒绝不连续或结构非法的事件；切单、重试和组件卸载会关闭旧连接，避免旧Run污染当前订单。
 - 开始/完成事件被配对为可读时间线并计算耗时，失败码定位到正在执行的步骤；最终诊断仍来自严格HTTP响应，不用进度事件替代业务结果。
+
+---
+
+## 2026-08-30 — `[T739-T748] M7.5 Run 历史页面`
+
+### 核心解决的问题
+
+为已经持久化的Run建立用户隔离的列表、详情和Step查询入口，并把历史证据组织成可分页、可重试的Web页面，使刷新后仍能回看诊断、规范依据、人工修改和失败位置。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/run_history.py`、`app/services/run_history.py`：Run列表/详情、Step时间线、诊断结果和Approval历史的严格投影。
+- `agent-service/app/repositories/agent_runtime.py`、`app/repositories/approval.py`：Session所有者联表校验、稳定分页及Run关联记录查询。
+- `agent-service/app/api/runs.py`：Run列表、详情和Step只读HTTP入口及统一安全错误。
+- `web-console/src/api/runHistoryClient.ts`、`src/components/RunHistoryPage.vue`：运行时响应校验、列表/详情隔离加载和完整历史视图。
+
+### 实现的核心功能
+
+- 当前用户只能查询自己Session下的Run，不存在和他人Run共用404；列表按`created_at DESC, run_id DESC`稳定分页，详情与Step每次重新校验所有权。
+- 页面选择Run后并行读取详情与步骤，以九类Step展示受控输入输出摘要，并分别呈现诊断结果、规范引用、Approval原稿/最终稿差异及错误码、失败步骤和终止原因。
+- 历史页面不读取Java业务表，列表和详情均不返回用户消息、完整上下文、Router或版本快照，Tool也只展示落库前已脱敏截断的摘要。

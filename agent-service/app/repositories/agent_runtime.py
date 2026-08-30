@@ -116,6 +116,47 @@ class AgentRunRepository:
             .order_by(AgentRun.created_at, AgentRun.run_id)
         )
         return list((await self._session.scalars(statement)).all())
+    # 列表查询接口
+    async def list_for_user(
+        self,
+        user_id: str,
+        *,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[AgentRun], int]:
+        """按会话所有者倒序分页Run, 并返回同一权限边界内的总数。"""
+
+        owner_filter = AgentSession.user_id == user_id
+        count_statement = (
+            select(func.count(AgentRun.run_id))
+            .select_from(AgentRun)
+            .join(AgentSession, AgentSession.session_id == AgentRun.session_id)
+            .where(owner_filter)
+        )
+        list_statement = (
+            select(AgentRun)
+            .join(AgentSession, AgentSession.session_id == AgentRun.session_id)
+            .where(owner_filter)
+            .order_by(AgentRun.created_at.desc(), AgentRun.run_id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        total = int(await self._session.scalar(count_statement) or 0)
+        runs = list((await self._session.scalars(list_statement)).all())
+        return runs, total
+    # 详情查询接口
+    async def get_for_user(self, run_id: str, user_id: str) -> AgentRun | None:
+        """在SQL层同时校验Run身份和Session所有者, 避免泄露他人的Run。"""
+
+        statement = (
+            select(AgentRun)
+            .join(AgentSession, AgentSession.session_id == AgentRun.session_id)
+            .where(
+                AgentRun.run_id == run_id, 
+                AgentSession.user_id == user_id,  # 需要同样匹配Session所有者才能返回Run
+            )
+        )
+        return (await self._session.scalars(statement)).one_or_none()
     # 定位最近一个带结果的Run
     async def latest_result_by_session(self, session_id: str) -> AgentRun | None:
         """返回会话中最近一个带结果的Run, 不回退到更旧的可审批状态。"""

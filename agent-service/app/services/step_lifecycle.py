@@ -265,7 +265,7 @@ class StepLifecycleService:
                 message=f"must contain at most {max_length} characters",
             )
         return normalized
-    # 摘要: 摘要处理
+    # 摘要: 摘要处理（写入step前进行处理）
     @staticmethod
     def _normalize_summary(value: str | None, field_name: str) -> str | None:
         """压缩空白、遮盖常见凭据并截断摘要, 但不保存原始载荷。"""

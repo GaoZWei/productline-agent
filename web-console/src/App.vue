@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElAlert, ElButton, ElLoading, ElSkeleton } from "element-plus";
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 
 import AgentDiagnosisDrawer from "./components/AgentDiagnosisDrawer.vue";
@@ -8,10 +8,12 @@ import DeliveryStatusPanel from "./components/DeliveryStatusPanel.vue";
 import OrderSummary from "./components/OrderSummary.vue";
 import OrderSwitcher from "./components/OrderSwitcher.vue";
 import QualityIssuesPanel from "./components/QualityIssuesPanel.vue";
+import RunHistoryPage from "./components/RunHistoryPage.vue";
 import TaskList from "./components/TaskList.vue";
 import { useOrderStore } from "./stores/orderStore";
 
 const store = useOrderStore();
+const currentView = ref<"business" | "history">("business");
 const vLoading = ElLoading.directive;
 const {
   orders,
@@ -34,12 +36,30 @@ onMounted(() => store.initialize());
         <span><strong>产线协同中心</strong><small>遥感数据生产业务</small></span>
       </a>
       <div class="topbar-status">
+        <nav class="topbar-navigation" aria-label="主导航">
+          <button
+            type="button"
+            :class="{ active: currentView === 'business' }"
+            data-testid="business-view-nav"
+            @click="currentView = 'business'"
+          >
+            业务全景
+          </button>
+          <button
+            type="button"
+            :class="{ active: currentView === 'history' }"
+            data-testid="run-history-nav"
+            @click="currentView = 'history'"
+          >
+            运行历史
+          </button>
+        </nav>
         <span class="environment">M2 · 诊断视图</span>
         <span class="service-health"><i></i>Java 事实源 · Agent 诊断</span>
       </div>
     </header>
 
-    <div class="workspace">
+    <div v-if="currentView === 'business'" class="workspace">
       <OrderSwitcher
         :orders="orders"
         :selected-order-id="selectedOrderId"
@@ -98,5 +118,6 @@ onMounted(() => store.initialize());
         </footer>
       </main>
     </div>
+    <RunHistoryPage v-else />
   </div>
 </template>

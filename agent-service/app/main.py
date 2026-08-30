@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app.api.approvals import router as approvals_router
 from app.api.order_diagnosis import router as order_diagnosis_router
 from app.api.run_events import router as run_events_router
+from app.api.runs import router as runs_router
 from app.api.sessions import router as sessions_router
 from app.api.tool_debug import ToolDebugRunContextStore
 from app.api.tool_debug import router as tool_debug_router
@@ -89,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.settings = resolved_settings
     application.include_router(order_diagnosis_router)
     application.include_router(run_events_router)
+    application.include_router(runs_router)
     application.include_router(sessions_router)
     application.include_router(approvals_router)
     # 根据环境决定是否注册路由

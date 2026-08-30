@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-sse-events test-run-timeline test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-knowledge-hybrid test-knowledge-rerank test-knowledge-citations test-specification-qa eval-rag test-approval test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-sse-events test-run-timeline test-run-history test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-knowledge-hybrid test-knowledge-rerank test-knowledge-citations test-specification-qa eval-rag test-approval test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -51,6 +51,12 @@ test-sse-events: ## 验证 M7.3 SSE事件、回放、心跳及诊断/RAG/Approva
 
 test-run-timeline: ## 验证 M7.4 SSE客户端、重连、时间线和诊断抽屉联动
 	npm --prefix web-console test -- --run src/api/runEventClient.spec.ts src/observability/runEventTimeline.spec.ts src/components/AgentRunTimeline.spec.ts src/components/AgentDiagnosisDrawer.spec.ts src/api/agentClient.spec.ts src/server.spec.mjs
+	npm --prefix web-console run build
+
+test-run-history: ## 验证 M7.5 Run列表/详情/Step API、历史页面和用户隔离
+	cd agent-service && uv run --frozen pytest -q tests/test_run_history.py tests/test_run_history_api.py
+	./scripts/test-agent-persistence.sh -k run_history
+	npm --prefix web-console test -- --run src/api/runHistoryClient.spec.ts src/components/RunHistoryPage.spec.ts src/App.spec.ts
 	npm --prefix web-console run build
 
 test-workflow-schemas: ## 单独验证 M2.4 Workflow 状态与诊断 Schema
