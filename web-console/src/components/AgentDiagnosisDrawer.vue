@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { ElAlert, ElButton, ElTag } from "element-plus";
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 import { diagnoseOrder } from "../api/agentApi";
 import { AGENT_USER_ROLE, AgentApiError } from "../api/agentClient";
+import {
+  createRunEventStreamId,
+  openRunEventStream,
+  RunEventClientError,
+  type RunEventConnection,
+} from "../api/runEventClient";
 import { createOrderDetailPageContext } from "../context/pageContext";
 import type { BlockingStage, OrderDiagnosisResponse } from "../types/agent";
+import type { RunEvent, RunEventConnectionStatus } from "../types/runEvents";
 import type { Order } from "../types/business";
+import AgentRunTimeline from "./AgentRunTimeline.vue";
 
 const DEFAULT_MESSAGE = "这个订单为什么还没有交付？";
 const STAGE_LABELS: Record<BlockingStage, string> = {
@@ -27,6 +35,10 @@ const result = ref<OrderDiagnosisResponse>();
 const error = ref<AgentApiError>();
 const sessionId = ref<string>();
 const messageInput = ref<HTMLTextAreaElement>();
+const runEvents = ref<RunEvent[]>([]);
+const connectionStatus = ref<RunEventConnectionStatus | "idle">("idle");
+const connectionWarning = ref<RunEventClientError>();
+let eventConnection: RunEventConnection | undefined;
 let requestSequence = 0;
 
 const currentOrderId = computed(() => props.order?.orderId);
@@ -36,11 +48,18 @@ const canSubmit = computed(
 
 watch(currentOrderId, () => {
   requestSequence += 1;
+  eventConnection?.close();
+  eventConnection = undefined;
   loading.value = false;
   result.value = undefined;
   error.value = undefined;
   sessionId.value = undefined;
+  runEvents.value = [];
+  connectionStatus.value = "idle";
+  connectionWarning.value = undefined;
 });
+
+onBeforeUnmount(() => eventConnection?.close());
 
 async function openDrawer() {
   visible.value = true;
@@ -59,14 +78,51 @@ async function submitDiagnosis() {
   if (!order || !orderId || !message || loading.value) return;
 
   const sequence = ++requestSequence;
+  eventConnection?.close();
+  eventConnection = undefined;
   loading.value = true;
   result.value = undefined;
   error.value = undefined;
+  runEvents.value = [];
+  connectionWarning.value = undefined;
+  connectionStatus.value = "connecting";
   try {
+    // 必须先连接SSE，再发诊断请求
+    const streamId = createRunEventStreamId();
+    const connection = openRunEventStream({
+      streamId,
+      onEvent: (event) => {
+        if (sequence === requestSequence && currentOrderId.value === orderId) {
+          runEvents.value = [...runEvents.value, event];
+        }
+      },
+      onStateChange: (state) => {
+        if (sequence === requestSequence && currentOrderId.value === orderId) {
+          connectionStatus.value = state.status;
+        }
+      },
+      onError: (streamError) => {
+        if (sequence === requestSequence && currentOrderId.value === orderId) {
+          connectionWarning.value = streamError;
+        }
+      },
+    });
+    eventConnection = connection;
+    await connection.ready;
+    if (sequence !== requestSequence || currentOrderId.value !== orderId) {
+      connection.close();
+      return;
+    }
     // 创建订单详情页上下文
     const pageContext = createOrderDetailPageContext(order, AGENT_USER_ROLE);
     // 请求诊断订单
-    const response = await diagnoseOrder(orderId, message, pageContext, sessionId.value);
+    const response = await diagnoseOrder(
+      orderId,
+      message,
+      pageContext,
+      sessionId.value,
+      streamId,
+    );
     if (sequence === requestSequence && currentOrderId.value === orderId) {
       sessionId.value = response.session_id;
       result.value = response;
@@ -74,6 +130,8 @@ async function submitDiagnosis() {
   } catch (reason) {
     if (sequence === requestSequence && currentOrderId.value === orderId) {
       error.value = toAgentError(reason);
+      // 连接建立失败时Client已经进入failed，不能再用closed覆盖真实状态。
+      if (!(reason instanceof RunEventClientError)) eventConnection?.close();
     }
   } finally {
     if (sequence === requestSequence) loading.value = false;
@@ -82,6 +140,15 @@ async function submitDiagnosis() {
 
 function toAgentError(reason: unknown) {
   if (reason instanceof AgentApiError) return reason;
+  if (reason instanceof RunEventClientError) {
+    return new AgentApiError({
+      code: reason.code,
+      message: reason.message,
+      traceId: reason.traceId,
+      retryable: reason.retryable,
+      status: reason.status,
+    });
+  }
   return new AgentApiError({
     code: "UNKNOWN_CLIENT_ERROR",
     message: "执行订单诊断时发生未知错误",
@@ -159,13 +226,28 @@ function formatEvidenceValue(value: string | number | boolean | null) {
           </div>
         </section>
 
-        <div v-if="loading" class="agent-loading" role="status" aria-live="polite">
+        <AgentRunTimeline
+          v-if="runEvents.length || connectionStatus !== 'idle'"
+          :events="runEvents"
+          :connection-status="connectionStatus"
+        />
+
+        <div v-if="loading && runEvents.length === 0" class="agent-loading" role="status" aria-live="polite">
           <span class="agent-loading-spinner"></span>
           <div>
             <strong>正在核对订单事实</strong>
             <p>依次读取生产、质检、复核与交付状态…</p>
           </div>
         </div>
+
+        <el-alert
+          v-if="connectionWarning && !error"
+          class="agent-stream-warning"
+          title="实时步骤连接已中断，诊断请求仍可能继续执行"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
 
         <el-alert
           v-if="error"

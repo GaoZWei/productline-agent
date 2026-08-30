@@ -7,7 +7,8 @@ M3.2 订单业务与诊断页面，使用 Vue 3、TypeScript、Vite、Pinia、Ax
 字段级证据和建议。订单、任务与质检 Context Adapter 均为纯函数；当前已有订单页只调用订单Adapter，
 其余两个供后续对应页面复用。
 同一订单抽屉会保存首次响应的`session_id`并在后续诊断中复用；切换订单时清除本地会话引用，避免跨订单
-继承。服务端仍会重新校验每轮携带的页面上下文。
+继承。每次诊断先建立带用户身份的SSE事件流，再将同一`stream_id`随诊断请求提交；页面实时展示Run和
+Tool步骤、失败位置及耗时，服务端仍会重新校验每轮携带的页面上下文。
 
 ## 本地开发
 
@@ -29,12 +30,13 @@ npm --prefix web-console run dev
 ## 测试与构建
 
 ```bash
+make test-run-timeline
 make test-web
 make build-web
 ```
 
-`test-web` 覆盖三个页面Context Adapter、业务与诊断响应解包、结构化错误、非法响应、固定五单加载、
-切换竞态、诊断抽屉结果、核心业务组件和生产代理；`build-web` 同时执行Vue TypeScript检查和Vite构建。
+`test-run-timeline`定向覆盖SSE分块解析、连接确认、有限重连、`Last-Event-ID`续接、事件归并、时间线、
+诊断抽屉绑定和生产代理错误；`test-web`覆盖全部页面测试，`build-web`同时执行Vue TypeScript检查和Vite构建。
 
 ## 生产运行
 
@@ -47,8 +49,8 @@ AGENT_API_URL=http://localhost:8000 \
 PORT=5173 node web-console/server.mjs
 ```
 
-当前侧边栏可在同一订单内复用Session，但每轮仍执行确定性Workflow；尚未实现自然语言意图继承、澄清或
-SSE。M6.4已提供可复用的复核确认卡片，能够展示目标任务、质检问题、目标版本，编辑草稿、核对规范引用并进行二次确认；
+当前侧边栏可在同一订单内复用Session，每轮仍执行确定性Workflow；SSE历史只在单个Agent进程内短期保留，
+重连无法跨进程或跨实例恢复。M6.4已提供可复用的复核确认卡片，能够展示目标任务、质检问题、目标版本，编辑草稿、核对规范引用并进行二次确认；
 M6.6前端Client已支持调用Approval确认接口并校验Java复核或返工结果，也能识别`EXPIRED`、`STALE`等结构化错误。
 M6.7又加入按Approval读取操作前后摘要、用户修改差异和Java Trace的只读Client及运行时校验。当前诊断侧边栏尚未
 取得和挂载Approval记录，也没有操作日志展示页；卡片仍通过事件交给父级调用Client，而不是由组件直接写Java。

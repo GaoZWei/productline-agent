@@ -22,7 +22,7 @@ describe("agent API client", () => {
         order_id: "ORDER-003",
         user_message: "这个订单为什么还没有交付？",
         page_context: orderPageContext(),
-      }),
+      }, "stream-client-003"),
     ).resolves.toMatchObject({
       run_id: "run-order-003",
       session_id: "session-order-003",
@@ -35,6 +35,7 @@ describe("agent API client", () => {
 
     expect(mock.history.post[0]?.headers?.["X-User-Id"]).toBe("reviewer-001");
     expect(mock.history.post[0]?.headers?.["X-User-Role"]).toBe("REVIEWER");
+    expect(mock.history.post[0]?.headers?.["X-Event-Stream-Id"]).toBe("stream-client-003");
     expect(JSON.parse(mock.history.post[0]?.data ?? "{}")).toMatchObject({
       order_id: "ORDER-003",
       page_context: {

@@ -16,13 +16,17 @@ export function diagnoseOrder(
   userMessage: string,
   pageContext: PageContext,
   sessionId?: string,
+  eventStreamId?: string,
 ): Promise<OrderDiagnosisResponse> {
-  return requestOrderDiagnosis({
-    session_id: sessionId,
-    order_id: orderId,
-    user_message: userMessage,
-    page_context: pageContext,
-  });
+  return requestOrderDiagnosis(
+    {
+      session_id: sessionId,
+      order_id: orderId,
+      user_message: userMessage,
+      page_context: pageContext,
+    },
+    eventStreamId,
+  );
 }
 
 export function confirmReviewApproval(

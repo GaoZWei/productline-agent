@@ -12,8 +12,8 @@ import type {
   ReviewApprovalDecision,
 } from "../types/agent";
 
-const AGENT_API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL ?? "/agent-api";
-const AGENT_USER_ID = import.meta.env.VITE_AGENT_USER_ID ?? "reviewer-001";
+export const AGENT_API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL ?? "/agent-api";
+export const AGENT_USER_ID = import.meta.env.VITE_AGENT_USER_ID ?? "reviewer-001";
 export const AGENT_USER_ROLE = import.meta.env.VITE_AGENT_USER_ROLE ?? "REVIEWER";
 
 const BLOCKING_STAGES = new Set<BlockingStage>([
@@ -70,9 +70,12 @@ export const agentHttpClient = axios.create({
 
 export async function requestOrderDiagnosis(
   request: OrderDiagnosisRequest,
+  eventStreamId?: string,
 ): Promise<OrderDiagnosisResponse> {
   try {
-    const response = await agentHttpClient.post<unknown>("/api/agent/order-diagnosis", request);
+    const response = await agentHttpClient.post<unknown>("/api/agent/order-diagnosis", request, {
+      headers: eventStreamId ? { "X-Event-Stream-Id": eventStreamId } : undefined,
+    });
     if (!isOrderDiagnosisResponse(response.data)) {
       throw responseValidationError(response.status, traceIdFrom(response.data));
     }

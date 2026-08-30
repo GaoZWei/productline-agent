@@ -89,7 +89,7 @@ function proxyServiceRequest(clientRequest, clientResponse, serviceUrl, prefix, 
   upstreamRequest.on("error", (error) => {
     console.error(`${serviceLabel} API proxy failed`, error.message);
     if (!clientResponse.headersSent) {
-      sendJson(clientResponse, 502, unavailablePayload(prefix, serviceLabel));
+      sendJson(clientResponse, 502, unavailablePayload(prefix, serviceLabel, upstreamPath));
     } else {
       clientResponse.destroy();
     }
@@ -98,7 +98,7 @@ function proxyServiceRequest(clientRequest, clientResponse, serviceUrl, prefix, 
   clientRequest.pipe(upstreamRequest);
 }
 
-function unavailablePayload(prefix, serviceLabel) {
+function unavailablePayload(prefix, serviceLabel, upstreamPath) {
   const common = {
     code: "UPSTREAM_UNAVAILABLE",
     message: `${serviceLabel}服务暂时不可用`,
@@ -106,9 +106,28 @@ function unavailablePayload(prefix, serviceLabel) {
     retryable: true,
   };
   if (prefix === "/agent-api") {
+    const streamId = eventStreamId(upstreamPath);
+    if (streamId) {
+      return {
+        stream_id: streamId,
+        trace_id: common.trace_id,
+        code: common.code,
+        message: common.message,
+      };
+    }
     return { run_id: null, ...common, error_step: null };
   }
   return { success: false, ...common, data: null };
+}
+
+function eventStreamId(upstreamPath) {
+  const prefix = "/api/agent/events/";
+  if (!upstreamPath.startsWith(prefix)) return null;
+  try {
+    return decodeURIComponent(upstreamPath.slice(prefix.length)) || null;
+  } catch {
+    return null;
+  }
 }
 
 function sendJson(response, status, value, method = "GET") {

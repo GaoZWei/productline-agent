@@ -1281,3 +1281,24 @@
 - 15种稳定事件共用流内递增身份、Trace、可选Run/Step身份和受限JSON数据，拒绝常见凭据键、过深结构和超大内容。
 - 客户端先连接自生成流标识，再通过请求头绑定诊断或确认；不同用户不能订阅或发布到对方事件流。
 - 心跳维持空闲连接，`Last-Event-ID`回放有界历史，终态与断开会清理订阅；事件只提供进度，不替代Run/Step或Java事实。
+
+---
+
+## 2026-08-29 — `[T731-T738] M7.4 前端实时步骤展示`
+
+### 核心解决的问题
+
+把后端有序SSE事件转换为用户能理解的实时执行步骤，使诊断期间可以区分连接、Run、Tool、RAG、人工确认、写回和失败状态，并在短暂断线后从最后事件续接。
+
+### 实现的核心代码
+
+- `web-console/src/api/runEventClient.ts`、`src/types/runEvents.ts`：带身份的流连接、严格事件解析、有限重连和错误契约。
+- `web-console/src/observability/runEventTimeline.ts`、`src/components/AgentRunTimeline.vue`：纯事件归并、步骤状态、失败定位和耗时展示。
+- `web-console/src/components/AgentDiagnosisDrawer.vue`、`src/api/agentClient.ts`：先连接再诊断的流标识绑定及生命周期清理。
+- `web-console/server.mjs`：生产同源代理的SSE专用上游不可用响应。
+
+### 实现的核心功能
+
+- 浏览器使用Fetch流读取SSE，以便同时发送用户身份和`Last-Event-ID`；连接确认后才发诊断请求，避免遗漏最早事件。
+- 重连回放按序号去重并拒绝不连续或结构非法的事件；切单、重试和组件卸载会关闭旧连接，避免旧Run污染当前订单。
+- 开始/完成事件被配对为可读时间线并计算耗时，失败码定位到正在执行的步骤；最终诊断仍来自严格HTTP响应，不用进度事件替代业务结果。

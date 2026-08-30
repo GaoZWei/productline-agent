@@ -1,16 +1,42 @@
 import { createApp, nextTick, type App } from "vue";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { diagnoseOrder } from "../api/agentApi";
 import { AgentApiError } from "../api/agentClient";
+import {
+  createRunEventStreamId,
+  openRunEventStream,
+  type OpenRunEventStreamOptions,
+} from "../api/runEventClient";
 import type { OrderDiagnosisResponse } from "../types/agent";
+import type { RunEvent } from "../types/runEvents";
 import AgentDiagnosisDrawer from "./AgentDiagnosisDrawer.vue";
 
 vi.mock("../api/agentApi", () => ({ diagnoseOrder: vi.fn() }));
+vi.mock("../api/runEventClient", () => ({
+  createRunEventStreamId: vi.fn(),
+  openRunEventStream: vi.fn(),
+  RunEventClientError: class RunEventClientError extends Error {},
+}));
 
 const mockedDiagnoseOrder = vi.mocked(diagnoseOrder);
+const mockedCreateStreamId = vi.mocked(createRunEventStreamId);
+const mockedOpenStream = vi.mocked(openRunEventStream);
 let host: HTMLDivElement | undefined;
 let application: App<Element> | undefined;
+
+beforeEach(() => {
+  mockedCreateStreamId.mockReturnValue("stream-drawer-003");
+  mockedOpenStream.mockImplementation((options) => {
+    options.onStateChange?.({ status: "connecting", reconnectAttempt: 0 });
+    options.onStateChange?.({ status: "open", reconnectAttempt: 0 });
+    return {
+      streamId: options.streamId,
+      ready: Promise.resolve(),
+      close: vi.fn(),
+    };
+  });
+});
 
 afterEach(() => {
   application?.unmount();
@@ -36,7 +62,7 @@ describe("Agent diagnosis drawer", () => {
     expect(host?.textContent).toContain("QUALITY_CHECKING");
 
     click('[data-testid="submit-diagnosis"]');
-    await nextTick();
+    await settleUi();
     expect(mockedDiagnoseOrder).toHaveBeenCalledWith(
       "ORDER-003",
       "这个订单为什么还没有交付？",
@@ -52,6 +78,7 @@ describe("Agent diagnosis drawer", () => {
         user_role: "REVIEWER",
       },
       undefined,
+      "stream-drawer-003",
     );
     expect(host?.textContent).toContain("正在核对订单事实");
 
@@ -74,6 +101,7 @@ describe("Agent diagnosis drawer", () => {
       "这个订单为什么还没有交付？",
       expect.objectContaining({ order_id: "ORDER-003" }),
       "session-order-003",
+      "stream-drawer-003",
     );
   });
 
@@ -102,6 +130,54 @@ describe("Agent diagnosis drawer", () => {
     expect(host?.textContent).toContain("失败步骤：get_quality_issues");
     expect(host?.textContent).toContain("Trace ID：trace-failed");
     expect(host?.textContent).toContain("重新诊断");
+  });
+
+  it("实时显示Tool步骤、失败状态和耗时", async () => {
+    let streamOptions: OpenRunEventStreamOptions | undefined;
+    let resolveDiagnosis!: (value: OrderDiagnosisResponse) => void;
+    mockedOpenStream.mockImplementation((options) => {
+      streamOptions = options;
+      options.onStateChange?.({ status: "open", reconnectAttempt: 0 });
+      return { streamId: options.streamId, ready: Promise.resolve(), close: vi.fn() };
+    });
+    mockedDiagnoseOrder.mockReturnValue(
+      new Promise((resolve) => {
+        resolveDiagnosis = resolve;
+      }),
+    );
+    mountDrawer();
+
+    click('[data-testid="open-agent-drawer"]');
+    await nextTick();
+    click('[data-testid="submit-diagnosis"]');
+    await settleUi();
+    streamOptions?.onEvent(runEvent("1", "run_started", "2026-08-29T03:00:00.000Z"));
+    streamOptions?.onEvent(
+      runEvent("2", "tool_started", "2026-08-29T03:00:01.000Z", {
+        stepId: "step-quality",
+        data: { step_name: "load_quality", status: "RUNNING" },
+      }),
+    );
+    streamOptions?.onEvent(
+      runEvent("3", "tool_completed", "2026-08-29T03:00:01.220Z", {
+        stepId: "step-quality",
+        data: {
+          step_name: "load_quality",
+          status: "FAILED",
+          error_code: "RESOURCE_NOT_FOUND",
+        },
+      }),
+    );
+    await nextTick();
+
+    expect(host?.textContent).toContain("实时执行步骤");
+    expect(host?.textContent).toContain("查询质检问题");
+    expect(host?.textContent).toContain("220 ms");
+    expect(host?.textContent).toContain("RESOURCE_NOT_FOUND");
+    expect(host?.querySelector('[data-status="failed"]')).toBeTruthy();
+
+    resolveDiagnosis(goldenDiagnosis());
+    await settleUi();
   });
 });
 
@@ -172,5 +248,24 @@ function evidence(toolName: string, fieldPath: string, value: string, descriptio
     field_path: fieldPath,
     value,
     description,
+  };
+}
+
+function runEvent(
+  eventId: string,
+  eventType: RunEvent["event_type"],
+  occurredAt: string,
+  options: { stepId?: string; data?: RunEvent["data"] } = {},
+): RunEvent {
+  return {
+    event_id: eventId,
+    event_type: eventType,
+    stream_id: "stream-drawer-003",
+    run_id: "run-drawer-003",
+    sequence_number: Number(eventId),
+    occurred_at: occurredAt,
+    trace_id: "trace-drawer-003",
+    step_id: options.stepId ?? null,
+    data: options.data ?? {},
   };
 }

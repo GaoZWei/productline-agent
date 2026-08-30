@@ -2,7 +2,7 @@
 
 面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
 
-当前进度为 **M7 可观测性里程碑进行中，M7.3 SSE事件服务已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
+当前进度为 **M7 可观测性里程碑进行中，M7.4 前端实时步骤展示已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
 可追溯根因、字段证据和建议；Web订单页已经接入严格PageContext。诊断现在可以复用持久化Session继承
 当前订单或任务，并继续通过Java事实重校验。内部路由器已具备六类意图、上下文Prompt注入、严格结构化
 解析、一次Schema重试、`UNKNOWN`回退、来源化实体合并，以及固定置信度、缺参/冲突澄清和补参恢复；
@@ -20,8 +20,9 @@ Web具备可展开引用卡片；内部`SpecificationSkill`可从`SPEC_QA`决策
 确定性执行限制和多订单固定路径；Approval链已实现草稿、用户修改、确认前Java事实重校验、单次安全写回和可查询
 操作日志，并由十场景安全矩阵及真实跨服务E2E验收。Run现在还会冻结页面上下文与组件版本，保存可选Router结果、
 Token与Tool调用统计、总耗时和终止原因；九类Step共享脱敏和终态规则。后端SSE现可按用户隔离的流标识推送Run、
-路由、Agent动作、Tool、RAG、Approval和写回事件，并支持心跳、短期回放和断线清理。具体模型供应商、统一路由HTTP、
-页面Approval生产接线、SSE时间线、操作日志页面和运行历史页面仍未实现。
+路由、Agent动作、Tool、RAG、Approval和写回事件，并支持心跳、短期回放和断线清理。Web诊断抽屉会先建立事件流再发请求，
+严格校验并有限重连，实时展示Run、Tool等步骤的状态、失败码和耗时。具体模型供应商、统一路由HTTP、页面Approval生产接线、
+操作日志页面和运行历史页面仍未实现。
 
 ## 环境要求
 
@@ -74,6 +75,8 @@ make test-tools        # 验证 M1.4～M1.8 Tool 协议、调用策略和开发�
 make test-agent-persistence # 在隔离 PostgreSQL 上验证 M2.1～M2.5 运行记录持久化
 make test-run-lifecycle # 单独验证 M2.2 Run 生命周期与并发状态流转
 make test-step-lifecycle # 单独验证 M2.3 Step 记录、摘要和耗时
+make test-sse-events   # 验证 M7.3 SSE事件服务与发布链路
+make test-run-timeline # 验证 M7.4 前端事件流和实时步骤时间线
 make test-workflow-schemas # 单独验证 M2.4 Workflow 状态与诊断 Schema
 make test-workflow-nodes # 单独验证 M2.5 固定节点、状态合并和失败中断
 make test-diagnosis-rules # 单独验证 M2.6 阻塞阶段规则、信息完整性和优先级

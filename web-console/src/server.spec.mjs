@@ -68,6 +68,31 @@ describe("production web server", () => {
     const fallback = await fetch(`${webUrl}/orders/ORDER-003`);
     expect(await fallback.text()).toContain("M0.8 page");
   });
+
+  it("SSE上游不可用时返回事件流专用错误结构", async () => {
+    const web = createWebServer({ agentApiUrl: "http://127.0.0.1:1" });
+    servers.push(web);
+    const webUrl = await listen(web);
+
+    const response = await fetch(
+      `${webUrl}/agent-api/api/agent/events/stream-proxy-unavailable`,
+      {
+        headers: {
+          Accept: "text/event-stream",
+          "X-User-Id": "reviewer-001",
+          "X-User-Role": "REVIEWER",
+        },
+      },
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      stream_id: "stream-proxy-unavailable",
+      trace_id: "web-proxy-unavailable",
+      code: "UPSTREAM_UNAVAILABLE",
+      message: "诊断服务暂时不可用",
+    });
+  });
 });
 
 function listen(server) {
