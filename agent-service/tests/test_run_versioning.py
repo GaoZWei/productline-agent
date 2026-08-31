@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 
 import pytest
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, SecretStr
 
 from app.routing.prompt import ROUTER_PROMPT_VERSION
 from app.schemas.versioning import (
@@ -101,8 +101,9 @@ def test_configured_model_name_and_non_sensitive_parameters_are_frozen() -> None
     snapshot = build_run_version_snapshot(
         Settings(
             environment="test",
-            model_provider="provider-a",
+            model_provider="openai_compatible",
             model_name="decision-model-v2",
+            model_base_url=AnyHttpUrl("https://models.example.test/v1"),
             model_temperature=0.2,
             model_max_output_tokens=4096,
         ),
@@ -111,7 +112,7 @@ def test_configured_model_name_and_non_sensitive_parameters_are_frozen() -> None
 
     assert snapshot.model is not None
     assert snapshot.model.configured is True
-    assert snapshot.model.provider == "provider-a"
+    assert snapshot.model.provider == "openai_compatible"
     assert snapshot.model.model_name == "decision-model-v2"
     assert snapshot.model.parameters == {
         "temperature": 0.2,

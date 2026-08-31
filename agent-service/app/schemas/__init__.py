@@ -28,6 +28,7 @@ from app.schemas.knowledge import (
     DocumentType,
     PermissionScope,
 )
+from app.schemas.model_capabilities import ModelCapabilitiesResponse
 from app.schemas.operation_log import (
     OperationAfterSummary,
     OperationBeforeSummary,
@@ -138,6 +139,7 @@ __all__ = [
     "Evidence",
     "InformationGap",
     "Intent",
+    "ModelCapabilitiesResponse",
     "ModelRuntimeSnapshot",
     "OperationAfterSummary",
     "OperationBeforeSummary",

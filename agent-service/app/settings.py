@@ -1,9 +1,9 @@
 """由环境变量提供的服务配置。"""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,9 +31,11 @@ class Settings(BaseSettings):
     business_pool_timeout_seconds: float = Field(default=1.0, gt=0, le=60)
     session_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
     approval_ttl_seconds: int = Field(default=900, ge=60, le=86400)
-    model_provider: str = Field(default="openai", min_length=1, max_length=128)  # 模型供应商
-    model_name: str | None = Field(default=None, max_length=128)  # 模型名称
-    model_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 模型温度
+    model_provider: Literal["openai_compatible"] = "openai_compatible"  # 使用哪种模型调用协议
+    model_name: str | None = Field(default=None, max_length=128)  # 空值表示未启用模型
+    model_base_url: AnyHttpUrl | None = None  # 模型网关地址 OpenAI兼容API根地址
+    model_api_key: SecretStr | None = None  # 访问密钥 本地无鉴权网关允许为空
+    model_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 控制生成结果的随机程度
     model_max_output_tokens: int = Field(default=2048, ge=1, le=65536)  # 模型最大输出令牌数
     embedding_provider: Literal["openai_compatible"] = "openai_compatible"
     embedding_model: str = "text-embedding-3-small"
@@ -54,14 +56,61 @@ class Settings(BaseSettings):
 
         return 1536 if value == "1536" else value
 
+    @field_validator("model_provider", mode="before")
+    @classmethod
+    def normalize_model_provider(cls, value: object) -> object:
+        """兼容旧的openai名称, 并把运行契约统一为openai_compatible。"""
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return "openai_compatible" if normalized == "openai" else normalized
+        return value
+
     @field_validator("model_name", mode="before")
     @classmethod
     def empty_model_name_is_unconfigured(cls, value: object) -> object:
-        """Compose 的空字符串表示尚未接入真实决策模型。"""
+        """Compose的空字符串表示未启用模型, 非空名称统一去除首尾空白。"""
 
-        if isinstance(value, str) and not value.strip():
-            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
         return value
+
+    @field_validator("model_base_url", mode="before")
+    @classmethod
+    def empty_model_base_url_is_unconfigured(cls, value: object) -> object:
+        """允许Compose用空字符串表达尚未提供模型地址。"""
+
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+    @field_validator("model_api_key", mode="before")
+    @classmethod
+    def empty_model_api_key_is_absent(cls, value: object) -> object:
+        """空密钥不构成配置, 非空值由SecretStr负责隐藏。"""
+
+        if isinstance(value, SecretStr):
+            return value if value.get_secret_value().strip() else None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+    # 不完整配置直接报错
+    @model_validator(mode="after")
+    def validate_model_configuration(self) -> Self:
+        """启用模型时必须有调用地址; 未启用时允许预先注入地址或密钥。"""
+
+        if self.model_name is not None and self.model_base_url is None:
+            raise ValueError("MODEL_BASE_URL is required when MODEL_NAME is configured")
+        return self
+    # 判断模型是否已配置启用
+    @property
+    def model_configured(self) -> bool:
+        """返回当前进程是否具备一个可寻址的模型配置。"""
+
+        return self.model_name is not None
 
     # 数据库 URL转换
     @property
@@ -73,6 +122,7 @@ class Settings(BaseSettings):
         if self.database_url.startswith("postgresql://"):
             return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         raise ValueError("DATABASE_URL must use postgresql:// or postgresql+asyncpg://")
+
 
 # 第一次读取环境变量后缓存 Settings。后续调用返回同一个对象。
 @lru_cache

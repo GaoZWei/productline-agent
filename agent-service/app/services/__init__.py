@@ -26,6 +26,7 @@ from app.services.intent_router import (
     unknown_router_result,
     validate_user_message_entity_evidence,
 )
+from app.services.model_capabilities import ModelCapabilityService
 from app.services.operation_log import (
     DatabaseOperationLogService,
     OperationFailure,
@@ -108,6 +109,7 @@ __all__ = [
     "InvalidRunTransitionError",
     "InvalidStepTransitionError",
     "InvalidStoredSessionContextError",
+    "ModelCapabilityService",
     "OperationFailure",
     "OperationLogAccessError",
     "OrderDiagnosisExecution",

@@ -30,6 +30,15 @@ uv run python -m app.main
 `SESSION_TTL_SECONDS`和`APPROVAL_TTL_SECONDS`覆盖会话及确认单有效期，后者默认900秒。启用Embedding生成时还需设置`EMBEDDING_API_KEY`；Provider、模型、
 Base URL、1536维度、批大小、超时、重试和索引版本均可通过对应`EMBEDDING_*`变量配置。
 
+结构化对话模型默认关闭：`MODEL_NAME`为空时，即使预先提供地址或密钥也不会被标记为已配置。启用时必须同时提供
+`MODEL_BASE_URL`，`MODEL_PROVIDER`固定为`openai_compatible`并兼容旧值`openai`；本地无鉴权网关允许
+`MODEL_API_KEY`为空，非空密钥使用`SecretStr`保存且不得进入日志或版本快照。T749只建立配置边界，具体HTTP调用
+将在T751接入。
+
+T750提供`GET /api/agent/capabilities/model`查询安全的模型配置能力。模型关闭时返回
+`{"configured":false,"provider":null,"model_name":null}`；启用时只增加Provider和模型名，不返回Base URL或
+API Key。该结果只证明配置通过校验，不探测模型网络，也不代表某次Run已经调用模型。
+
 ## Java HTTP Client
 
 `app.clients.business.BusinessHttpClient` 在 FastAPI lifespan 中创建和关闭，共享连接池，

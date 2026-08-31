@@ -1323,3 +1323,45 @@
 - 当前用户只能查询自己Session下的Run，不存在和他人Run共用404；列表按`created_at DESC, run_id DESC`稳定分页，详情与Step每次重新校验所有权。
 - 页面选择Run后并行读取详情与步骤，以九类Step展示受控输入输出摘要，并分别呈现诊断结果、规范引用、Approval原稿/最终稿差异及错误码、失败步骤和终止原因。
 - 历史页面不读取Java业务表，列表和详情均不返回用户消息、完整上下文、Router或版本快照，Tool也只展示落库前已脱敏截断的摘要。
+
+---
+
+## 2026-08-31 — `[T749] M7.6-A 模型配置与环境变量校验`
+
+### 核心解决的问题
+
+修正Compose虽然传入模型地址和密钥、但Settings未声明字段而静默忽略的问题，并防止只有模型名称、没有可调用地址的
+半配置状态被记录为已启用模型。
+
+### 实现的核心代码
+
+- `agent-service/app/settings.py`：OpenAI兼容Provider、模型地址、SecretStr密钥、启用条件和跨字段校验。
+- `agent-service/app/versioning.py`：Run版本快照复用统一`model_configured`判定。
+- `.env.example`、`docker-compose.yml`：统一`openai_compatible`默认值和启用说明。
+
+### 实现的核心功能
+
+- 旧`openai`配置会规范为`openai_compatible`，其他未支持Provider在配置加载阶段关闭失败。
+- 空`MODEL_NAME`明确保持模型关闭；非空模型名称必须同时提供合法HTTP(S) Base URL，本地无鉴权网关允许空密钥。
+- 模型密钥使用`SecretStr`保存，Run版本快照只记录非敏感Provider、模型名和生成参数，不保存地址或密钥。
+
+---
+
+## 2026-08-31 — `[T750] M7.6-A 模型能力查询Schema与服务`
+
+### 核心解决的问题
+
+让页面和运维能够通过稳定接口判断模型配置是否已经启用，避免读取进程环境、解析日志或把健康检查误当成模型能力；
+同时防止查询接口泄露模型网关地址和API Key。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/model_capabilities.py`：模型配置能力的严格响应契约和状态一致性校验。
+- `agent-service/app/services/model_capabilities.py`：从校验后Settings投影非敏感模型身份。
+- `agent-service/app/api/model_capabilities.py`、`app/main.py`：只读能力查询路由和应用服务接线。
+
+### 实现的核心功能
+
+- `GET /api/agent/capabilities/model`稳定返回配置状态、Provider和模型名，关闭状态不会保留无效模型身份。
+- Schema拒绝“已启用却没有模型身份”及“已关闭却仍宣称模型身份”的矛盾响应。
+- 能力查询不返回Base URL或API Key，也不发网络请求；它只证明配置通过校验，不证明模型可达或实际参与Run。

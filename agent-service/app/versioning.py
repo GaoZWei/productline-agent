@@ -31,6 +31,7 @@ from app.workflows.action_prompt import ACTION_DECISION_PROMPT_VERSION
 TOOL_SCHEMA_VERSION: Final = "read-tool-schema-v1"
 RAG_STRATEGY_VERSION: Final = "hybrid-rrf-rerank-v1"
 
+
 # 完整快照生成函数
 def build_run_version_snapshot(
     settings: Settings,
@@ -64,8 +65,8 @@ def build_run_version_snapshot(
 
 def _model_snapshot(settings: Settings) -> ModelRuntimeSnapshot:
     """只在模型名称已配置时记录有效参数, 避免把默认供应商冒充实际调用。"""
-
-    if settings.model_name is None:
+    # 模型未启用时, 记录空配置
+    if not settings.model_configured:
         return ModelRuntimeSnapshot(
             configured=False,
             provider=None,
@@ -81,6 +82,7 @@ def _model_snapshot(settings: Settings) -> ModelRuntimeSnapshot:
             "max_output_tokens": settings.model_max_output_tokens,
         },
     )
+
 
 # Tool Schema 版本快照生成函数
 def _tool_schema_snapshot(registry: ToolRegistry) -> ToolSchemaSnapshot:
@@ -99,7 +101,7 @@ def _tool_schema_snapshot(registry: ToolRegistry) -> ToolSchemaSnapshot:
                 "required_permissions": sorted(tool.required_permissions),
             }
         )
-    # 对所有tool的schema进行排序，确保一致的哈希结果
+    # 对所有tool的schema进行排序, 确保一致的哈希结果
     serialized = json.dumps(
         contracts,
         ensure_ascii=False,
