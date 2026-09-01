@@ -19,6 +19,7 @@ from app.api.sessions import router as sessions_router
 from app.api.tool_debug import ToolDebugRunContextStore
 from app.api.tool_debug import router as tool_debug_router
 from app.clients.business import BusinessHttpClient
+from app.clients.model import OpenAICompatibleChatClient
 from app.database import Database
 from app.observability import TraceIdMiddleware, configure_logging
 from app.services import DatabaseApprovalExecutionStore, ModelCapabilityService, RunEventService
@@ -50,9 +51,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         database = Database(resolved_settings.database_url)
         # FastAPI lifespan 创建共享 Business HTTP Client 实例
         business_client = BusinessHttpClient(resolved_settings)
+        model_client = OpenAICompatibleChatClient(resolved_settings)
         # FastAPI 应用级共享状态供路由处理访问数据库和业务客户端。
         application.state.database = database
         application.state.business_client = business_client
+        application.state.model_client = model_client
         application.state.run_event_service = RunEventService()
         # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。
         application.state.tool_registry = create_read_tool_registry(business_client)
@@ -80,9 +83,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await application.state.run_event_service.close()
             finally:
                 try:
-                    await business_client.aclose()
+                    await model_client.aclose()
                 finally:
-                    await database.dispose()
+                    try:
+                        await business_client.aclose()
+                    finally:
+                        await database.dispose()
             logger.info("service_stopped", extra={"service": resolved_settings.service_name})
 
     application = FastAPI(

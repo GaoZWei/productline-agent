@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     model_api_key: SecretStr | None = None  # 访问密钥 本地无鉴权网关允许为空
     model_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 控制生成结果的随机程度
     model_max_output_tokens: int = Field(default=2048, ge=1, le=65536)  # 模型最大输出令牌数
+    model_timeout_seconds: float = Field(default=30.0, gt=0, le=120)  # 单次 HTTP 超时时间
+    model_max_retries: int = Field(default=1, ge=0, le=3)  # 首次请求之外允许的重试次数
+    model_initial_backoff_seconds: float = Field(default=0.2, gt=0, le=10)  # 指数退避边界时间
+    model_max_backoff_seconds: float = Field(default=2.0, gt=0, le=30)
     embedding_provider: Literal["openai_compatible"] = "openai_compatible"
     embedding_model: str = "text-embedding-3-small"
     embedding_base_url: AnyHttpUrl = AnyHttpUrl("https://api.openai.com/v1")
@@ -104,6 +108,11 @@ class Settings(BaseSettings):
 
         if self.model_name is not None and self.model_base_url is None:
             raise ValueError("MODEL_BASE_URL is required when MODEL_NAME is configured")
+        if self.model_max_backoff_seconds < self.model_initial_backoff_seconds:
+            raise ValueError(
+                "MODEL_MAX_BACKOFF_SECONDS must not be smaller than "
+                "MODEL_INITIAL_BACKOFF_SECONDS"
+            )
         return self
     # 判断模型是否已配置启用
     @property

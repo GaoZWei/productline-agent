@@ -63,7 +63,7 @@ from app.schemas.run_history import (
     StepListResponse,
     StepSummary,
 )
-from app.schemas.run_observability import RunTokenUsage
+from app.schemas.run_observability import LLMStepObservation, RunTokenUsage
 from app.schemas.session import (
     PendingActionContext,
     SessionContext,
@@ -139,6 +139,7 @@ __all__ = [
     "Evidence",
     "InformationGap",
     "Intent",
+    "LLMStepObservation",
     "ModelCapabilitiesResponse",
     "ModelRuntimeSnapshot",
     "OperationAfterSummary",

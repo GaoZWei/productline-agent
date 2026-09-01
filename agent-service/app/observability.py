@@ -32,6 +32,8 @@ _LOG_EXTRA_FIELDS = (
     "error_code",
     "embedding_provider",
     "embedding_model",
+    "model_provider",
+    "model_name",
     "index_version",
     "batch_number",
     "retry_number",
@@ -50,6 +52,7 @@ def set_trace_id(trace_id: str) -> Token[str]:
 def reset_trace_id(token: Token[str]) -> None:
     _trace_id.reset(token)
 
+
 # Trace ID 校验函数
 def resolve_trace_id(candidate: str | None) -> str:
     """接受长度受限的安全调用方标识。否则生成新的标识。"""
@@ -57,6 +60,7 @@ def resolve_trace_id(candidate: str | None) -> str:
     if candidate and TRACE_ID_PATTERN.fullmatch(candidate):
         return candidate
     return f"trace-{uuid4()}"
+
 
 # JSON 格式化器方便后续日志系统按字段查询日志。
 class JsonFormatter(logging.Formatter):
@@ -87,6 +91,7 @@ def configure_logging(level: str) -> None:
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(level)
+
 
 # Trace ID 中间件为每个请求绑定一个 Trace ID。
 class TraceIdMiddleware(BaseHTTPMiddleware):

@@ -21,6 +21,7 @@ class RunObservabilitySchema(BaseModel):
 
 class RunTokenUsage(RunObservabilitySchema):
     """一次Run内可归属模型调用的输入、输出和总Token。"""
+
     # 数值必须非负
     input_tokens: RunCount = 0
     output_tokens: RunCount = 0
@@ -43,3 +44,11 @@ class RunTokenUsage(RunObservabilitySchema):
             output_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
         )
+
+# Step 生命周期指标
+class LLMStepObservation(RunObservabilitySchema):
+    """一次LLM Step的模型身份、Token用量和实际重试次数。"""
+
+    model_name: Annotated[str, Field(min_length=1, max_length=128)]
+    token_usage: RunTokenUsage = RunTokenUsage()
+    retry_count: RunCount = 0

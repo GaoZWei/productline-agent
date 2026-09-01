@@ -296,6 +296,11 @@ class AgentStepRepository:
             "output_summary",
             "error_code",
             "duration_ms",
+            "llm_model_name",
+            "llm_input_token_count",
+            "llm_output_token_count",
+            "llm_total_token_count",
+            "llm_retry_count",
         }
         unexpected_changes = set(changes) - allowed_changes
         if unexpected_changes:

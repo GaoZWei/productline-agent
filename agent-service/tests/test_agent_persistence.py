@@ -55,6 +55,7 @@ from app.repositories import (
 )
 from app.schemas import (
     Conclusion,
+    LLMStepObservation,
     PageContext,
     ReviewDraft,
     RouterResult,
@@ -83,10 +84,10 @@ from app.services import (
     DatabaseRunHistoryService,
     InvalidRunTransitionError,
     InvalidStepTransitionError,
+    RunHistoryAccessError,
     RunLifecycleService,
     RunLifecycleValidationError,
     RunNotFoundError,
-    RunHistoryAccessError,
     SessionAccessDeniedError,
     StepLifecycleService,
     StepLifecycleValidationError,
@@ -415,9 +416,14 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "status",
         "input_summary",
         "output_summary",
-        "error_code",
-        "duration_ms",
-        "created_at",
+            "error_code",
+            "duration_ms",
+            "llm_model_name",
+            "llm_input_token_count",
+            "llm_output_token_count",
+            "llm_total_token_count",
+            "llm_retry_count",
+            "created_at",
         "started_at",
         "finished_at",
     }
@@ -2063,6 +2069,65 @@ async def test_step_lifecycle_persists_success_summaries_and_duration(
             assert stored.status is AgentStepStatus.SUCCEEDED
             assert stored.run_id == "run-step-success"
             assert stored.duration_ms == 1250
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_llm_step_observability_persists_structured_metrics(
+    migrated_database_url: str,
+) -> None:
+    started_at = datetime(2026, 8, 31, 4, 0, tzinfo=UTC)
+    finished_at = started_at + timedelta(milliseconds=46)
+    clock_values = iter([started_at, finished_at])
+    database = Database(migrated_database_url)
+    try:
+        async with database.session() as session, session.begin():
+            session.add(AgentSession(session_id="session-llm-metrics", user_id="user-001"))
+            run_repository = AgentRunRepository(session)
+            run_service = RunLifecycleService(run_repository)
+            await run_service.create_run(
+                run_id="run-llm-metrics",
+                session_id="session-llm-metrics",
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            )
+            await run_service.mark_running("run-llm-metrics")
+            step_service = StepLifecycleService(
+                AgentStepRepository(session),
+                run_repository,
+                now=lambda: next(clock_values),
+            )
+            await step_service.start_step(
+                step_id="step-llm-metrics",
+                run_id="run-llm-metrics",
+                sequence_number=1,
+                step_type=AgentStepType.LLM,
+                step_name="route_intent",
+                input_summary="message_length=8",
+            )
+            await step_service.mark_succeeded(
+                "step-llm-metrics",
+                output_summary="structured_output=validated",
+                llm_observation=LLMStepObservation(
+                    model_name="actual-model-version",
+                    token_usage=RunTokenUsage.from_counts(
+                        input_tokens=31,
+                        output_tokens=7,
+                    ),
+                    retry_count=1,
+                ),
+            )
+
+        async with database.session() as verification_session:
+            stored = await AgentStepRepository(verification_session).get("step-llm-metrics")
+            assert stored is not None
+            assert stored.duration_ms == 46
+            assert stored.llm_model_name == "actual-model-version"
+            assert stored.llm_input_token_count == 31
+            assert stored.llm_output_token_count == 7
+            assert stored.llm_total_token_count == 38
+            assert stored.llm_retry_count == 1
     finally:
         await database.dispose()
 

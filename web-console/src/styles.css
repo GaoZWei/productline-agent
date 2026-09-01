@@ -1961,6 +1961,17 @@ input {
 .step-summary-grid small { color: var(--muted); font-size: 9px; }
 .step-summary-grid code { overflow-wrap: anywhere; color: #344054; font-size: 10px; }
 
+.llm-step-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 8px 0 0;
+  color: #475467;
+  font-size: 10px;
+}
+
+.llm-step-metrics small { color: #175cd3; font-weight: 700; }
+
 .step-history-list li > div > footer {
   display: flex;
   justify-content: space-between;

@@ -33,7 +33,7 @@ describe("Run history page", () => {
   it("展示Run详情、Step摘要、规范引用和Approval修改记录", async () => {
     mockedHistory.mockResolvedValue({ items: [runSummary()], page: 1, page_size: 10, total: 1 });
     mockedDetail.mockResolvedValue(runDetail());
-    mockedSteps.mockResolvedValue({ run_id: "run-history-003", items: [toolStep()] });
+    mockedSteps.mockResolvedValue({ run_id: "run-history-003", items: [toolStep(), llmStep()] });
 
     mountPage();
     await settleUi();
@@ -43,6 +43,10 @@ describe("Run history page", () => {
     expect(host?.textContent).toContain("get_quality_issues");
     expect(host?.textContent).toContain("task_id=TASK-003");
     expect(host?.textContent).toContain("issue_count=1");
+    expect(host?.textContent).toContain("actual-model-version");
+    expect(host?.textContent).toContain("输入 31 Token");
+    expect(host?.textContent).toContain("输出 7 Token");
+    expect(host?.textContent).toContain("重试 1 次");
     expect(host?.textContent).toContain("坐标系统处理规范");
     expect(host?.textContent).toContain("用户修改 1 项");
     expect(host?.textContent).toContain("用户确认先完成返工");
@@ -122,9 +126,36 @@ function toolStep(): StepSummary {
     output_summary: "issue_count=1",
     error_code: null,
     duration_ms: 12,
+    model_name: null,
+    input_token_count: null,
+    output_token_count: null,
+    total_token_count: null,
+    retry_count: null,
     created_at: "2026-08-30T02:00:00Z",
     started_at: "2026-08-30T02:00:00Z",
     finished_at: "2026-08-30T02:00:00.012Z",
+  };
+}
+
+function llmStep(): StepSummary {
+  return {
+    step_id: "step-history-llm",
+    sequence_number: 2,
+    step_type: "LLM",
+    step_name: "route_intent",
+    status: "SUCCEEDED",
+    input_summary: "message_length=8",
+    output_summary: "structured_output=validated",
+    error_code: null,
+    duration_ms: 37,
+    model_name: "actual-model-version",
+    input_token_count: 31,
+    output_token_count: 7,
+    total_token_count: 38,
+    retry_count: 1,
+    created_at: "2026-08-30T02:00:00Z",
+    started_at: "2026-08-30T02:00:00Z",
+    finished_at: "2026-08-30T02:00:00.037Z",
   };
 }
 

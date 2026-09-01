@@ -1365,3 +1365,24 @@
 - `GET /api/agent/capabilities/model`稳定返回配置状态、Provider和模型名，关闭状态不会保留无效模型身份。
 - Schema拒绝“已启用却没有模型身份”及“已关闭却仍宣称模型身份”的矛盾响应。
 - 能力查询不返回Base URL或API Key，也不发网络请求；它只证明配置通过校验，不证明模型可达或实际参与Run。
+
+---
+
+## 2026-08-31 — `[T751-T753] M7.6-A 结构化模型调用与LLM Step观测`
+
+### 核心解决的问题
+
+把已校验的模型配置落实为可复用的真实HTTP调用边界，并为每次模型请求提供稳定错误、有限重试和独立Step指标，使后续业务适配器不必各自处理供应商协议或从文本摘要中推断Token和重试情况。
+
+### 实现的核心代码
+
+- `agent-service/app/clients/model.py`：Chat Completions请求、响应外壳、结构化输出、错误映射、有限重试和调用指标。
+- `agent-service/app/services/model_invocation.py`、`app/workflows/recording.py`：模型调用与LLM Step生命周期的观测接线。
+- `agent-service/app/models/agent_runtime.py`、`migrations/versions/0013_llm_step_observability.py`：LLM模型身份、Token和重试次数的独立持久化字段与约束。
+- `agent-service/app/schemas/run_history.py`、`web-console/src/components/RunHistoryPage.vue`：LLM Step指标的受控历史投影与展示。
+
+### 实现的核心功能
+
+- 共享Client向OpenAI兼容`/chat/completions`发送JSON Schema请求，依次校验HTTP状态、响应外壳、纯JSON正文和调用方Pydantic Schema。
+- 未配置、超时、上游不可用、限流、鉴权、非法请求、非法响应和非法输出使用稳定错误码区分；仅瞬时错误按配置有限退避重试，错误文案不复制供应商正文。
+- LLM Step成功时保存实际响应模型名、自洽输入/输出/总Token、耗时和重试次数，失败时保存稳定错误及可确认指标；Prompt、模型正文和凭据不落库，业务Protocol仍留待后续批次适配。

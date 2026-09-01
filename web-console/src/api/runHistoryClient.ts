@@ -148,6 +148,11 @@ function isStepSummary(value: unknown): value is StepSummary {
     isNullableString(value.output_summary) &&
     isNullableString(value.error_code) &&
     isNullableNonnegativeInteger(value.duration_ms) &&
+    isNullableString(value.model_name) &&
+    isNullableNonnegativeInteger(value.input_token_count) &&
+    isNullableNonnegativeInteger(value.output_token_count) &&
+    isNullableNonnegativeInteger(value.total_token_count) &&
+    isNullableNonnegativeInteger(value.retry_count) &&
     isString(value.created_at) &&
     isNullableString(value.started_at) &&
     isNullableString(value.finished_at)

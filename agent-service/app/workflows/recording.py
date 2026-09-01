@@ -9,6 +9,7 @@ from app.eventing import RunEventSink
 from app.models import AgentStepType
 from app.repositories import AgentRunRepository, AgentStepRepository
 from app.schemas.events import RunEventType
+from app.schemas.run_observability import LLMStepObservation
 
 if TYPE_CHECKING:
     from app.services.step_lifecycle import StepLifecycleService
@@ -129,6 +130,48 @@ class DatabaseWorkflowStepRecorder:
                 step_id,
                 error_code=error_code,
                 output_summary=output_summary,
+            )
+
+    async def mark_llm_succeeded(
+        self,
+        step_id: str,
+        *,
+        output_summary: str | None,
+        observation: LLMStepObservation,
+    ) -> None:
+        """在LLM Step成功终态保存模型、Token和实际重试次数。"""
+
+        async with self._database.session() as session, session.begin():
+            service = _step_lifecycle_service(
+                AgentStepRepository(session),
+                AgentRunRepository(session),
+            )
+            await service.mark_succeeded(
+                step_id,
+                output_summary=output_summary,
+                llm_observation=observation,
+            )
+
+    async def mark_llm_failed(
+        self,
+        step_id: str,
+        *,
+        error_code: str,
+        output_summary: str | None,
+        observation: LLMStepObservation | None,
+    ) -> None:
+        """保存LLM失败码, 实际发出过请求时同时保存可得调用指标。"""
+
+        async with self._database.session() as session, session.begin():
+            service = _step_lifecycle_service(
+                AgentStepRepository(session),
+                AgentRunRepository(session),
+            )
+            await service.mark_failed(
+                step_id,
+                error_code=error_code,
+                output_summary=output_summary,
+                llm_observation=observation,
             )
 
 

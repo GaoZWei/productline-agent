@@ -7,6 +7,7 @@ from typing import Any
 
 from app.models import AgentRunStatus, AgentStep, AgentStepStatus, AgentStepType
 from app.repositories import AgentRunRepository, AgentStepRepository
+from app.schemas.run_observability import LLMStepObservation
 
 STEP_SUMMARY_MAX_LENGTH = 1000
 _SUMMARY_REDACTION = "[REDACTED]"
@@ -151,6 +152,7 @@ class StepLifecycleService:
         step_id: str,
         *,
         output_summary: str | None = None,
+        llm_observation: LLMStepObservation | None = None,
     ) -> AgentStep:
         """仅允许 RUNNING Step成功结束并保存受控输出摘要。"""
 
@@ -160,7 +162,9 @@ class StepLifecycleService:
             changes={
                 "output_summary": self._normalize_summary(output_summary, "output_summary"),
                 "error_code": None,
+                **self._llm_changes(llm_observation),
             },
+            llm_observation=llm_observation,
         )
     # 标记失败
     async def mark_failed(
@@ -169,6 +173,7 @@ class StepLifecycleService:
         *,
         error_code: str,
         output_summary: str | None = None,
+        llm_observation: LLMStepObservation | None = None,
     ) -> AgentStep:
         """仅允许 RUNNING Step失败结束并保存机器错误码和受控摘要。"""
 
@@ -179,7 +184,9 @@ class StepLifecycleService:
             changes={
                 "output_summary": self._normalize_summary(output_summary, "output_summary"),
                 "error_code": normalized_error_code,
+                **self._llm_changes(llm_observation),
             },
+            llm_observation=llm_observation,
         )
     # 公共结束逻辑
     async def _finish(
@@ -188,6 +195,7 @@ class StepLifecycleService:
         *,
         target_status: AgentStepStatus,
         changes: Mapping[str, Any],
+        llm_observation: LLMStepObservation | None = None,
     ) -> AgentStep:
         """计算耗时并以 compare-and-set原子抢占唯一终态。"""
 
@@ -202,6 +210,11 @@ class StepLifecycleService:
                 step_id=normalized_step_id,
                 current_status=current.status,
                 target_status=target_status,
+            )
+        if llm_observation is not None and current.step_type is not AgentStepType.LLM:
+            raise StepLifecycleValidationError(
+                field_name="llm_observation",
+                message="is only allowed for an LLM step",
             )
         if current.started_at is None:
             raise StepLifecycleValidationError(
@@ -238,6 +251,21 @@ class StepLifecycleService:
             target_status=target_status,
         )
 
+    @staticmethod
+    def _llm_changes(observation: LLMStepObservation | None) -> dict[str, Any]:
+        """将强类型LLM观测投影为独立数据库字段。"""
+
+        if observation is None:
+            return {}
+        usage = observation.token_usage
+        return {
+            "llm_model_name": observation.model_name,
+            "llm_input_token_count": usage.input_tokens,
+            "llm_output_token_count": usage.output_tokens,
+            "llm_total_token_count": usage.total_tokens,
+            "llm_retry_count": observation.retry_count,
+        }
+
     def _timestamp(self) -> datetime:
         """拒绝无时区时间, 避免不同部署环境产生含糊执行时间。"""
 
@@ -265,7 +293,7 @@ class StepLifecycleService:
                 message=f"must contain at most {max_length} characters",
             )
         return normalized
-    # 摘要: 摘要处理（写入step前进行处理）
+    # 摘要: 摘要处理(写入step前进行处理)
     @staticmethod
     def _normalize_summary(value: str | None, field_name: str) -> str | None:
         """压缩空白、遮盖常见凭据并截断摘要, 但不保存原始载荷。"""

@@ -139,6 +139,36 @@ def test_step_summary_keeps_only_controlled_tool_input_and_output() -> None:
 
 
 @pytest.mark.unit
+def test_step_summary_exposes_structured_llm_metrics_without_model_content() -> None:
+    step = AgentStep(
+        step_id="step-history-llm",
+        run_id="run-history-safe",
+        sequence_number=3,
+        step_type=AgentStepType.LLM,
+        step_name="route_intent",
+        status=AgentStepStatus.SUCCEEDED,
+        input_summary="message_length=8",
+        output_summary="structured_output=validated",
+        duration_ms=37,
+        llm_model_name="actual-model-version",
+        llm_input_token_count=31,
+        llm_output_token_count=7,
+        llm_total_token_count=38,
+        llm_retry_count=1,
+        created_at=datetime(2026, 8, 30, 1, 0, tzinfo=UTC),
+    )
+
+    summary = step_summary_from_record(step)
+
+    assert summary.model_name == "actual-model-version"
+    assert summary.input_token_count == 31
+    assert summary.output_token_count == 7
+    assert summary.total_token_count == 38
+    assert summary.retry_count == 1
+    assert "model content" not in repr(summary)
+
+
+@pytest.mark.unit
 def test_approval_history_preserves_original_and_effective_draft_with_diff() -> None:
     original = _review_draft("Agent原始意见")
     modified = _review_draft("用户确认先完成返工")

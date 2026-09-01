@@ -78,3 +78,24 @@ def test_unsupported_model_provider_is_rejected(monkeypatch: pytest.MonkeyPatch)
 
     with pytest.raises(ValidationError, match="openai_compatible"):
         Settings(environment="test")
+
+
+@pytest.mark.unit
+def test_model_retry_backoff_and_timeout_are_bounded() -> None:
+    settings = Settings(
+        environment="test",
+        model_timeout_seconds=12.5,
+        model_max_retries=3,
+        model_initial_backoff_seconds=0.5,
+        model_max_backoff_seconds=1.0,
+    )
+
+    assert settings.model_timeout_seconds == 12.5
+    assert settings.model_max_retries == 3
+
+    with pytest.raises(ValidationError, match="must not be smaller"):
+        Settings(
+            environment="test",
+            model_initial_backoff_seconds=2.0,
+            model_max_backoff_seconds=1.0,
+        )

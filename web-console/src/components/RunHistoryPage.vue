@@ -273,6 +273,12 @@ function formatDiffValue(value: ApprovalFieldChange["before"]) {
                     <p v-if="step.input_summary"><small>输入摘要</small><code>{{ step.input_summary }}</code></p>
                     <p v-if="step.output_summary"><small>输出摘要</small><code>{{ step.output_summary }}</code></p>
                   </div>
+                  <p v-if="step.model_name" class="llm-step-metrics">
+                    <small>模型 {{ step.model_name }}</small>
+                    <span>输入 {{ step.input_token_count ?? 0 }} Token</span>
+                    <span>输出 {{ step.output_token_count ?? 0 }} Token</span>
+                    <span>重试 {{ step.retry_count ?? 0 }} 次</span>
+                  </p>
                   <footer>
                     <span>{{ formatDuration(step.duration_ms) }}</span>
                     <code v-if="step.error_code">{{ step.error_code }}</code>

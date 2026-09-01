@@ -119,3 +119,30 @@ def test_json_formatter_includes_embedding_retry_fields() -> None:
     assert payload["retry_number"] == 1
     assert payload["retry_delay_ms"] == 200.0
     assert payload["error_code"] == "EMBEDDING_RATE_LIMITED"
+
+
+@pytest.mark.unit
+def test_json_formatter_includes_model_retry_fields_without_request_content() -> None:
+    record = logging.LogRecord(
+        name="app.clients.model",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=128,
+        msg="model_retry_scheduled",
+        args=(),
+        exc_info=None,
+    )
+    record.model_provider = "openai_compatible"
+    record.model_name = "structured-model"
+    record.retry_number = 1
+    record.retry_delay_ms = 200.0
+    record.error_code = "MODEL_TIMEOUT"
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["model_provider"] == "openai_compatible"
+    assert payload["model_name"] == "structured-model"
+    assert payload["retry_number"] == 1
+    assert payload["retry_delay_ms"] == 200.0
+    assert payload["error_code"] == "MODEL_TIMEOUT"
+    assert "messages" not in payload

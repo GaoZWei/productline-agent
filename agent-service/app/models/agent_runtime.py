@@ -285,6 +285,21 @@ class AgentStep(Base):
         CheckConstraint(
             "duration_ms IS NULL OR duration_ms >= 0", name="ck_agent_steps_duration_nonnegative"
         ),
+        CheckConstraint(
+            "(llm_input_token_count IS NULL AND llm_output_token_count IS NULL AND "
+            "llm_total_token_count IS NULL) OR ("
+            "llm_input_token_count >= 0 AND llm_output_token_count >= 0 AND "
+            "llm_total_token_count = llm_input_token_count + llm_output_token_count)",
+            name="ck_agent_steps_llm_token_counts",
+        ),
+        CheckConstraint(
+            "llm_retry_count IS NULL OR llm_retry_count >= 0",
+            name="ck_agent_steps_llm_retry_count_nonnegative",
+        ),
+        CheckConstraint(
+            "llm_model_name IS NULL OR char_length(llm_model_name) > 0",
+            name="ck_agent_steps_llm_model_not_blank",
+        ),
         # 保证同一个Run内步骤顺序唯一
         UniqueConstraint("run_id", "sequence_number", name="uq_agent_steps_run_sequence"),
     )
@@ -315,6 +330,12 @@ class AgentStep(Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 执行耗时 步骤未完成时可以是NULL, 完成后必须是非负数
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 仅LLM Step写入; 历史Step和其他类型保持NULL, 避免在摘要文本中解析指标。
+    llm_model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    llm_input_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    llm_output_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    llm_total_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    llm_retry_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

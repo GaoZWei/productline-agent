@@ -88,6 +88,11 @@ export interface StepSummary {
   output_summary: string | null;
   error_code: string | null;
   duration_ms: number | null;
+  model_name: string | null;
+  input_token_count: number | null;
+  output_token_count: number | null;
+  total_token_count: number | null;
+  retry_count: number | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

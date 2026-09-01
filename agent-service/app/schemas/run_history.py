@@ -108,6 +108,11 @@ class StepSummary(RunHistorySchema):
     output_summary: Annotated[str, Field(min_length=1, max_length=4096)] | None = None
     error_code: RunHistoryCode | None = None
     duration_ms: RunHistoryCount | None = None
+    model_name: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    input_token_count: RunHistoryCount | None = None
+    output_token_count: RunHistoryCount | None = None
+    total_token_count: RunHistoryCount | None = None
+    retry_count: RunHistoryCount | None = None
     created_at: AwareDatetime
     started_at: AwareDatetime | None = None
     finished_at: AwareDatetime | None = None

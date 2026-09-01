@@ -5,8 +5,8 @@ M3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库
 只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
 Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由Prompt契约、固定LangGraph数据加载节点、
-确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，尚未包含
-具体模型供应商适配或统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
+确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，公共OpenAI兼容
+Chat Client已经可发出严格结构化请求，但尚未把具体业务模型适配器或统一路由HTTP入口接到该Client。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
 全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
 固定1536维pgvector入库和索引版本记录，M4.5～M4.12已实现中文关键词、同版本余弦检索、统一元数据门禁、
 RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测，但尚无具体问答/Rerank供应商、统一路由HTTP
@@ -32,12 +32,25 @@ Base URL、1536维度、批大小、超时、重试和索引版本均可通过�
 
 结构化对话模型默认关闭：`MODEL_NAME`为空时，即使预先提供地址或密钥也不会被标记为已配置。启用时必须同时提供
 `MODEL_BASE_URL`，`MODEL_PROVIDER`固定为`openai_compatible`并兼容旧值`openai`；本地无鉴权网关允许
-`MODEL_API_KEY`为空，非空密钥使用`SecretStr`保存且不得进入日志或版本快照。T749只建立配置边界，具体HTTP调用
-将在T751接入。
+`MODEL_API_KEY`为空，非空密钥使用`SecretStr`保存且不得进入日志或版本快照。调用超时、额外重试次数和指数退避可通过
+`MODEL_TIMEOUT_SECONDS`、`MODEL_MAX_RETRIES`、`MODEL_INITIAL_BACKOFF_SECONDS`及
+`MODEL_MAX_BACKOFF_SECONDS`设置；默认只额外重试一次明确瞬时失败。
 
 T750提供`GET /api/agent/capabilities/model`查询安全的模型配置能力。模型关闭时返回
 `{"configured":false,"provider":null,"model_name":null}`；启用时只增加Provider和模型名，不返回Base URL或
 API Key。该结果只证明配置通过校验，不探测模型网络，也不代表某次Run已经调用模型。
+
+## 结构化模型调用与LLM Step
+
+`app.clients.model.OpenAICompatibleChatClient`复用应用生命周期内的HTTP连接池，调用OpenAI兼容
+`POST /chat/completions`并使用`response_format=json_schema`请求严格结构化输出。供应商成功响应必须包含唯一选择、
+助手JSON正文和自洽Token用量，正文还要通过调用方Pydantic Schema；未配置、超时、瞬时上游失败、限流、鉴权、
+非法请求、响应外壳错误及输出JSON/Schema错误使用稳定机器码区分，异常文案不会复制供应商响应。
+
+只有超时、网络错误、HTTP 408/425/429及5xx会按配置有限退避重试，参数、鉴权、非法响应和非法结构化输出不会重试。
+`ObservedModelInvoker`在真实请求边界创建`LLM` Step，成功时保存供应商实际返回的模型名、输入/输出/总Token、耗时和
+实际重试次数，失败时保存稳定错误码及能够确认的配置模型名与重试次数；Prompt、模型正文、API Key和供应商错误正文
+均不进入Step。Run历史接口和页面会展示这些独立指标，但当前业务Protocol尚未接线，因此固定诊断仍不调用该Client。
 
 ## Java HTTP Client
 
