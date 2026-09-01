@@ -5,6 +5,11 @@ from collections.abc import Mapping
 import pytest
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, SecretStr
 
+from app.model_adapters import (
+    RERANK_PROMPT_VERSION,
+    REVIEW_DRAFT_PROMPT_VERSION,
+    SPECIFICATION_ANSWER_PROMPT_VERSION,
+)
 from app.routing.prompt import ROUTER_PROMPT_VERSION
 from app.schemas.versioning import (
     RunVersionSnapshot,
@@ -90,6 +95,11 @@ def test_version_snapshot_records_all_components_without_inventing_model() -> No
     assert snapshot.rag_strategy is not None
     assert snapshot.rag_strategy.version == RAG_STRATEGY_VERSION
     assert snapshot.rag_strategy.embedding_index_version == settings.embedding_index_version
+    assert snapshot.rag_strategy.parameters["rerank_prompt_version"] == RERANK_PROMPT_VERSION
+    assert (
+        snapshot.rag_strategy.parameters["specification_answer_prompt_version"]
+        == SPECIFICATION_ANSWER_PROMPT_VERSION
+    )
     serialized = snapshot.model_dump_json()
     assert "do-not-persist" not in serialized
     assert "api_key" not in serialized
@@ -117,6 +127,11 @@ def test_configured_model_name_and_non_sensitive_parameters_are_frozen() -> None
     assert snapshot.model.parameters == {
         "temperature": 0.2,
         "max_output_tokens": 4096,
+        "timeout_seconds": 30.0,
+        "max_retries": 1,
+        "initial_backoff_seconds": 0.2,
+        "max_backoff_seconds": 2.0,
+        "review_draft_prompt_version": REVIEW_DRAFT_PROMPT_VERSION,
     }
 
 

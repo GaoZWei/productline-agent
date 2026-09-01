@@ -50,7 +50,18 @@ API Key。该结果只证明配置通过校验，不探测模型网络，也不�
 只有超时、网络错误、HTTP 408/425/429及5xx会按配置有限退避重试，参数、鉴权、非法响应和非法结构化输出不会重试。
 `ObservedModelInvoker`在真实请求边界创建`LLM` Step，成功时保存供应商实际返回的模型名、输入/输出/总Token、耗时和
 实际重试次数，失败时保存稳定错误码及能够确认的配置模型名与重试次数；Prompt、模型正文、API Key和供应商错误正文
-均不进入Step。Run历史接口和页面会展示这些独立指标，但当前业务Protocol尚未接线，因此固定诊断仍不调用该Client。
+均不进入Step。Run历史接口和页面会展示这些独立指标；具体Protocol适配器见下节，但尚未装配到统一生产入口，因此固定诊断仍不调用该Client。
+
+## 现有模型Protocol适配器
+
+`app.model_adapters`在公共Client之上分别实现Router、动态Action、规范回答、Rerank和Review草稿五个既有Protocol。
+Router和Action适配器原样复用已有版本化System Prompt与JSON数据载荷，并拒绝Prompt声明的响应Schema与唯一Pydantic
+契约漂移；另外三个适配器使用各自版本化指令，只把对应请求数据转换为两条Chat消息，不共享业务语义。
+
+适配器只返回已经过公共Client校验的`RouterResult`、`ActionDecision`、`SpecificationAnswerDraft`、`RerankResponse`
+或`ReviewDraft`候选。用户原文实体证据、注册表LOW风险和资源身份、citation_id白名单、全部候选覆盖以及草稿任务、问题、
+引用白名单仍由原组件二次校验；Review适配器不会取得Tool、Store或Approval执行入口。当前五个适配器可由内部组件注入，
+但统一Agent HTTP入口和生产Skill装配仍留在M7.6-D～F，因此固定诊断API的行为不变。
 
 ## Java HTTP Client
 

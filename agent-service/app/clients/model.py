@@ -174,7 +174,7 @@ class OpenAICompatibleChatClient:
         output_schema: type[OutputT],
     ) -> StructuredModelResult[OutputT]:
         """请求严格JSON Schema输出, 并返回校验结果与实际调用指标。"""
-
+        # 检查模型是否已配置
         if self._client is None or self._settings.model_name is None:
             raise ModelClientError(
                 code=ModelErrorCode.NOT_CONFIGURED,
@@ -186,7 +186,7 @@ class OpenAICompatibleChatClient:
             raise ValueError("at least one chat message is required")
         if not issubclass(output_schema, BaseModel):
             raise TypeError("output_schema must be a Pydantic BaseModel type")
-
+        # 请求体构建
         request_body = {
             "model": self._settings.model_name,
             "messages": [message.model_dump(mode="json") for message in normalized_messages],
@@ -205,10 +205,13 @@ class OpenAICompatibleChatClient:
         retry_count = 0
         while True:
             try:
+                # 调用 /chat/completions 
                 response = await self._client.post("chat/completions", json=request_body)
+                # 校验HTTP响应外壳是否符合预期
                 payload = self._parse_response(response)
                 output = self._parse_output(payload, output_schema)
                 duration_ms = max(0, int((self._clock() - started_at) * 1000))
+                # 返回模型名、Token、耗时和重试次数
                 return StructuredModelResult(
                     output=output,
                     model_name=payload.model,
@@ -219,6 +222,7 @@ class OpenAICompatibleChatClient:
                     duration_ms=duration_ms,
                     retry_count=retry_count,
                 )
+            # 只对超时、限流、5xx等瞬时错误有限重试
             except ModelClientError as exc:
                 if not exc.retryable or retry_count >= self._settings.model_max_retries:
                     raise exc.after_retries(retry_count) from exc

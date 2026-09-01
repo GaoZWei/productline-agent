@@ -1386,3 +1386,24 @@
 - 共享Client向OpenAI兼容`/chat/completions`发送JSON Schema请求，依次校验HTTP状态、响应外壳、纯JSON正文和调用方Pydantic Schema。
 - 未配置、超时、上游不可用、限流、鉴权、非法请求、非法响应和非法输出使用稳定错误码区分；仅瞬时错误按配置有限退避重试，错误文案不复制供应商正文。
 - LLM Step成功时保存实际响应模型名、自洽输入/输出/总Token、耗时和重试次数，失败时保存稳定错误及可确认指标；Prompt、模型正文和凭据不落库，业务Protocol仍留待后续批次适配。
+
+---
+
+## 2026-09-01 — `[T754-T758] M7.6-B 现有模型协议适配`
+
+### 核心解决的问题
+
+把Router、动作决策、规范回答、Rerank和Review草稿五种既有模型Protocol分别接到公共结构化Client，避免各业务组件重复实现供应商HTTP协议，也避免一个通用适配器混淆不同业务语义和权限边界。
+
+### 实现的核心代码
+
+- `agent-service/app/model_adapters.py`：五类单一职责适配器、版本化系统Prompt、输入JSON序列化和Prompt Schema一致性校验。
+- `agent-service/app/versioning.py`：把规范回答、Rerank和Review草稿Prompt版本及模型重试参数纳入可重放版本快照。
+- `agent-service/tests/test_model_adapters.py`：公共Client请求、五类业务载荷和既有确定性门禁的组合测试。
+- `Makefile`：模型协议适配独立验收入口。
+
+### 实现的核心功能
+
+- 五类适配器统一发送system与data消息，并把各自严格Pydantic Schema交给公共Client；输入作为JSON数据处理，不从候选内容中执行指令。
+- Router实体证据、Action注册表与参数、回答引用ID、Rerank候选完整性及Review草稿事实关联仍由原组件二次校验，结构合法但业务越界的输出不会被直接采用。
+- Review草稿适配器只生成候选草稿，不持有Tool注册表、Approval Store或执行能力；本批次不新增生产API和业务写入。

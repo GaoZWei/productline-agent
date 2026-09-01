@@ -16,6 +16,11 @@ from app.knowledge.retrieval import (
     DEFAULT_HYBRID_TOP_K,
     DEFAULT_MIN_VECTOR_SIMILARITY,
 )
+from app.model_adapters import (
+    RERANK_PROMPT_VERSION,
+    REVIEW_DRAFT_PROMPT_VERSION,
+    SPECIFICATION_ANSWER_PROMPT_VERSION,
+)
 from app.routing.prompt import ROUTER_PROMPT_VERSION
 from app.schemas.versioning import (
     ModelRuntimeSnapshot,
@@ -29,7 +34,7 @@ from app.tools import ToolRegistry
 from app.workflows.action_prompt import ACTION_DECISION_PROMPT_VERSION
 
 TOOL_SCHEMA_VERSION: Final = "read-tool-schema-v1"
-RAG_STRATEGY_VERSION: Final = "hybrid-rrf-rerank-v1"
+RAG_STRATEGY_VERSION: Final = "hybrid-rrf-rerank-v2"
 
 
 # 完整快照生成函数
@@ -58,6 +63,8 @@ def build_run_version_snapshot(
                 "rrf_rank_constant": RRF_RANK_CONSTANT,
                 "rerank_timeout_seconds": DEFAULT_RERANK_TIMEOUT_SECONDS,
                 "min_relevance_score": DEFAULT_MIN_RELEVANCE_SCORE,
+                "rerank_prompt_version": RERANK_PROMPT_VERSION,
+                "specification_answer_prompt_version": (SPECIFICATION_ANSWER_PROMPT_VERSION),
             },
         ),
     )
@@ -80,6 +87,11 @@ def _model_snapshot(settings: Settings) -> ModelRuntimeSnapshot:
         parameters={
             "temperature": settings.model_temperature,
             "max_output_tokens": settings.model_max_output_tokens,
+            "timeout_seconds": settings.model_timeout_seconds,
+            "max_retries": settings.model_max_retries,
+            "initial_backoff_seconds": settings.model_initial_backoff_seconds,
+            "max_backoff_seconds": settings.model_max_backoff_seconds,
+            "review_draft_prompt_version": REVIEW_DRAFT_PROMPT_VERSION,
         },
     )
 
