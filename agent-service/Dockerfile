@@ -7,12 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /service
 COPY --from=uv /uv /uvx /bin/
-COPY pyproject.toml uv.lock .python-version ./
+COPY agent-service/pyproject.toml agent-service/uv.lock agent-service/.python-version ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY app ./app
-COPY migrations ./migrations
-COPY alembic.ini ./alembic.ini
+COPY agent-service/app ./app
+COPY agent-service/migrations ./migrations
+COPY agent-service/alembic.ini ./alembic.ini
+COPY knowledge-base /knowledge-base
 
 EXPOSE 8000
 CMD ["/service/.venv/bin/python", "-m", "app.main"]

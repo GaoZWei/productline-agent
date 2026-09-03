@@ -42,7 +42,8 @@ services:
   # python 服务
   agent-service:
     build:
-      context: ./agent-service
+      context: .
+      dockerfile: agent-service/Dockerfile
     environment:
       PORT: 8000
       ENVIRONMENT: development

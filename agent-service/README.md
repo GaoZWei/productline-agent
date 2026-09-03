@@ -6,11 +6,11 @@ M3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库
 包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
 Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由Prompt契约、固定LangGraph数据加载节点、
 确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，公共OpenAI兼容
-Chat Client已经可发出严格结构化请求，但尚未把具体业务模型适配器或统一路由HTTP入口接到该Client。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
+Chat Client及五类业务模型适配器已经可发出严格结构化请求，但尚未接入统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
 全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
 固定1536维pgvector入库和索引版本记录，M4.5～M4.12已实现中文关键词、同版本余弦检索、统一元数据门禁、
-RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测，但尚无具体问答/Rerank供应商、统一路由HTTP
-入口或全目录执行入口。M5.1～M5.4已扩展动态诊断状态、实现结构化动作决策、可回环LangGraph执行图和
+RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测；M7.6-C又提供显式全目录入库命令和
+索引就绪查询，但尚未接入统一路由HTTP入口。M5.1～M5.4已扩展动态诊断状态、实现结构化动作决策、可回环LangGraph执行图和
 确定性执行限制，但尚无具体动作模型供应商。M6.1～M6.8已加入Approval生命周期、严格复核草稿、安全草稿生成、
 执行结果持久化、不暴露给动态模型的复核/返工写Tool、确认HTTP接口、与终态原子提交的Agent操作日志，以及覆盖
 未确认、修改、重复、取消、过期、事实变化、无权限和Java异常的安全验收矩阵。
@@ -62,6 +62,27 @@ Router和Action适配器原样复用已有版本化System Prompt与JSON数据载
 或`ReviewDraft`候选。用户原文实体证据、注册表LOW风险和资源身份、citation_id白名单、全部候选覆盖以及草稿任务、问题、
 引用白名单仍由原组件二次校验；Review适配器不会取得Tool、Store或Approval执行入口。当前五个适配器可由内部组件注入，
 但统一Agent HTTP入口和生产Skill装配仍留在M7.6-D～F，因此固定诊断API的行为不变。
+
+## 知识库全量入库与就绪能力
+
+M7.6-C把现有catalog校验、UTF-8 Loader、标题分块、批量Embedding和`KnowledgeIndexRepository`串成
+`KnowledgeIngestionService`。服务会先在内存完成16份文档、80个Chunk和全部向量的校验，全部成功后才在调用方
+事务中清理目录外旧文档并替换当前目录的Chunk；重复执行得到相同Chunk身份，不会追加重复记录。
+
+入库只通过显式运维命令触发，Agent启动和能力查询都不会访问Embedding Provider：
+
+```bash
+# 在根目录.env中配置EMBEDDING_API_KEY及需要覆盖的EMBEDDING_*参数后执行
+make knowledge-ingest
+```
+
+命令会确保PostgreSQL已启动、执行Alembic迁移、构建包含`/knowledge-base`的Agent镜像，再运行一次全量入库。
+成功时只输出文档数、Chunk数、清理数量和非敏感索引身份；目录/配置错误、Embedding错误和持久化错误分别使用
+退出码2、3和4，输出不包含正文、向量、密钥或供应商响应。
+
+`GET /api/agent/capabilities/knowledge-index`只读取文档级统计，返回`NOT_INDEXED`、`INCOMPLETE`、
+`INDEX_MISMATCH`或`READY`。只有数据库中的文档身份与当前16份catalog完全一致、每份文档至少有一个Chunk，且
+所有文档的Provider、模型、1536维度和索引版本均与当前配置一致时才返回`ready=true`；该查询不会探测外部网络。
 
 ## Java HTTP Client
 

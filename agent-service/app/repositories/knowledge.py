@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.knowledge import EmbeddingGeneration, ProcessedDocument, build_search_document
@@ -15,6 +16,32 @@ from app.schemas.knowledge import EMBEDDING_DIMENSION, DocumentLifecycle
 
 class KnowledgeIndexValidationError(ValueError):
     """处理结果、向量或索引身份不满足原子入库契约。"""
+
+
+@dataclass(frozen=True, slots=True)
+class StoredKnowledgeDocumentIndex:
+    """一份已存文档的Chunk数量和可空索引身份。"""
+
+    document_id: str
+    chunk_count: int
+    embedding_provider: str | None
+    embedding_model: str | None
+    embedding_dimension: int | None
+    index_version: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeIndexState:
+    """能力检查所需的全部文档级索引状态。"""
+
+    documents: tuple[StoredKnowledgeDocumentIndex, ...]
+
+    @property
+    def chunk_count(self) -> int:
+        """汇总当前数据库中的Chunk数量。"""
+
+        return sum(document.chunk_count for document in self.documents)
+
 
 # 把“本次处理得到的文档、Chunk和Embedding”完整同步到数据库, 旧索引存在时进行整体替换
 class KnowledgeIndexRepository:
@@ -30,8 +57,73 @@ class KnowledgeIndexRepository:
             select(KnowledgeDocument.content_hash, KnowledgeDocument.document_id)
         )
         return {content_hash: document_id for content_hash, document_id in rows}
-    
-    # 核心重新索引算法    
+    # 删除已经不在当前 catalog.json 中的旧文档
+    async def prune_documents_not_in(self, document_ids: Sequence[str]) -> int:
+        """全量目录入库时删除不再属于目录的文档, 由同一事务保证可回滚。"""
+
+        normalized_ids = tuple(document_ids)
+        if not normalized_ids or len(normalized_ids) != len(set(normalized_ids)):
+            raise KnowledgeIndexValidationError("catalog document ids must be non-empty and unique")
+        removed_count = await self._session.scalar(
+            select(func.count())
+            .select_from(KnowledgeDocument)
+            .where(KnowledgeDocument.document_id.not_in(normalized_ids))
+        )
+        await self._session.execute(
+            delete(KnowledgeDocument).where(KnowledgeDocument.document_id.not_in(normalized_ids))
+        )
+        await self._session.flush()
+        return int(removed_count or 0)
+
+    async def get_index_state(self) -> KnowledgeIndexState:
+        """按文档返回Chunk数量和索引身份, 不读取正文或向量。"""
+
+        rows = (
+            await self._session.execute(
+                select(
+                    KnowledgeDocument.document_id,
+                    func.count(KnowledgeChunk.chunk_id),
+                    KnowledgeDocument.embedding_provider,
+                    KnowledgeDocument.embedding_model,
+                    KnowledgeDocument.embedding_dimension,
+                    KnowledgeDocument.index_version,
+                )
+                .outerjoin(
+                    KnowledgeChunk,
+                    KnowledgeChunk.document_id == KnowledgeDocument.document_id,
+                )
+                .group_by(
+                    KnowledgeDocument.document_id,
+                    KnowledgeDocument.embedding_provider,
+                    KnowledgeDocument.embedding_model,
+                    KnowledgeDocument.embedding_dimension,
+                    KnowledgeDocument.index_version,
+                )
+                .order_by(KnowledgeDocument.document_id)
+            )
+        ).all()
+        return KnowledgeIndexState(
+            documents=tuple(
+                StoredKnowledgeDocumentIndex(
+                    document_id=document_id,
+                    chunk_count=chunk_count,
+                    embedding_provider=embedding_provider,
+                    embedding_model=embedding_model,
+                    embedding_dimension=embedding_dimension,
+                    index_version=index_version,
+                )
+                for (
+                    document_id,
+                    chunk_count,
+                    embedding_provider,
+                    embedding_model,
+                    embedding_dimension,
+                    index_version,
+                ) in rows
+            )
+        )
+
+    # 核心重新索引算法
     async def reindex_documents(
         self,
         documents: Sequence[ProcessedDocument],
@@ -138,8 +230,7 @@ class KnowledgeIndexRepository:
             raise KnowledgeIndexValidationError("processed documents contain duplicate chunk_id")
         for document in documents:
             if not document.chunks or any(
-                chunk.document_id != document.metadata.document_id
-                for chunk in document.chunks
+                chunk.document_id != document.metadata.document_id for chunk in document.chunks
             ):
                 raise KnowledgeIndexValidationError("chunk ownership does not match document")
             if [chunk.chunk_index for chunk in document.chunks] != list(
@@ -159,9 +250,6 @@ class KnowledgeIndexRepository:
             for vector in embeddings_by_id.values()
         ):
             raise KnowledgeIndexValidationError("embedding vector is invalid")
-        if (
-            generation.generated_at.tzinfo is None
-            or generation.generated_at.utcoffset() is None
-        ):
+        if generation.generated_at.tzinfo is None or generation.generated_at.utcoffset() is None:
             raise KnowledgeIndexValidationError("indexed_at must be timezone-aware")
         return embeddings_by_id

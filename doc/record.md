@@ -1407,3 +1407,24 @@
 - 五类适配器统一发送system与data消息，并把各自严格Pydantic Schema交给公共Client；输入作为JSON数据处理，不从候选内容中执行指令。
 - Router实体证据、Action注册表与参数、回答引用ID、Rerank候选完整性及Review草稿事实关联仍由原组件二次校验，结构合法但业务越界的输出不会被直接采用。
 - Review草稿适配器只生成候选草稿，不持有Tool注册表、Approval Store或执行能力；本批次不新增生产API和业务写入。
+
+---
+
+## 2026-09-01 — `[T759-T761] M7.6-C 知识库可运行入库`
+
+### 核心解决的问题
+
+把已经独立存在的目录校验、文档解析、分块、Embedding和Repository组合成可主动执行的全量入库链路，并提供索引就绪状态，避免服务启动隐式访问外部Provider或仅凭配置推断RAG已经可用。
+
+### 实现的核心代码
+
+- `agent-service/app/services/knowledge_ingestion.py`、`app/cli/knowledge_ingest.py`：全目录处理、全部向量先成功、事务内重建和稳定CLI退出码。
+- `agent-service/app/repositories/knowledge.py`：目录外文档清理及不读取正文/向量的文档级索引统计。
+- `agent-service/app/services/knowledge_index_capabilities.py`、`app/api/knowledge_index_capabilities.py`：目录完整性、Chunk存在性和索引身份就绪判断及只读HTTP入口。
+- `agent-service/Dockerfile`、`docker-compose.yml`、`Makefile`：把知识目录加入Agent镜像并提供迁移后显式入库和独立验收入口。
+
+### 实现的核心功能
+
+- CLI先验证catalog、读取和分块全部文档，再批量生成全部Embedding；任何前置失败都不写数据库，目录外旧文档清理和当前目录重建在同一事务内提交。
+- 全量命令可重复执行，稳定Chunk身份会替换旧索引而不追加重复记录；输出只包含数量、清理结果和非敏感索引身份，配置/输入、Embedding和持久化失败使用不同退出码。
+- 能力查询使用四态结果区分未入库、不完整、索引身份不匹配和可用，只有目录身份、每文档Chunk及当前Provider/模型/维度/版本全部一致才就绪，查询和服务启动都不访问外部Embedding。

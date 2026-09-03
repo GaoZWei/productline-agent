@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from app.api.approvals import router as approvals_router
+from app.api.knowledge_index_capabilities import router as knowledge_index_capabilities_router
 from app.api.model_capabilities import router as model_capabilities_router
 from app.api.order_diagnosis import router as order_diagnosis_router
 from app.api.run_events import router as run_events_router
@@ -22,7 +23,12 @@ from app.clients.business import BusinessHttpClient
 from app.clients.model import OpenAICompatibleChatClient
 from app.database import Database
 from app.observability import TraceIdMiddleware, configure_logging
-from app.services import DatabaseApprovalExecutionStore, ModelCapabilityService, RunEventService
+from app.services import (
+    DatabaseApprovalExecutionStore,
+    KnowledgeIndexCapabilityService,
+    ModelCapabilityService,
+    RunEventService,
+)
 from app.settings import Settings, get_settings
 from app.tools import create_read_tool_registry, create_write_tool_registry
 from app.versioning import build_run_version_snapshot
@@ -99,7 +105,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.settings = resolved_settings
     # 启动时使用同一个已经校验过的 Settings 创建服务实例
     application.state.model_capability_service = ModelCapabilityService(resolved_settings)
+    application.state.knowledge_index_capability_service = KnowledgeIndexCapabilityService(
+        resolved_settings
+    )
     application.include_router(model_capabilities_router)
+    application.include_router(knowledge_index_capabilities_router)
     application.include_router(order_diagnosis_router)
     application.include_router(run_events_router)
     application.include_router(runs_router)

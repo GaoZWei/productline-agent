@@ -26,6 +26,13 @@ from app.services.intent_router import (
     unknown_router_result,
     validate_user_message_entity_evidence,
 )
+from app.services.knowledge_index_capabilities import KnowledgeIndexCapabilityService
+from app.services.knowledge_ingestion import (
+    DEFAULT_KNOWLEDGE_ROOT,
+    KnowledgeCatalogLoadError,
+    KnowledgeIngestionService,
+    load_document_catalog,
+)
 from app.services.model_capabilities import ModelCapabilityService
 from app.services.model_invocation import ObservedModelInvoker
 from app.services.operation_log import (
@@ -85,6 +92,7 @@ from app.services.step_lifecycle import (
 )
 
 __all__ = [
+    "DEFAULT_KNOWLEDGE_ROOT",
     "ApprovalConfirmationError",
     "ApprovalConfirmationExecution",
     "ApprovalConfirmationService",
@@ -110,6 +118,9 @@ __all__ = [
     "InvalidRunTransitionError",
     "InvalidStepTransitionError",
     "InvalidStoredSessionContextError",
+    "KnowledgeCatalogLoadError",
+    "KnowledgeIndexCapabilityService",
+    "KnowledgeIngestionService",
     "ModelCapabilityService",
     "ObservedModelInvoker",
     "OperationFailure",
@@ -141,6 +152,7 @@ __all__ = [
     "build_operation_log_detail",
     "draft_diff",
     "encode_sse_event",
+    "load_document_catalog",
     "parse_router_result",
     "run_summary_from_record",
     "step_summary_from_record",

@@ -62,7 +62,7 @@ class ProcessedDocument:
     content_hash: str
     chunks: tuple[DocumentChunk, ...]
 
-
+# 文档处理管道
 class DocumentProcessingPipeline:
     """处理完整目录但不执行数据库写入或Embedding调用。"""
 

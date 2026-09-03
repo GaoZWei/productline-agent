@@ -1,0 +1,10 @@
+.git
+**/.DS_Store
+**/__pycache__
+**/.venv
+**/node_modules
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+business-service/target
+web-console/dist

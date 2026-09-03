@@ -1,7 +1,7 @@
 import asyncio
 import os
 import subprocess
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -68,6 +68,7 @@ from app.schemas.knowledge import (
     DocumentType,
     PermissionScope,
 )
+from app.schemas.knowledge_index import KnowledgeIndexStatus
 from app.schemas.versioning import (
     ModelRuntimeSnapshot,
     RagStrategySnapshot,
@@ -84,6 +85,8 @@ from app.services import (
     DatabaseRunHistoryService,
     InvalidRunTransitionError,
     InvalidStepTransitionError,
+    KnowledgeIndexCapabilityService,
+    KnowledgeIngestionService,
     RunHistoryAccessError,
     RunLifecycleService,
     RunLifecycleValidationError,
@@ -95,6 +98,7 @@ from app.services import (
     StepRunUnavailableError,
     build_operation_log_detail,
 )
+from app.services.knowledge_ingestion import DEFAULT_KNOWLEDGE_ROOT
 from app.settings import Settings
 from app.workflows import DatabaseWorkflowStepRecorder
 
@@ -738,6 +742,91 @@ async def test_knowledge_repository_reindexes_chunks_and_records_version(
             assert len(stored_chunks) == 1
             assert stored_chunks[0].embedding is not None
             assert stored_chunks[0].embedding[0] == pytest.approx(0.2)
+    finally:
+        await database.dispose()
+
+
+class _CatalogEmbeddingGenerator:
+    """为真实PostgreSQL全目录测试生成确定性非零向量。"""
+
+    async def generate(self, chunks: Sequence[DocumentChunk]) -> EmbeddingGeneration:
+        normalized = tuple(chunks)
+        return EmbeddingGeneration(
+            descriptor=EmbeddingIndexDescriptor(
+                provider="openai_compatible",
+                model="text-embedding-3-small",
+                dimension=EMBEDDING_DIMENSION,
+                index_version="text-embedding-3-small-1536-v1",
+            ),
+            generated_at=datetime(2026, 9, 1, 8, 0, tzinfo=UTC),
+            embeddings=tuple(
+                ChunkEmbedding(
+                    chunk_id=chunk.chunk_id,
+                    vector=(1.0, *([0.0] * (EMBEDDING_DIMENSION - 1))),
+                )
+                for chunk in normalized
+            ),
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_knowledge_ingestion_is_idempotent_and_capabilities_report_ready(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    generator = _CatalogEmbeddingGenerator()
+    try:
+        async with database.session() as session, session.begin():
+            first = await KnowledgeIngestionService(
+                repository=KnowledgeIndexRepository(session),
+                embedding_generator=generator,
+            ).ingest_catalog(DEFAULT_KNOWLEDGE_ROOT)
+
+        stale = _search_processed_document(
+            suffix="STALE",
+            content="已经不属于当前目录的旧规范。",
+        )
+        async with database.session() as session, session.begin():
+            await KnowledgeIndexRepository(session).reindex_documents(
+                (stale,),
+                _search_generation(
+                    (stale,),
+                    ((1.0, *([0.0] * (EMBEDDING_DIMENSION - 1))),),
+                    index_version="stale-v1",
+                ),
+            )
+
+        async with database.session() as session, session.begin():
+            second = await KnowledgeIngestionService(
+                repository=KnowledgeIndexRepository(session),
+                embedding_generator=generator,
+            ).ingest_catalog(DEFAULT_KNOWLEDGE_ROOT)
+
+        async with database.session() as session:
+            repository = KnowledgeIndexRepository(session)
+            state = await repository.get_index_state()
+            ready = await KnowledgeIndexCapabilityService(
+                Settings(environment="test")
+            ).get(repository)
+            mismatched = await KnowledgeIndexCapabilityService(
+                Settings(environment="test", embedding_index_version="future-index-v2")
+            ).get(repository)
+            stored_chunk_ids = tuple(
+                (await session.scalars(select(KnowledgeChunk.chunk_id))).all()
+            )
+
+        assert first.document_count == second.document_count == 16
+        assert first.chunk_count == second.chunk_count == 80
+        assert first.removed_document_count == 0
+        assert second.removed_document_count == 1
+        assert len(state.documents) == 16
+        assert state.chunk_count == 80
+        assert len(stored_chunk_ids) == len(set(stored_chunk_ids)) == 80
+        assert ready.status is KnowledgeIndexStatus.READY
+        assert ready.ready is True
+        assert mismatched.status is KnowledgeIndexStatus.INDEX_MISMATCH
+        assert mismatched.ready is False
     finally:
         await database.dispose()
 
