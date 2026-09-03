@@ -18,15 +18,46 @@ from app.models import (
     OperationType,
     PendingToolName,
 )
+from app.schemas.agent_messages import DiagnosisAgentResult
 from app.schemas.business import BusinessIdentity
 from app.schemas.run_history import RunSummary
 from app.services.run_history import (
     DatabaseRunHistoryService,
     RunHistoryAccessError,
+    agent_result_from_record,
     approval_history_from_record,
     run_summary_from_record,
     step_summary_from_record,
 )
+
+
+@pytest.mark.unit
+def test_legacy_fixed_diagnosis_is_wrapped_for_unified_history() -> None:
+    """既有固定入口的裸诊断快照在历史读取时获得DIAGNOSIS kind。"""
+
+    run = AgentRun(
+        run_id="run-history-legacy-diagnosis",
+        session_id="session-history-legacy",
+        status=AgentRunStatus.SUCCEEDED,
+        version_snapshot={"legacy": True},
+        final_result={
+            "order_id": "ORDER-003",
+            "blocking_stage": "INSUFFICIENT_INFORMATION",
+            "summary": "当前事实不足。",
+            "root_causes": [{"code": "INFORMATION_GAP", "description": "缺少必要事实。"}],
+            "evidence": [],
+            "suggestions": [{"action_type": "RETRY_READ", "description": "稍后重新读取。"}],
+            "confidence": 0.0,
+        },
+        tool_call_count=0,
+        total_token_count=0,
+        created_at=datetime(2026, 8, 30, 1, 0, tzinfo=UTC),
+    )
+
+    result = agent_result_from_record(run)
+
+    assert isinstance(result, DiagnosisAgentResult)
+    assert result.diagnosis.order_id == "ORDER-003"
 
 
 @pytest.mark.unit

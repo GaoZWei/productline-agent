@@ -1428,3 +1428,25 @@
 - CLI先验证catalog、读取和分块全部文档，再批量生成全部Embedding；任何前置失败都不写数据库，目录外旧文档清理和当前目录重建在同一事务内提交。
 - 全量命令可重复执行，稳定Chunk身份会替换旧索引而不追加重复记录；输出只包含数量、清理结果和非敏感索引身份，配置/输入、Embedding和持久化失败使用不同退出码。
 - 能力查询使用四态结果区分未入库、不完整、索引身份不匹配和可用，只有目录身份、每文档Chunk及当前Provider/模型/维度/版本全部一致才就绪，查询和服务启动都不访问外部Embedding。
+
+---
+
+## 2026-09-03 — `[T762-T766] M7.6-D 统一Agent入口与路由闭环`
+
+### 核心解决的问题
+
+把已经存在的Session、模型Router、实体合并、澄清、Run/Step和SSE组件收口到唯一生产消息入口，避免自然语言请求只能走固定诊断，或模型故障被静默伪装成可执行路由结果。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/agent_messages.py`：统一消息、澄清选择、五类结果Envelope和安全错误契约。
+- `agent-service/app/services/agent_messages.py`：`AgentMessageService`请求生命周期、观测Router调用、澄清续接及`AgentSkillDispatcher`边界。
+- `agent-service/app/api/agent_messages.py`、`app/main.py`：统一能力查询、消息HTTP入口、身份/SSE接线和默认未接线Skill错误。
+- `agent-service/app/repositories/agent_runtime.py`：最近有效结果查询同时排除SQL空值与JSON空值，避免当前运行中的Run覆盖澄清来源。
+- `agent-service/app/services/run_history.py`：统一结果历史恢复及既有固定诊断快照兼容。
+
+### 实现的核心功能
+
+- `POST /api/agent/messages`可创建或复用本人Session，持久化用户消息和Run，并为上下文、每次Router模型调用、路由门禁及Skill分发记录有序Step和SSE终态。
+- 参数仍按用户本轮输入、已确认Session、页面提示、Session候选的固定优先级合并；澄清选择必须引用同一Session中最近返回结果的成功澄清Run，低置信度、缺参、冲突和意图确认都不能绕过服务端门禁。
+- 统一结果以`kind`区分状态、诊断、规范回答、澄清和Approval；历史接口继续保留固定诊断字段，同时提供统一Envelope，模型未配置、不可用、两次结构化输出非法和Skill未接线均返回独立稳定错误。

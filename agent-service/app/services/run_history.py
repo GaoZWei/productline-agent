@@ -7,6 +7,11 @@ from pydantic import TypeAdapter, ValidationError
 from app.database import Database
 from app.models import AgentRun, AgentStep, ApprovalRecord
 from app.repositories import AgentRunRepository, AgentStepRepository, ApprovalRecordRepository
+from app.schemas.agent_messages import (
+    AgentMessageResult,
+    AgentResultKind,
+    DiagnosisAgentResult,
+)
 from app.schemas.approval import ReviewDraft
 from app.schemas.business import BusinessIdentity
 from app.schemas.run_history import (
@@ -23,6 +28,7 @@ from app.services.operation_log import draft_diff
 
 _ORDER_ID_ADAPTER = TypeAdapter(OrderIdentifier)
 _TASK_ID_ADAPTER = TypeAdapter(TaskIdentifier)
+_AGENT_RESULT_ADAPTER: TypeAdapter[AgentMessageResult] = TypeAdapter(AgentMessageResult)
 
 
 class RunHistoryAccessError(Exception):
@@ -79,11 +85,17 @@ class DatabaseRunHistoryService:
             if run is None:
                 raise _run_not_found()
             approvals = await ApprovalRecordRepository(session).list_by_run(run_id)
+        agent_result = agent_result_from_record(run)
         return RunDetailResponse(
             run=run_summary_from_record(run),
             input_token_count=run.input_token_count,
             output_token_count=run.output_token_count,
-            result=_diagnosis_from_record(run),
+            agent_result=agent_result,
+            result=(
+                agent_result.diagnosis
+                if agent_result is not None and agent_result.kind is AgentResultKind.DIAGNOSIS
+                else None
+            ),
             approvals=tuple(approval_history_from_record(item) for item in approvals),
         )
 
@@ -173,16 +185,19 @@ def approval_history_from_record(approval: ApprovalRecord) -> ApprovalHistory:
     )
 
 
-def _diagnosis_from_record(run: AgentRun) -> DiagnosisResult | None:
-    """只恢复符合当前严格契约的诊断结果, 其他Run类型不补造正文。"""
+def agent_result_from_record(run: AgentRun) -> AgentMessageResult | None:
+    """恢复统一Envelope, 并把既有固定诊断快照安全包装为DIAGNOSIS。"""
 
     if run.final_result is None:
         return None
     try:
-        # 数据库JSON中的枚举以字符串保存; 历史读取时允许恢复枚举, 其余字段仍由Schema校验。
-        return DiagnosisResult.model_validate(run.final_result, strict=False)
+        return _AGENT_RESULT_ADAPTER.validate_python(run.final_result, strict=False)
     except ValidationError:
-        return None
+        try:
+            diagnosis = DiagnosisResult.model_validate(run.final_result, strict=False)
+        except ValidationError:
+            return None
+        return DiagnosisAgentResult(diagnosis=diagnosis)
 
 
 def _require_reviewer(identity: BusinessIdentity) -> None:

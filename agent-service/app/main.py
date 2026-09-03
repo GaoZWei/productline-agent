@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from app.api.agent_messages import router as agent_messages_router
 from app.api.approvals import router as approvals_router
 from app.api.knowledge_index_capabilities import router as knowledge_index_capabilities_router
 from app.api.model_capabilities import router as model_capabilities_router
@@ -28,6 +29,7 @@ from app.services import (
     KnowledgeIndexCapabilityService,
     ModelCapabilityService,
     RunEventService,
+    UnavailableAgentSkillDispatcher,
 )
 from app.settings import Settings, get_settings
 from app.tools import create_read_tool_registry, create_write_tool_registry
@@ -62,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.database = database
         application.state.business_client = business_client
         application.state.model_client = model_client
+        application.state.agent_skill_dispatcher = UnavailableAgentSkillDispatcher()
         application.state.run_event_service = RunEventService()
         # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。
         application.state.tool_registry = create_read_tool_registry(business_client)
@@ -110,6 +113,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.include_router(model_capabilities_router)
     application.include_router(knowledge_index_capabilities_router)
+    application.include_router(agent_messages_router)
     application.include_router(order_diagnosis_router)
     application.include_router(run_events_router)
     application.include_router(runs_router)

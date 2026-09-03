@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import subprocess
 from collections.abc import AsyncIterator, Sequence
@@ -8,12 +9,15 @@ from pathlib import Path
 from uuid import uuid4
 
 import asyncpg  # type: ignore[import-untyped]
+import httpx
 import pytest
 import pytest_asyncio
+from pydantic import AnyHttpUrl
 from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from app.clients.model import OpenAICompatibleChatClient
 from app.database import Base, Database
 from app.knowledge import (
     EMBEDDING_DIMENSION,
@@ -28,6 +32,7 @@ from app.knowledge import (
     build_search_document,
     fuse_hybrid_results,
 )
+from app.main import create_app
 from app.models import (
     AgentMessage,
     AgentMessageRole,
@@ -53,12 +58,20 @@ from app.repositories import (
     KnowledgeSearchValidationError,
     OperationLogRepository,
 )
+from app.routing import BusinessSkill
 from app.schemas import (
+    AgentMessageRequest,
+    AgentResultKind,
+    ClarificationChoice,
     Conclusion,
+    EntitySelection,
     LLMStepObservation,
+    OrderStatusResult,
+    OrderStatusSubject,
     PageContext,
     ReviewDraft,
     RouterResult,
+    RoutingEntityName,
     RunTokenUsage,
 )
 from app.schemas.business import BusinessIdentity
@@ -78,6 +91,10 @@ from app.schemas.versioning import (
 )
 from app.schemas.write_tools import WriteReviewResultOutput
 from app.services import (
+    AgentMessageExecutionError,
+    AgentMessageService,
+    AgentSkillExecution,
+    AgentSkillRequest,
     ApprovalLifecycleService,
     DatabaseApprovalConfirmationStore,
     DatabaseApprovalExecutionStore,
@@ -87,6 +104,7 @@ from app.services import (
     InvalidStepTransitionError,
     KnowledgeIndexCapabilityService,
     KnowledgeIngestionService,
+    RunEventService,
     RunHistoryAccessError,
     RunLifecycleService,
     RunLifecycleValidationError,
@@ -96,6 +114,7 @@ from app.services import (
     StepLifecycleValidationError,
     StepNotFoundError,
     StepRunUnavailableError,
+    UnavailableAgentSkillDispatcher,
     build_operation_log_detail,
 )
 from app.services.knowledge_ingestion import DEFAULT_KNOWLEDGE_ROOT
@@ -2656,4 +2675,406 @@ async def test_workflow_step_recorder_uses_committed_short_transactions(
             assert stored_steps[0].output_summary == "order_id=ORDER-003"
             assert stored_steps[1].error_code == "RESOURCE_NOT_FOUND"
     finally:
+        await database.dispose()
+
+
+class _AgentMessageStatusDispatcher:
+    """仅供统一入口验收的状态Skill替身, 不读取或伪造额外业务事实。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[BusinessSkill, AgentSkillRequest]] = []
+
+    async def dispatch(
+        self,
+        skill: BusinessSkill,
+        request: AgentSkillRequest,
+    ) -> AgentSkillExecution:
+        self.calls.append((skill, request))
+        order_id = request.decision.entities.to_router_entities().order_id
+        assert order_id is not None
+        return AgentSkillExecution(
+            result=OrderStatusResult(
+                subject=OrderStatusSubject.ORDER,
+                order_id=order_id,
+                status="STUB_VALIDATED",
+                summary="测试Skill已收到通过路由门禁的订单参数。",
+            )
+        )
+
+
+def _router_transport(outputs: list[dict[str, object]]) -> httpx.MockTransport:
+    """按顺序返回OpenAI兼容的结构化Router响应。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        output = outputs.pop(0)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "chatcmpl-agent-message",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "router-test-model",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(output),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 4,
+                    "total_tokens": 16,
+                },
+            },
+        )
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_agent_messages_persist_route_clarification_resume_and_model_failures(
+    migrated_database_url: str,
+) -> None:
+    """统一Turn保存完整Step/SSE并让模型错误进入明确失败终态。"""
+
+    database = Database(migrated_database_url)
+    dispatcher = _AgentMessageStatusDispatcher()
+    configured = Settings(
+        environment="test",
+        database_url=migrated_database_url,
+        model_name="router-test-model",
+        model_base_url=AnyHttpUrl("http://model.test/v1"),
+        model_max_retries=0,
+    )
+    model_client = OpenAICompatibleChatClient(
+        configured,
+        transport=_router_transport(
+            [
+                {
+                    "intent": "ORDER_QUERY",
+                    "confidence": 0.95,
+                    "entities": {},
+                    "missing_fields": ["order_id"],
+                    "need_clarification": True,
+                }
+            ]
+        ),
+    )
+    event_service = RunEventService()
+    await event_service.open_stream("stream-agent-message", owner_user_id="reviewer-001")
+    publisher = await event_service.publisher(
+        "stream-agent-message",
+        owner_user_id="reviewer-001",
+        trace_id="trace-agent-message",
+    )
+    subscription = await event_service.subscribe(
+        "stream-agent-message",
+        owner_user_id="reviewer-001",
+    )
+    identity = BusinessIdentity(user_id="reviewer-001", role="REVIEWER")
+    service = AgentMessageService(
+        database,
+        model_client,
+        dispatcher,
+        session_ttl_seconds=1800,
+        version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+        event_sink=publisher,
+    )
+    try:
+        clarification = await service.execute(
+            AgentMessageRequest(message="查询订单状态"),
+            identity=identity,
+            trace_id="trace-agent-message",
+        )
+        assert clarification.result.kind is AgentResultKind.CLARIFICATION
+        assert dispatcher.calls == []
+
+        resumed = await AgentMessageService(
+            database,
+            model_client,
+            dispatcher,
+            session_ttl_seconds=1800,
+            version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+        ).execute(
+            AgentMessageRequest(
+                message="选择 ORDER-003",
+                session_id=clarification.session_id,
+                clarification=ClarificationChoice(
+                    source_run_id=clarification.run_id,
+                    selection=EntitySelection(
+                        field=RoutingEntityName.ORDER_ID,
+                        value="ORDER-003",
+                    ),
+                ),
+            ),
+            identity=identity,
+            trace_id="trace-agent-message-resume",
+        )
+        assert resumed.result.kind is AgentResultKind.ORDER_STATUS
+        assert len(dispatcher.calls) == 1
+
+        async with database.session() as session:
+            first_run = await AgentRunRepository(session).get(clarification.run_id)
+            first_steps = await AgentStepRepository(session).list_by_run(clarification.run_id)
+            second_run = await AgentRunRepository(session).get(resumed.run_id)
+            second_steps = await AgentStepRepository(session).list_by_run(resumed.run_id)
+            stored_session = await session.get(AgentSession, resumed.session_id)
+            messages = list(
+                (
+                    await session.scalars(
+                        select(AgentMessage)
+                        .where(AgentMessage.session_id == resumed.session_id)
+                        .order_by(AgentMessage.sequence_number)
+                    )
+                ).all()
+            )
+        assert first_run is not None and first_run.status is AgentRunStatus.SUCCEEDED
+        assert first_run.final_result is not None
+        assert first_run.final_result["kind"] == "CLARIFICATION"
+        assert first_run.total_token_count == 16
+        assert [step.step_type for step in first_steps] == [
+            AgentStepType.CONTEXT,
+            AgentStepType.LLM,
+            AgentStepType.ROUTER,
+        ]
+        assert second_run is not None and second_run.status is AgentRunStatus.SUCCEEDED
+        assert second_run.final_result is not None
+        assert second_run.final_result["kind"] == "ORDER_STATUS"
+        assert [step.step_type for step in second_steps] == [
+            AgentStepType.CONTEXT,
+            AgentStepType.ROUTER,
+            AgentStepType.WORKFLOW,
+        ]
+        assert stored_session is not None
+        assert stored_session.context["confirmed_entities"]["order_id"] == "ORDER-003"
+        assert [message.content for message in messages] == [
+            "查询订单状态",
+            "选择 ORDER-003",
+        ]
+        history = await DatabaseRunHistoryService(database).get_run_detail(
+            identity=identity,
+            run_id=resumed.run_id,
+        )
+        assert isinstance(history.agent_result, OrderStatusResult)
+        assert history.result is None
+
+        with pytest.raises(AgentMessageExecutionError) as denied_session:
+            await AgentMessageService(
+                database,
+                model_client,
+                dispatcher,
+                session_ttl_seconds=1800,
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            ).execute(
+                AgentMessageRequest(
+                    message="继续查询",
+                    session_id=resumed.session_id,
+                ),
+                identity=BusinessIdentity(user_id="reviewer-002", role="REVIEWER"),
+                trace_id="trace-agent-session-denied",
+            )
+        assert denied_session.value.code == "PERMISSION_DENIED"
+        assert denied_session.value.run_id is None
+
+        async with database.session() as session, session.begin():
+            session.add(
+                AgentSession(
+                    session_id="session-agent-other-source",
+                    user_id="reviewer-001",
+                    context={},
+                    expires_at=datetime.now(UTC) + timedelta(minutes=30),
+                )
+            )
+        with pytest.raises(AgentMessageExecutionError) as wrong_source_session:
+            await AgentMessageService(
+                database,
+                model_client,
+                dispatcher,
+                session_ttl_seconds=1800,
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            ).execute(
+                AgentMessageRequest(
+                    message="选择 ORDER-003",
+                    session_id="session-agent-other-source",
+                    clarification=ClarificationChoice(
+                        source_run_id=clarification.run_id,
+                        selection=EntitySelection(
+                            field=RoutingEntityName.ORDER_ID,
+                            value="ORDER-003",
+                        ),
+                    ),
+                ),
+                identity=identity,
+                trace_id="trace-agent-source-denied",
+            )
+        assert wrong_source_session.value.code == "CLARIFICATION_SELECTION_INVALID"
+        assert wrong_source_session.value.run_id is not None
+
+        streamed: list[str] = []
+
+        async def connected() -> bool:
+            return False
+
+        async for item in subscription.iter_sse(connected):
+            streamed.append(item)
+        stream_body = "".join(streamed)
+        assert "event: run_started" in stream_body
+        assert "event: context_loaded" in stream_body
+        assert "event: intent_detected" in stream_body
+        assert "event: clarification_required" in stream_body
+        assert "event: run_completed" in stream_body
+        assert "查询订单状态" not in stream_body
+
+        unconfigured_client = OpenAICompatibleChatClient(
+            Settings(environment="test", database_url=migrated_database_url)
+        )
+        with pytest.raises(AgentMessageExecutionError) as missing_model:
+            await AgentMessageService(
+                database,
+                unconfigured_client,
+                dispatcher,
+                session_ttl_seconds=1800,
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            ).execute(
+                AgentMessageRequest(message="查询 ORDER-003 的状态"),
+                identity=identity,
+                trace_id="trace-agent-model-missing",
+            )
+        assert missing_model.value.code == "MODEL_NOT_CONFIGURED"
+        assert missing_model.value.run_id is not None
+        async with database.session() as session:
+            failed_run = await AgentRunRepository(session).get(missing_model.value.run_id)
+            failed_steps = await AgentStepRepository(session).list_by_run(
+                missing_model.value.run_id
+            )
+        assert failed_run is not None and failed_run.status is AgentRunStatus.FAILED
+        assert [step.status for step in failed_steps] == [
+            AgentStepStatus.SUCCEEDED,
+            AgentStepStatus.FAILED,
+        ]
+        assert failed_steps[-1].error_code == "MODEL_NOT_CONFIGURED"
+        await unconfigured_client.aclose()
+
+        invalid_client = OpenAICompatibleChatClient(
+            configured,
+            transport=_router_transport([{}, {}]),
+        )
+        with pytest.raises(AgentMessageExecutionError) as invalid_output:
+            await AgentMessageService(
+                database,
+                invalid_client,
+                dispatcher,
+                session_ttl_seconds=1800,
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            ).execute(
+                AgentMessageRequest(message="查询 ORDER-003 的状态"),
+                identity=identity,
+                trace_id="trace-agent-model-invalid",
+            )
+        assert invalid_output.value.code == "MODEL_OUTPUT_VALIDATION_ERROR"
+        assert invalid_output.value.run_id is not None
+        async with database.session() as session:
+            invalid_run = await AgentRunRepository(session).get(invalid_output.value.run_id)
+            invalid_steps = await AgentStepRepository(session).list_by_run(
+                invalid_output.value.run_id
+            )
+        assert invalid_run is not None and invalid_run.status is AgentRunStatus.FAILED
+        assert [step.step_type for step in invalid_steps] == [
+            AgentStepType.CONTEXT,
+            AgentStepType.LLM,
+            AgentStepType.LLM,
+        ]
+        assert [step.error_code for step in invalid_steps[1:]] == [
+            "MODEL_OUTPUT_VALIDATION_ERROR",
+            "MODEL_OUTPUT_VALIDATION_ERROR",
+        ]
+        await invalid_client.aclose()
+
+        unavailable_model = OpenAICompatibleChatClient(
+            configured,
+            transport=_router_transport(
+                [
+                    {
+                        "intent": "ORDER_DIAGNOSIS",
+                        "confidence": 0.98,
+                        "entities": {"order_id": "ORDER-003"},
+                        "missing_fields": [],
+                        "need_clarification": False,
+                    }
+                ]
+            ),
+        )
+        with pytest.raises(AgentMessageExecutionError) as unavailable_skill:
+            await AgentMessageService(
+                database,
+                unavailable_model,
+                UnavailableAgentSkillDispatcher(),
+                session_ttl_seconds=1800,
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            ).execute(
+                AgentMessageRequest(message="诊断 ORDER-003"),
+                identity=identity,
+                trace_id="trace-agent-skill-unavailable",
+            )
+        assert unavailable_skill.value.code == "SKILL_NOT_AVAILABLE"
+        assert unavailable_skill.value.run_id is not None
+        async with database.session() as session:
+            unavailable_run = await AgentRunRepository(session).get(
+                unavailable_skill.value.run_id
+            )
+        assert unavailable_run is not None
+        assert unavailable_run.status is AgentRunStatus.FAILED
+        assert unavailable_run.final_result is None
+        await unavailable_model.aclose()
+
+        api_model_client = OpenAICompatibleChatClient(
+            configured,
+            transport=_router_transport(
+                [
+                    {
+                        "intent": "ORDER_QUERY",
+                        "confidence": 0.96,
+                        "entities": {"order_id": "ORDER-003"},
+                        "missing_fields": [],
+                        "need_clarification": False,
+                    }
+                ]
+            ),
+        )
+        application = create_app(configured)
+        async with application.router.lifespan_context(application):
+            application.state.model_client = api_model_client
+            application.state.agent_skill_dispatcher = dispatcher
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=application),
+                base_url="http://test",
+            ) as api_client:
+                api_response = await api_client.post(
+                    "/api/agent/messages",
+                    json={"message": "查询 ORDER-003 的状态"},
+                    headers={
+                        "X-Trace-Id": "trace-agent-api",
+                        "X-User-Id": "reviewer-001",
+                        "X-User-Role": "REVIEWER",
+                    },
+                )
+                capabilities = await api_client.get("/api/agent/capabilities")
+        assert api_response.status_code == 200
+        assert api_response.json()["result"]["kind"] == "ORDER_STATUS"
+        assert api_response.json()["trace_id"] == "trace-agent-api"
+        assert capabilities.status_code == 200
+        assert capabilities.json()["result_kinds"] == [item.value for item in AgentResultKind]
+        assert capabilities.json()["model"]["configured"] is True
+        assert capabilities.json()["knowledge_index"]["status"] == "NOT_INDEXED"
+        await api_model_client.aclose()
+    finally:
+        await subscription.close()
+        await event_service.close()
+        await model_client.aclose()
         await database.dispose()

@@ -9,6 +9,7 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
+from app.clients.model import ModelClientError, ModelErrorCode
 from app.eventing import RunEventSink
 from app.routing import Intent
 from app.routing.prompt import RoutingPrompt, build_routing_prompt
@@ -70,7 +71,7 @@ def unknown_router_result() -> RouterResult:
 
 # 解析、重试和 UNKNOWN 降级处理
 class IntentRouter:
-    """执行最多两次模型结构化路由, 失败时不抛出模型内容。"""
+    """执行最多两次结构化路由, 可选择安全UNKNOWN或显式错误边界。"""
 
     def __init__(
         self,
@@ -78,10 +79,12 @@ class IntentRouter:
         *,
         event_sink: RunEventSink | None = None,
         run_id: str | None = None,
+        strict_model_errors: bool = False, # 严格模型错误
     ) -> None:
         self._model = model
         self._event_sink = event_sink
         self._run_id = run_id
+        self._strict_model_errors = strict_model_errors
 
     async def route(
         self,
@@ -90,7 +93,7 @@ class IntentRouter:
         page_context: PageContext | None = None,
         session_context: SessionContext | None = None,
     ) -> RouterResult:
-        """首次Schema失败重试一次; 模型异常或二次失败回退UNKNOWN。"""
+        """首次Schema失败重试一次; 严格模式保留模型错误供统一入口处理。"""
 
         for attempt in (1, 2):
             prompt = build_routing_prompt(
@@ -101,7 +104,31 @@ class IntentRouter:
             )
             try:
                 raw_output = await self._model.generate(prompt)
-            except Exception as error:  # 模型异常, 直接回退UNKNOWN
+            except ModelClientError as error:
+                if error.code is ModelErrorCode.INVALID_OUTPUT:
+                    _LOGGER.warning(
+                        "intent_router_output_invalid",
+                        extra={"attempt": attempt, "prompt_version": prompt.version},
+                    )
+                    if attempt == 1:
+                        continue
+                    if self._strict_model_errors:
+                        raise InvalidRouterOutputError(
+                            "router output schema validation failed twice"
+                        ) from error
+                    return await self._publish_result(unknown_router_result())
+                _LOGGER.error(
+                    "intent_router_model_call_failed",
+                    extra={
+                        "attempt": attempt,
+                        "prompt_version": prompt.version,
+                        "error_code": error.code.value,
+                    },
+                )
+                if self._strict_model_errors:
+                    raise
+                return await self._publish_result(unknown_router_result())
+            except Exception as error:  # 兼容旧调用方的安全UNKNOWN降级。
                 _LOGGER.error(
                     "intent_router_model_call_failed",
                     extra={
@@ -110,6 +137,8 @@ class IntentRouter:
                         "error_type": type(error).__name__,
                     },
                 )
+                if self._strict_model_errors:
+                    raise
                 return await self._publish_result(unknown_router_result())
 
             try:
@@ -122,6 +151,8 @@ class IntentRouter:
                     extra={"attempt": attempt, "prompt_version": prompt.version},
                 )
                 if attempt == 2:
+                    if self._strict_model_errors:
+                        raise
                     return await self._publish_result(
                         unknown_router_result()
                     )  # 二次失败回退UNKNOWN

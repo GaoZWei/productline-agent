@@ -11,6 +11,7 @@ from app.models import (
     ApprovalStatus,
     OperationType,
 )
+from app.schemas.agent_messages import AgentMessageResult
 from app.schemas.approval import ReviewDraft
 from app.schemas.operation_log import OperationFieldChange
 from app.schemas.session import RunIdentifier, SessionIdentifier
@@ -69,6 +70,7 @@ class RunListResponse(RunHistorySchema):
     page_size: RunHistoryPageSize
     total: RunHistoryCount
 
+
 # Approval确认历史结构模型
 class ApprovalHistory(RunHistorySchema):
     """Run产生的人工确认记录, 保留原稿、最终稿和受控修改差异。"""
@@ -87,11 +89,13 @@ class ApprovalHistory(RunHistorySchema):
 
 
 class RunDetailResponse(RunHistorySchema):
-    """单个Run的受控执行详情, 不返回消息和内部上下文快照。"""
+    """单个Run的受控执行详情, 同时保留旧诊断字段和统一结果Envelope。"""
 
     run: RunSummary
     input_token_count: RunHistoryCount
     output_token_count: RunHistoryCount
+    agent_result: AgentMessageResult | None = None
+    # 固定诊断页面仍读取此字段; 统一页面迁移后改读agent_result。
     result: DiagnosisResult | None = None
     approvals: tuple[ApprovalHistory, ...]
 

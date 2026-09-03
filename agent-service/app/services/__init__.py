@@ -1,5 +1,17 @@
 """Agent 运行生命周期与后续 Workflow 服务入口。"""
 
+from app.services.agent_messages import (
+    AgentMessageExecution,
+    AgentMessageExecutionError,
+    AgentMessageService,
+    AgentSkillDispatcher,
+    AgentSkillExecution,
+    AgentSkillExecutionError,
+    AgentSkillRequest,
+    AgentSkillUnavailableError,
+    ClarificationContinuationError,
+    UnavailableAgentSkillDispatcher,
+)
 from app.services.approval_confirmation import (
     ApprovalConfirmationError,
     ApprovalConfirmationExecution,
@@ -62,6 +74,7 @@ from app.services.run_events import (
 from app.services.run_history import (
     DatabaseRunHistoryService,
     RunHistoryAccessError,
+    agent_result_from_record,
     approval_history_from_record,
     run_summary_from_record,
     step_summary_from_record,
@@ -93,6 +106,14 @@ from app.services.step_lifecycle import (
 
 __all__ = [
     "DEFAULT_KNOWLEDGE_ROOT",
+    "AgentMessageExecution",
+    "AgentMessageExecutionError",
+    "AgentMessageService",
+    "AgentSkillDispatcher",
+    "AgentSkillExecution",
+    "AgentSkillExecutionError",
+    "AgentSkillRequest",
+    "AgentSkillUnavailableError",
     "ApprovalConfirmationError",
     "ApprovalConfirmationExecution",
     "ApprovalConfirmationService",
@@ -102,6 +123,7 @@ __all__ = [
     "ApprovalLifecycleService",
     "ApprovalLifecycleValidationError",
     "ApprovalNotFoundError",
+    "ClarificationContinuationError",
     "DatabaseApprovalConfirmationStore",
     "DatabaseApprovalExecutionStore",
     "DatabaseOperationLogService",
@@ -148,6 +170,8 @@ __all__ = [
     "StepLifecycleValidationError",
     "StepNotFoundError",
     "StepRunUnavailableError",
+    "UnavailableAgentSkillDispatcher",
+    "agent_result_from_record",
     "approval_history_from_record",
     "build_operation_log_detail",
     "draft_diff",

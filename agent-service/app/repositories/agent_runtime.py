@@ -166,6 +166,7 @@ class AgentRunRepository:
             .where(
                 AgentRun.session_id == session_id,
                 AgentRun.final_result.is_not(None),
+                func.json_typeof(AgentRun.final_result) != "null",
             )
             .order_by(AgentRun.created_at.desc(), AgentRun.run_id.desc())
             .limit(1)
