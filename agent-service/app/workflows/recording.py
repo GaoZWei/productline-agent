@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from app.database import Database
 from app.eventing import RunEventSink
@@ -61,6 +61,33 @@ class WorkflowStepRecorder(Protocol):
         output_summary: str | None,
     ) -> None:
         """在独立短事务中把 Step 标记为失败。"""
+
+        ...
+
+
+class ObservedWorkflowStepRecorder(WorkflowStepRecorder, Protocol):
+    """在通用Step生命周期上补充LLM专属指标写入能力。"""
+
+    async def mark_llm_succeeded(
+        self,
+        step_id: str,
+        *,
+        output_summary: str | None,
+        observation: LLMStepObservation,
+    ) -> None:
+        """保存 LLM Step 成功终态和结构化调用指标。"""
+
+        ...
+
+    async def mark_llm_failed(
+        self,
+        step_id: str,
+        *,
+        error_code: str,
+        output_summary: str | None,
+        observation: LLMStepObservation | None,
+    ) -> None:
+        """保存 LLM Step 失败终态和可获得的结构化调用指标。"""
 
         ...
 
@@ -178,7 +205,11 @@ class DatabaseWorkflowStepRecorder:
 class EventPublishingWorkflowStepRecorder:
     """装饰Step记录器, 在数据库成功后发布对应实时事件。"""
 
-    def __init__(self, delegate: WorkflowStepRecorder, event_sink: RunEventSink) -> None:
+    def __init__(
+        self,
+        delegate: WorkflowStepRecorder,
+        event_sink: RunEventSink,
+    ) -> None:
         self._delegate = delegate
         self._event_sink = event_sink
         self._steps: dict[str, tuple[str, AgentStepType, str]] = {}
@@ -241,6 +272,38 @@ class EventPublishingWorkflowStepRecorder:
             step_id,
             status="FAILED",
             error_code=error_code,
+        )
+
+    async def mark_llm_succeeded(
+        self,
+        step_id: str,
+        *,
+        output_summary: str | None,
+        observation: LLMStepObservation,
+    ) -> None:
+        """委托保存 LLM 成功指标; LLM 不复用 Tool 专属事件。"""
+
+        await cast(ObservedWorkflowStepRecorder, self._delegate).mark_llm_succeeded(
+            step_id,
+            output_summary=output_summary,
+            observation=observation,
+        )
+
+    async def mark_llm_failed(
+        self,
+        step_id: str,
+        *,
+        error_code: str,
+        output_summary: str | None,
+        observation: LLMStepObservation | None,
+    ) -> None:
+        """委托保存 LLM 失败指标; LLM 不复用 Tool 专属事件。"""
+
+        await cast(ObservedWorkflowStepRecorder, self._delegate).mark_llm_failed(
+            step_id,
+            error_code=error_code,
+            output_summary=output_summary,
+            observation=observation,
         )
 
     async def _publish_tool_completed(

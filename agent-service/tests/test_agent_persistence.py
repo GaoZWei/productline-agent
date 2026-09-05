@@ -17,6 +17,7 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from app.clients.business import BusinessHttpClient
 from app.clients.model import OpenAICompatibleChatClient
 from app.database import Base, Database
 from app.knowledge import (
@@ -104,6 +105,7 @@ from app.services import (
     InvalidStepTransitionError,
     KnowledgeIndexCapabilityService,
     KnowledgeIngestionService,
+    ProductionAgentSkillDispatcher,
     RunEventService,
     RunHistoryAccessError,
     RunLifecycleService,
@@ -119,6 +121,7 @@ from app.services import (
 )
 from app.services.knowledge_ingestion import DEFAULT_KNOWLEDGE_ROOT
 from app.settings import Settings
+from app.tools import create_read_tool_registry
 from app.workflows import DatabaseWorkflowStepRecorder
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -3078,3 +3081,262 @@ async def test_agent_messages_persist_route_clarification_resume_and_model_failu
         await event_service.close()
         await model_client.aclose()
         await database.dispose()
+
+
+class _CatalogQueryEmbeddingGenerator:
+    """在目录索引相同的确定性向量空间生成查询向量。"""
+
+    async def generate_query(self, query: str) -> QueryEmbedding:
+        assert query.strip()
+        return QueryEmbedding(
+            descriptor=EmbeddingIndexDescriptor(
+                provider="openai_compatible",
+                model="text-embedding-3-small",
+                dimension=EMBEDDING_DIMENSION,
+                index_version="text-embedding-3-small-1536-v1",
+            ),
+            vector=(1.0, *([0.0] * (EMBEDDING_DIMENSION - 1))),
+        )
+
+
+def _production_skill_model_transport() -> httpx.MockTransport:
+    """按公共结构化Schema返回Router、Action、Rerank和规范回答Stub。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_body = json.loads(request.content)
+        schema_name = request_body["response_format"]["json_schema"]["name"]
+        user_payload = json.loads(request_body["messages"][-1]["content"])
+        if schema_name == "RouterResult":
+            message = user_payload["user_message"]
+            if "诊断" in message:
+                output = {
+                    "intent": "ORDER_DIAGNOSIS",
+                    "confidence": 0.98,
+                    "entities": {"order_id": "ORDER-003"},
+                    "missing_fields": [],
+                    "need_clarification": False,
+                }
+            elif "状态" in message:
+                output = {
+                    "intent": "ORDER_QUERY",
+                    "confidence": 0.98,
+                    "entities": {"order_id": "ORDER-003"},
+                    "missing_fields": [],
+                    "need_clarification": False,
+                }
+            else:
+                output = {
+                    "intent": "SPEC_QA",
+                    "confidence": 0.98,
+                    "entities": {},
+                    "missing_fields": [],
+                    "need_clarification": False,
+                }
+        elif schema_name == "ActionDecision":
+            known_order = user_payload["known_facts"]["order"]
+            output = (
+                {
+                    "action": "QUERY_ORDER",
+                    "reason": "先从Java读取订单事实",
+                    "tool_name": "get_order_detail",
+                    "tool_arguments": {"order_id": "ORDER-003"},
+                }
+                if known_order is None
+                else {
+                    "action": "FINISH",
+                    "reason": "已有订单事实, 安全结束本轮查询",
+                    "tool_name": None,
+                    "tool_arguments": {},
+                }
+            )
+        elif schema_name == "RerankResponse":
+            output = {
+                "scores": [
+                    {"candidate_id": item["candidate_id"], "score": 0.9}
+                    for item in user_payload["candidates"]
+                ]
+            }
+        elif schema_name == "SpecificationAnswerDraft":
+            output = {
+                "answer": "坐标系问题应先完成返工处理, 再重新提交复核。",
+                "citation_ids": [user_payload["citations"][0]["chunk_id"]],
+            }
+        else:  # pragma: no cover - 新增模型协议时应显式扩展测试Stub
+            raise AssertionError(f"unexpected schema: {schema_name}")
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "chatcmpl-production-skills",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "production-skill-test-model",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(output, ensure_ascii=False),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 4,
+                    "total_tokens": 16,
+                },
+            },
+        )
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_agent_read_skills_execute_through_unified_http(
+    migrated_database_url: str,
+) -> None:
+    """三个只读Skill经统一HTTP执行, 并保存实际嵌套Step和引用结果。"""
+
+    seed_database = Database(migrated_database_url)
+    try:
+        async with seed_database.session() as session, session.begin():
+            await KnowledgeIngestionService(
+                repository=KnowledgeIndexRepository(session),
+                embedding_generator=_CatalogEmbeddingGenerator(),
+            ).ingest_catalog(DEFAULT_KNOWLEDGE_ROOT)
+    finally:
+        await seed_database.dispose()
+
+    settings = Settings(
+        environment="test",
+        database_url=migrated_database_url,
+        business_service_url=AnyHttpUrl("http://business.test"),
+        model_name="production-skill-test-model",
+        model_base_url=AnyHttpUrl("http://model.test/v1"),
+        model_api_key=None,
+        model_max_retries=0,
+        embedding_api_key=None,
+    )
+    model_client = OpenAICompatibleChatClient(
+        settings,
+        transport=_production_skill_model_transport(),
+    )
+
+    def business_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/orders/ORDER-003"
+        return httpx.Response(
+            200,
+            request=request,
+            headers={"X-Trace-Id": request.headers["X-Trace-Id"]},
+            json={
+                "success": True,
+                "code": "SUCCESS",
+                "message": "ok",
+                "data": {
+                    "orderId": "ORDER-003",
+                    "productType": "DOM",
+                    "status": "BLOCKED",
+                },
+                "trace_id": request.headers["X-Trace-Id"],
+                "retryable": False,
+            },
+        )
+
+    business_client = BusinessHttpClient(
+        settings,
+        transport=httpx.MockTransport(business_handler),
+    )
+    application = create_app(settings)
+    try:
+        async with application.router.lifespan_context(application):
+            application.state.model_client = model_client
+            application.state.tool_registry = create_read_tool_registry(business_client)
+            application.state.agent_skill_dispatcher = ProductionAgentSkillDispatcher(
+                database=application.state.database,
+                tool_registry=application.state.tool_registry,
+                model_client=model_client,
+                knowledge_capability_service=(
+                    application.state.knowledge_index_capability_service
+                ),
+                embedding_generator=_CatalogQueryEmbeddingGenerator(),
+                today=lambda: date(2026, 9, 3),
+            )
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=application),
+                base_url="http://test",
+            ) as api_client:
+                headers = {
+                    "X-User-Id": "reviewer-001",
+                    "X-User-Role": "REVIEWER",
+                }
+                order_response = await api_client.post(
+                    "/api/agent/messages",
+                    json={"message": "查询 ORDER-003 当前状态"},
+                    headers={**headers, "X-Trace-Id": "trace-production-order"},
+                )
+                diagnosis_response = await api_client.post(
+                    "/api/agent/messages",
+                    json={"message": "诊断 ORDER-003"},
+                    headers={**headers, "X-Trace-Id": "trace-production-diagnosis"},
+                )
+                specification_response = await api_client.post(
+                    "/api/agent/messages",
+                    json={"message": "坐标系问题应如何处理"},
+                    headers={**headers, "X-Trace-Id": "trace-production-specification"},
+                )
+
+            assert order_response.status_code == 200, order_response.text
+            assert diagnosis_response.status_code == 200, diagnosis_response.text
+            assert specification_response.status_code == 200, specification_response.text
+            order_body = order_response.json()
+            diagnosis_body = diagnosis_response.json()
+            specification_body = specification_response.json()
+            assert order_body["result"] == {
+                "kind": "ORDER_STATUS",
+                "subject": "ORDER",
+                "order_id": "ORDER-003",
+                "task_id": None,
+                "status": "BLOCKED",
+                "summary": "订单 ORDER-003 当前状态为 BLOCKED。",
+            }
+            assert diagnosis_body["result"]["kind"] == "DIAGNOSIS"
+            assert (
+                diagnosis_body["result"]["diagnosis"]["blocking_stage"]
+                == "INSUFFICIENT_INFORMATION"
+            )
+            specification = specification_body["result"]["specification_answer"]
+            assert specification["status"] == "ANSWERED"
+            assert specification["citations"]
+            assert specification["citations"][0]["document_version"]
+            assert specification["citations"][0]["chunk_id"]
+
+            run_ids = (
+                order_body["run_id"],
+                diagnosis_body["run_id"],
+                specification_body["run_id"],
+            )
+            async with application.state.database.session() as session:
+                runs = [await AgentRunRepository(session).get(run_id) for run_id in run_ids]
+                steps = [
+                    await AgentStepRepository(session).list_by_run(run_id)
+                    for run_id in run_ids
+                ]
+
+            assert all(run is not None for run in runs)
+            assert [run.tool_call_count for run in runs if run is not None] == [1, 1, 0]
+            assert [run.total_token_count for run in runs if run is not None] == [16, 48, 48]
+            assert [step.step_type for step in steps[0]][-2:] == [
+                AgentStepType.WORKFLOW,
+                AgentStepType.TOOL,
+            ]
+            assert AgentStepType.AGENT in [step.step_type for step in steps[1]]
+            assert [step.step_type for step in steps[2]][-3:] == [
+                AgentStepType.RAG,
+                AgentStepType.LLM,
+                AgentStepType.LLM,
+            ]
+    finally:
+        await business_client.aclose()
+        await model_client.aclose()

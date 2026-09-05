@@ -23,13 +23,18 @@ from app.api.tool_debug import router as tool_debug_router
 from app.clients.business import BusinessHttpClient
 from app.clients.model import OpenAICompatibleChatClient
 from app.database import Database
+from app.knowledge import (
+    EmbeddingBatchGenerator,
+    EmbeddingConfig,
+    OpenAICompatibleEmbeddingProvider,
+)
 from app.observability import TraceIdMiddleware, configure_logging
 from app.services import (
     DatabaseApprovalExecutionStore,
     KnowledgeIndexCapabilityService,
     ModelCapabilityService,
+    ProductionAgentSkillDispatcher,
     RunEventService,
-    UnavailableAgentSkillDispatcher,
 )
 from app.settings import Settings, get_settings
 from app.tools import create_read_tool_registry, create_write_tool_registry
@@ -64,10 +69,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.database = database
         application.state.business_client = business_client
         application.state.model_client = model_client
-        application.state.agent_skill_dispatcher = UnavailableAgentSkillDispatcher()
         application.state.run_event_service = RunEventService()
         # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。
         application.state.tool_registry = create_read_tool_registry(business_client)
+        embedding_provider: OpenAICompatibleEmbeddingProvider | None = None
+        embedding_generator: EmbeddingBatchGenerator | None = None
+        try:
+            embedding_config = EmbeddingConfig.from_settings(resolved_settings)
+        except ValueError:
+            # 未配置Embedding时应用仍可启动; 规范Skill在实际调用时返回稳定错误。
+            pass
+        else:
+            embedding_provider = OpenAICompatibleEmbeddingProvider(embedding_config)
+            embedding_generator = EmbeddingBatchGenerator(
+                embedding_config,
+                embedding_provider,
+            )
+        application.state.embedding_provider = embedding_provider
+        application.state.agent_skill_dispatcher = ProductionAgentSkillDispatcher(
+            database=database,
+            tool_registry=application.state.tool_registry,
+            model_client=model_client,
+            knowledge_capability_service=(
+                application.state.knowledge_index_capability_service
+            ),
+            embedding_generator=embedding_generator,
+        )
         application.state.write_tool_registry = create_write_tool_registry(
             business_client,
             DatabaseApprovalExecutionStore(database),
@@ -92,12 +119,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await application.state.run_event_service.close()
             finally:
                 try:
-                    await model_client.aclose()
+                    if embedding_provider is not None:
+                        await embedding_provider.aclose()
                 finally:
                     try:
-                        await business_client.aclose()
+                        await model_client.aclose()
                     finally:
-                        await database.dispose()
+                        try:
+                            await business_client.aclose()
+                        finally:
+                            await database.dispose()
             logger.info("service_stopped", extra={"service": resolved_settings.service_name})
 
     application = FastAPI(

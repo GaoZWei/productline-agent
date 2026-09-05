@@ -59,6 +59,7 @@ from app.services.order_diagnosis import (
     OrderDiagnosisExecutionError,
     OrderDiagnosisService,
 )
+from app.services.production_agent_skills import ProductionAgentSkillDispatcher
 from app.services.review_draft_store import DatabaseReviewDraftStore
 from app.services.run_events import (
     EventReplayUnavailableError,
@@ -150,6 +151,7 @@ __all__ = [
     "OrderDiagnosisExecution",
     "OrderDiagnosisExecutionError",
     "OrderDiagnosisService",
+    "ProductionAgentSkillDispatcher",
     "RunEventPublisher",
     "RunEventService",
     "RunEventServiceError",

@@ -1450,3 +1450,24 @@
 - `POST /api/agent/messages`可创建或复用本人Session，持久化用户消息和Run，并为上下文、每次Router模型调用、路由门禁及Skill分发记录有序Step和SSE终态。
 - 参数仍按用户本轮输入、已确认Session、页面提示、Session候选的固定优先级合并；澄清选择必须引用同一Session中最近返回结果的成功澄清Run，低置信度、缺参、冲突和意图确认都不能绕过服务端门禁。
 - 统一结果以`kind`区分状态、诊断、规范回答、澄清和Approval；历史接口继续保留固定诊断字段，同时提供统一Envelope，模型未配置、不可用、两次结构化输出非法和Skill未接线均返回独立稳定错误。
+
+---
+
+## 2026-09-03 — `[T767-T769] M7.6-E 三个只读Skill生产接线`
+
+### 核心解决的问题
+
+把订单/任务状态、动态诊断和规范问答从独立Workflow测试组件接入统一Agent消息入口，使生产Router通过门禁后能够执行真实只读链路，同时保持Java业务事实、RAG规范依据和模型决策互不越权。
+
+### 实现的核心代码
+
+- `agent-service/app/workflows/order_status.py`：订单与任务状态的确定性意图校验、Java Tool调用和最小结果投影。
+- `agent-service/app/services/production_agent_skills.py`：三个只读Skill分发、Action循环装配、知识索引门禁、服务端权限/日期及嵌套Step观测。
+- `agent-service/app/services/agent_messages.py`、`app/workflows/recording.py`：Skill请求级Run上下文、模型/Tool用量聚合和AGENT、LLM、TOOL、RAG记录能力。
+- `agent-service/app/main.py`：生产分发器、七个只读Tool和按配置惰性启用的Query Embedding Provider应用接线。
+
+### 实现的核心功能
+
+- 状态查询按`ORDER_QUERY`或`TASK_TRACKING`唯一调用对应Java只读Tool，返回的标识、状态和摘要均从已校验Tool结果投影，不调用模型补造业务事实。
+- 动态诊断在同一Run内让Action模型选择注册表中的LOW风险动作，再由确定性Workflow校验参数、资源归属、权限、重复调用及执行预算；模型调用、动作轮次和Tool调用分别形成有序Step，Action模型失败会保留稳定错误并使Turn失败，不会冒充正常信息不足。
+- 规范问答先校验完整索引身份，以服务端角色和当前日期执行元数据过滤，再运行Query Embedding、双路召回、RRF、Rerank和引用白名单回答；索引或Embedding未就绪返回稳定错误，不回退为无引用规范结论。

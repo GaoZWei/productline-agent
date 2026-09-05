@@ -36,6 +36,7 @@ from app.schemas.agent_messages import (
     SpecificationAnswerAgentResult,
 )
 from app.schemas.business import BusinessIdentity
+from app.schemas.context import PageContext
 from app.schemas.events import RunEventType
 from app.schemas.routing import EntityExtractionResult, EntitySource, RoutingDecision
 from app.schemas.run_observability import RunTokenUsage
@@ -49,13 +50,17 @@ from app.services.session_context import (
     SessionContextError,
     SessionContextService,
 )
-from app.workflows.recording import DatabaseWorkflowStepRecorder
+from app.workflows.recording import (
+    DatabaseWorkflowStepRecorder,
+    EventPublishingWorkflowStepRecorder,
+    ObservedWorkflowStepRecorder,
+)
 
 _LOGGER = logging.getLogger("agent-service.agent-messages")
 _RESULT_ADAPTER: TypeAdapter[AgentMessageResult] = TypeAdapter(AgentMessageResult)
 OutputT = TypeVar("OutputT", bound=BaseModel)
 
-
+# 向skill传递的参数
 @dataclass(frozen=True, slots=True)
 class AgentSkillRequest:
     """分发给业务Skill的受控请求, 不把页面或Session提示冒充Java事实。"""
@@ -66,15 +71,20 @@ class AgentSkillRequest:
     message: str
     identity: BusinessIdentity
     decision: RoutingDecision
+    page_context: PageContext | None
+    step_recorder: ObservedWorkflowStepRecorder  # 让Skill内部继续记录Step信息
+    first_step_sequence: int  #  Skill内部Step从哪个序号开始
+    event_sink: RunEventSink | None  #  向前端发布SSE进度事件的Sink
 
-
+# skill执行完返回的结果
 @dataclass(frozen=True, slots=True)
 class AgentSkillExecution:
     """Skill结果及其可汇总到Run的最小用量。"""
 
     result: AgentMessageResult
-    token_usage: RunTokenUsage = field(default_factory=RunTokenUsage)
-    tool_call_count: int = 0
+    token_usage: RunTokenUsage = field(default_factory=RunTokenUsage)  #  Skill内部模型Token使用量, 由Skill内部的ObservedModelInvoker收集
+    tool_call_count: int = 0  #  Java Tool调用次数
+    termination_reason: str = "COMPLETED"  #  动态Agent真实终止原因
 
 
 class AgentSkillDispatcher(Protocol):
@@ -92,7 +102,25 @@ class AgentSkillUnavailableError(RuntimeError):
 
 
 class AgentSkillExecutionError(RuntimeError):
-    """Skill已接线但执行失败或返回了错误结果类型。"""
+    """Skill已接线但执行失败, 并携带可以安全持久化的稳定字段。"""
+
+    def __init__(
+        self,
+        *,
+        code: str = "SKILL_EXECUTION_ERROR",
+        message: str = "routed agent skill execution failed",
+        retryable: bool = False,
+        error_step: str = "dispatch_agent_skill",
+        token_usage: RunTokenUsage | None = None,
+        tool_call_count: int = 0,
+    ) -> None:
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.error_step = error_step
+        self.token_usage = token_usage or RunTokenUsage()
+        self.tool_call_count = tool_call_count
+        super().__init__(f"{code}: {message}")
 
 
 class UnavailableAgentSkillDispatcher:
@@ -303,6 +331,12 @@ class AgentMessageService:
         )
         # 创建 Step Recorder
         recorder = DatabaseWorkflowStepRecorder(self._database)
+        skill_recorder: ObservedWorkflowStepRecorder = recorder
+        if self._event_sink is not None:
+            skill_recorder = EventPublishingWorkflowStepRecorder(
+                recorder,
+                self._event_sink,
+            )
         try:
             # 4.创建并完成上下文 Step
             await recorder.start_step(
@@ -469,6 +503,10 @@ class AgentMessageService:
                             message=request.message,
                             identity=identity,
                             decision=decision,
+                            page_context=request.page_context,
+                            step_recorder=skill_recorder,
+                            first_step_sequence=dispatch_sequence + 1,
+                            event_sink=self._event_sink,
                         ),
                     )
                     # 6.8.3.校验 Skill 返回类型
@@ -480,13 +518,20 @@ class AgentMessageService:
                         output_summary="skill_dispatch=failed",
                     )
                     raise
+                except AgentSkillExecutionError as error:
+                    await recorder.mark_failed(
+                        dispatch_step_id,
+                        error_code=error.code,
+                        output_summary="skill_dispatch=failed",
+                    )
+                    raise
                 except Exception as error:
                     await recorder.mark_failed(
                         dispatch_step_id,
                         error_code="SKILL_EXECUTION_ERROR",
                         output_summary="skill_dispatch=failed",
                     )
-                    raise AgentSkillExecutionError("routed agent skill execution failed") from error
+                    raise AgentSkillExecutionError() from error
                 await recorder.mark_succeeded(
                     dispatch_step_id,
                     output_summary=f"result_kind={skill_execution.result.kind.value}",
@@ -494,7 +539,7 @@ class AgentMessageService:
                 result = skill_execution.result
                 skill_usage = skill_execution.token_usage
                 tool_call_count = skill_execution.tool_call_count
-                termination_reason = "COMPLETED"
+                termination_reason = skill_execution.termination_reason
             # 6.8.4.汇总运行指标
             total_usage = RunTokenUsage.from_counts(
                 input_tokens=router_usage.input_tokens + skill_usage.input_tokens,
@@ -572,11 +617,15 @@ class AgentMessageService:
         except AgentSkillExecutionError as error:
             await self._fail_and_raise(
                 run_id,
-                code="SKILL_EXECUTION_ERROR",
-                message="routed agent skill execution failed",
-                retryable=False,
-                error_step="dispatch_agent_skill",
-                token_usage=router_usage,
+                code=error.code,
+                message=error.message,
+                retryable=error.retryable,
+                error_step=error.error_step,
+                token_usage=RunTokenUsage.from_counts(
+                    input_tokens=router_usage.input_tokens + error.token_usage.input_tokens,
+                    output_tokens=router_usage.output_tokens + error.token_usage.output_tokens,
+                ),
+                tool_call_count=error.tool_call_count,
                 cause=error,
             )
         except AgentMessageExecutionError:
@@ -603,7 +652,8 @@ class AgentMessageService:
         message_id: str,
     ) -> tuple[str, SessionContext]:
         now = datetime.now(UTC)
-        # 前端不能通过 page_context.user_role 声称自己拥有另一个角色。可信身份来自请求身份解析，而不是页面参数
+        # 前端不能通过 page_context.user_role 声称自己拥有另一个角色。
+        # 可信身份来自请求身份解析, 而不是页面参数。
         if request.page_context is not None and request.page_context.user_role != identity.role:
             raise SessionAccessDeniedError()
         # 把以下操作放在同一个数据库事务中, 确保原子性
@@ -828,6 +878,7 @@ class AgentMessageService:
         error_step: str,
         token_usage: RunTokenUsage,
         cause: Exception,
+        tool_call_count: int = 0,
     ) -> None:
         """尽力持久化失败终态并发布不含内部正文的终态事件。"""
 
@@ -839,6 +890,7 @@ class AgentMessageService:
                     error_code=code,
                     error_step=error_step,
                     token_usage=token_usage,
+                    tool_call_count=tool_call_count,
                     termination_reason="EXECUTION_ERROR",
                 )
         await self._publish(

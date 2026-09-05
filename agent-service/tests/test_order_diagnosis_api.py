@@ -489,7 +489,7 @@ async def test_order_diagnosis_api_persists_successful_run_and_returns_golden_re
             "get_review_result",
             "get_task_detail",
         ]
-        assert run.version_snapshot["rag_strategy"]["version"] == "hybrid-rrf-rerank-v1"
+        assert run.version_snapshot["rag_strategy"]["version"] == "hybrid-rrf-rerank-v2"
         assert run.page_context_snapshot == _page_context()
         assert run.router_result is None
         assert run.input_token_count == 0

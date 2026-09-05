@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-sse-events test-run-timeline test-run-history test-model-runtime test-model-adapters knowledge-ingest test-knowledge-ingestion test-agent-messages test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-knowledge-hybrid test-knowledge-rerank test-knowledge-citations test-specification-qa eval-rag test-approval test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-sse-events test-run-timeline test-run-history test-model-runtime test-model-adapters knowledge-ingest test-knowledge-ingestion test-agent-messages test-agent-read-skills test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-knowledge-hybrid test-knowledge-rerank test-knowledge-citations test-specification-qa eval-rag test-approval test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -81,6 +81,10 @@ test-knowledge-ingestion: ## 验证 M7.6-C全量入库、幂等重建、CLI退�
 test-agent-messages: ## 验证 M7.6-D统一消息、路由澄清、Run/Step/SSE和模型错误
 	cd agent-service && uv run --frozen pytest -q tests/test_agent_messages.py tests/test_intent_router_prompt.py tests/test_run_history.py tests/test_run_history_api.py
 	./scripts/test-agent-persistence.sh -k agent_messages
+
+test-agent-read-skills: ## 验证 M7.6-E三个只读Skill生产分发、观测和统一HTTP闭环
+	cd agent-service && uv run --frozen pytest -q tests/test_production_agent_skills.py tests/test_dynamic_diagnosis_workflow.py tests/knowledge/test_specification_qa_workflow.py
+	./scripts/test-agent-persistence.sh -k agent_read_skills
 
 test-workflow-schemas: ## 单独验证 M2.4 Workflow 状态与诊断 Schema
 	cd agent-service && uv run --frozen pytest -q tests/test_workflow_schemas.py

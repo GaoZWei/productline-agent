@@ -25,9 +25,11 @@ from app.workflows.dynamic_diagnosis import (
 )
 from app.workflows.information_gaps import InformationGapDetector
 from app.workflows.order_diagnosis import OrderDiagnosisWorkflow
+from app.workflows.order_status import OrderStatusWorkflow, OrderStatusWorkflowError
 from app.workflows.recording import (
     DatabaseWorkflowStepRecorder,
     EventPublishingWorkflowStepRecorder,
+    ObservedWorkflowStepRecorder,
     WorkflowStepRecorder,
 )
 from app.workflows.review_draft import (
@@ -67,7 +69,10 @@ __all__ = [
     "InvalidActionDecisionOutputError",
     "InvalidDiagnosisNarrativeError",
     "InvalidReviewDraftOutputError",
+    "ObservedWorkflowStepRecorder",
     "OrderDiagnosisWorkflow",
+    "OrderStatusWorkflow",
+    "OrderStatusWorkflowError",
     "ReviewDraftBusinessFactError",
     "ReviewDraftGenerationError",
     "ReviewDraftGenerationModel",
