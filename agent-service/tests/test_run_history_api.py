@@ -121,9 +121,10 @@ async def test_run_list_api_requires_identity_and_returns_paginated_safe_summari
     assert success.json()["page"] == 2
     assert success.json()["total"] == 3
     assert success.json()["items"][0] == {
-        "run_id": "run-history-002",
-        "session_id": "session-history-001",
-        "status": "FAILED",
+            "run_id": "run-history-002",
+            "session_id": "session-history-001",
+            "source_run_id": None,
+            "status": "FAILED",
         "order_id": "ORDER-003",
         "task_id": "TASK-003",
         "tool_call_count": 4,

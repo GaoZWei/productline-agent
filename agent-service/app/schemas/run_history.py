@@ -48,6 +48,7 @@ class RunSummary(RunHistorySchema):
 
     run_id: RunIdentifier
     session_id: SessionIdentifier
+    source_run_id: RunIdentifier | None = None
     status: AgentRunStatus
     order_id: OrderIdentifier | None = None
     task_id: TaskIdentifier | None = None

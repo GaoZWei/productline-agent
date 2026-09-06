@@ -1,14 +1,18 @@
 import {
   requestApprovalConfirmation,
+  requestApprovalCancellation,
   requestApprovalOperationLog,
+  requestReworkApproval,
   requestOrderDiagnosis,
 } from "./agentClient";
 import type {
   ApprovalConfirmationResponse,
+  ApprovalCancellationResponse,
   OrderDiagnosisResponse,
   OperationLogDetail,
   PageContext,
   ReviewApprovalDecision,
+  ReworkApprovalCreationResponse,
 } from "../types/agent";
 
 export function diagnoseOrder(
@@ -33,6 +37,18 @@ export function confirmReviewApproval(
   decision: ReviewApprovalDecision,
 ): Promise<ApprovalConfirmationResponse> {
   return requestApprovalConfirmation(decision);
+}
+
+export function cancelReviewApproval(
+  approvalId: string,
+): Promise<ApprovalCancellationResponse> {
+  return requestApprovalCancellation(approvalId);
+}
+
+export function createReworkApproval(
+  sourceApprovalId: string,
+): Promise<ReworkApprovalCreationResponse> {
+  return requestReworkApproval(sourceApprovalId);
 }
 
 export function getApprovalOperationLog(approvalId: string): Promise<OperationLogDetail> {

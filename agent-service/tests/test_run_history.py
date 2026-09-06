@@ -86,8 +86,9 @@ def test_run_summary_projects_only_safe_fields_and_hides_invalid_resource_hint()
     assert summary.tool_call_count == 6
     assert set(summary.model_dump()) == {
         "run_id",
-        "session_id",
-        "status",
+            "session_id",
+            "source_run_id",
+            "status",
         "order_id",
         "task_id",
         "tool_call_count",

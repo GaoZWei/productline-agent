@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from app.eventing import RunEventSink
 from app.models import AgentRunStatus, ApprovalStatus
+from app.schemas.agent_messages import DiagnosisAgentResult
 from app.schemas.approval import ReviewDraft
 from app.schemas.business import BusinessIdentity
 from app.schemas.context import PageContext
@@ -60,8 +61,11 @@ class ReviewDraftGenerationResult:
 
     approval_id: str
     run_id: str
+    source_run_id: str
     approval_status: ApprovalStatus
     run_status: AgentRunStatus
+    target_id: str
+    target_version: int
     draft: ReviewDraft
 
 
@@ -80,6 +84,7 @@ class ReviewDraftStore(Protocol):
         *,
         approval_id: str,
         run_id: str,
+        source_run_id: str,
         draft: ReviewDraft,
         target_version: int,
     ) -> Awaitable[ReviewDraftPersistenceResult]: ...
@@ -175,7 +180,7 @@ class ReviewDraftGenerationWorkflow:
         self._approval_id_factory = approval_id_factory
         self._event_sink = event_sink
         self._invoked = False
-    # 主流程
+    # 主流程 Review草稿生成
     async def ainvoke(
         self,
         *,
@@ -187,7 +192,7 @@ class ReviewDraftGenerationWorkflow:
         if self._invoked:
             raise RuntimeError("one review draft workflow instance can only execute once")
         self._invoked = True
-        # 第二步: 读取最近诊断Run的快照。
+        # 第二步: 找到来源诊断
         source = await self._store.latest_diagnosis(  # 定位最近一个带结果的Run
             session_id,
             identity=self._tool_context.identity,
@@ -195,8 +200,9 @@ class ReviewDraftGenerationWorkflow:
         diagnosis = self._parse_source_diagnosis(source)
         if source is None:  # pragma: no cover - 已由解析函数关闭失败
             raise AssertionError("source diagnosis must exist")
-        if self._tool_context.run_id != source.run_id:
-            raise ReviewDraftSourceError("ToolContext run_id must match recent diagnosis run")
+        # 强制使用新run
+        if self._tool_context.run_id == source.run_id:
+            raise ReviewDraftSourceError("Review must execute in a new Run")
         # 第三步: 必须重新调用Java Tool。
         task = await self._read_task(task_id)
         issues = await self._read_quality_issues(task_id)
@@ -227,14 +233,15 @@ class ReviewDraftGenerationWorkflow:
         approval_id = self._approval_id_factory()
         persisted = await self._store.save_waiting_approval(
             approval_id=approval_id,
-            run_id=source.run_id,
+            run_id=self._tool_context.run_id,
+            source_run_id=source.run_id,
             draft=draft,
             target_version=task.version,
         )
         if self._event_sink is not None:
             await self._event_sink.publish(
                 RunEventType.APPROVAL_REQUIRED,
-                run_id=source.run_id,
+                run_id=self._tool_context.run_id,
                 data={
                     "approval_id": persisted.approval_id,
                     "status": persisted.approval_status.value,
@@ -243,9 +250,12 @@ class ReviewDraftGenerationWorkflow:
             )
         return ReviewDraftGenerationResult(
             approval_id=persisted.approval_id,
-            run_id=source.run_id,
+            run_id=self._tool_context.run_id,
+            source_run_id=source.run_id,
             approval_status=persisted.approval_status,
             run_status=persisted.run_status,
+            target_id=task.task_id,
+            target_version=task.version,
             draft=draft,
         )
 
@@ -259,10 +269,12 @@ class ReviewDraftGenerationWorkflow:
             raise ReviewDraftSourceError("recent diagnosis Run must be SUCCEEDED")
         if source.final_result is None:
             raise ReviewDraftSourceError("recent diagnosis result is invalid")
-        try:  # 历史诊断要用JSON模式恢复模型输出
-            return DiagnosisResult.model_validate_json(
-                json.dumps(source.final_result, ensure_ascii=False, allow_nan=False)
-            )
+        try:  # 兼容旧固定诊断结果和统一入口的DIAGNOSIS Envelope。
+            payload = json.dumps(source.final_result, ensure_ascii=False, allow_nan=False)
+            try:
+                return DiagnosisAgentResult.model_validate_json(payload).diagnosis
+            except ValidationError:
+                return DiagnosisResult.model_validate_json(payload)
         except (TypeError, ValueError, ValidationError) as error:
             raise ReviewDraftSourceError("recent diagnosis result is invalid") from error
     # 只调用两个只读Tool获取任务详情和质检问题列表

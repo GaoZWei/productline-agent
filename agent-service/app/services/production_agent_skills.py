@@ -24,13 +24,15 @@ from app.knowledge import (
 from app.model_adapters import (
     StructuredActionDecisionModel,
     StructuredReranker,
+    StructuredReviewDraftGenerationModel,
     StructuredSpecificationAnswerModel,
 )
-from app.models import AgentStepType
+from app.models import AgentStepType, OperationType
 from app.repositories import KnowledgeIndexRepository, KnowledgeSearchRepository
 from app.routing import BusinessSkill, Intent
 from app.schemas.action import ActionDecision
 from app.schemas.agent_messages import (
+    ApprovalAgentResult,
     DiagnosisAgentResult,
     SpecificationAnswerAgentResult,
 )
@@ -47,17 +49,20 @@ from app.services.agent_messages import (
 )
 from app.services.knowledge_index_capabilities import KnowledgeIndexCapabilityService
 from app.services.model_invocation import ObservedModelInvoker, StructuredChatClient
+from app.services.review_draft_store import DatabaseReviewDraftStore
 from app.tools import BaseTool, ToolContext, ToolRegistry, ToolRiskLevel
 from app.tools.models import ToolResult
 from app.workflows import (
     ActionDecider,
     AgentExecutionLimits,
     DynamicDiagnosisWorkflow,
+    ReviewDraftGenerationWorkflow,
     SpecificationQaWorkflow,
     SpecificationSkill,
 )
 from app.workflows.order_status import OrderStatusWorkflow, OrderStatusWorkflowError
 from app.workflows.recording import ObservedWorkflowStepRecorder, WorkflowStepRecorder
+from app.workflows.review_draft import ReviewDraftGenerationError
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
 _DateProvider = Callable[[], date]
@@ -524,7 +529,7 @@ class _ProductionSpecificationWorkflow:
 
 
 class ProductionAgentSkillDispatcher:
-    """将三个只读 BusinessSkill 装配到统一 Agent Run, Review 保持未接线。"""
+    """把三个只读Skill和唯一写操作Review草稿接入统一Agent Run。"""
 
     def __init__(
         self,
@@ -552,9 +557,6 @@ class ProductionAgentSkillDispatcher:
     ) -> AgentSkillExecution:
         """按确定性 Skill 名称分发, 并返回统一结果、用量和 Tool 次数。"""
 
-        if skill is BusinessSkill.REVIEW:
-            raise AgentSkillUnavailableError("review skill is not available before M7.6-F")
-
         sequence = _StepSequence(request.first_step_sequence)
         collector = _TokenCollector()
         observed_registry = cast(
@@ -578,6 +580,13 @@ class ProductionAgentSkillDispatcher:
             )
         if skill is BusinessSkill.SPECIFICATION:
             return await self._dispatch_specification(request, sequence, collector)
+        if skill is BusinessSkill.REVIEW:
+            return await self._dispatch_review(
+                request,
+                observed_registry,
+                sequence,
+                collector,
+            )
         raise AgentSkillUnavailableError("routed agent skill is not available")
 
     async def _dispatch_order_status(
@@ -727,6 +736,92 @@ class ProductionAgentSkillDispatcher:
         return AgentSkillExecution(
             result=SpecificationAnswerAgentResult(specification_answer=result),
             token_usage=collector.total,
+        )
+
+    async def _dispatch_review(
+        self,
+        request: AgentSkillRequest,
+        registry: ToolRegistry,
+        sequence: _StepSequence,
+        collector: _TokenCollector,
+    ) -> AgentSkillExecution:
+        """刷新Java事实和现行规范后生成草稿, 保存Approval但不调用写Tool。"""
+
+        entities = request.decision.entities.to_router_entities()
+        # 确认Router给出的意图是REVIEW_GENERATION，并且存在task_id。
+        if request.decision.intent is not Intent.REVIEW_GENERATION or entities.task_id is None:
+            raise AgentSkillExecutionError(
+                code="SKILL_DISPATCH_INVALID",
+                message="review routing decision is missing task_id",
+            )
+        # 创建只包含TASK_READ和QUALITY_ISSUE_READ的ToolContext
+        context = ToolContext(
+            identity=request.identity,
+            permissions=frozenset({"TASK_READ", "QUALITY_ISSUE_READ"}),
+            trace_id=request.trace_id,
+            run_id=request.run_id,
+        )
+        # 给Review模型套上观测包装器，记录模型名称、Token和LLM Step
+        observed_draft_client = _SequencedObservedModelClient(
+            self._model_client,
+            request.step_recorder,
+            sequence,
+            collector,
+            run_id=request.run_id,
+            step_name="generate_review_draft",
+        )
+        # 组装并执行ReviewDraftGenerationWorkflow
+        workflow = ReviewDraftGenerationWorkflow(
+            store=DatabaseReviewDraftStore(self._database),
+            tool_registry=registry,
+            tool_context=context,
+            specification_workflow=self._specification_workflow(request, sequence, collector),
+            draft_model=StructuredReviewDraftGenerationModel(observed_draft_client),
+            effective_at=self._today(),
+            permission_scope=self._permission_scope(request),
+            page_context=request.page_context,
+            event_sink=request.event_sink,
+        )
+        try:
+            generated = await workflow.ainvoke(
+                session_id=request.session_id,
+                task_id=entities.task_id,
+            )
+        except AgentSkillExecutionError:
+            raise
+        except ModelClientError as error:
+            raise AgentSkillExecutionError(
+                code=error.code.value,
+                message=str(error),
+                retryable=error.retryable,
+                error_step="generate_review_draft",
+                token_usage=collector.total,
+                tool_call_count=context.tool_call_ledger.recorded_call_count,
+            ) from error
+        except ReviewDraftGenerationError as error:
+            raise AgentSkillExecutionError(
+                code="REVIEW_DRAFT_GENERATION_ERROR",
+                message=str(error),
+                retryable=False,
+                error_step="generate_review_draft",
+                token_usage=collector.total,
+                tool_call_count=context.tool_call_ledger.recorded_call_count,
+            ) from error
+        return AgentSkillExecution(
+            result=ApprovalAgentResult(
+                approval_id=generated.approval_id,
+                run_id=generated.run_id,
+                source_run_id=generated.source_run_id,
+                status=generated.approval_status,
+                operation_type=OperationType.SUBMIT_REVIEW,
+                target_id=generated.target_id,
+                target_version=generated.target_version,
+                draft=generated.draft,
+            ),
+            token_usage=collector.total,
+            tool_call_count=context.tool_call_ledger.recorded_call_count,
+            termination_reason="WAITING_CONFIRMATION",
+            awaiting_confirmation=True,
         )
 
     def _specification_workflow(

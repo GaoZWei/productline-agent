@@ -30,6 +30,12 @@ from app.services.approval_lifecycle import (
     ApprovalNotFoundError,
     InvalidApprovalTransitionError,
 )
+from app.services.approval_orchestration import (
+    ApprovalCancellation,
+    ApprovalOrchestrationError,
+    ApprovalOrchestrationService,
+    ReworkApprovalCreation,
+)
 from app.services.intent_router import (
     IntentRouter,
     IntentRoutingModel,
@@ -115,6 +121,7 @@ __all__ = [
     "AgentSkillExecutionError",
     "AgentSkillRequest",
     "AgentSkillUnavailableError",
+    "ApprovalCancellation",
     "ApprovalConfirmationError",
     "ApprovalConfirmationExecution",
     "ApprovalConfirmationService",
@@ -124,6 +131,8 @@ __all__ = [
     "ApprovalLifecycleService",
     "ApprovalLifecycleValidationError",
     "ApprovalNotFoundError",
+    "ApprovalOrchestrationError",
+    "ApprovalOrchestrationService",
     "ClarificationContinuationError",
     "DatabaseApprovalConfirmationStore",
     "DatabaseApprovalExecutionStore",
@@ -152,6 +161,7 @@ __all__ = [
     "OrderDiagnosisExecutionError",
     "OrderDiagnosisService",
     "ProductionAgentSkillDispatcher",
+    "ReworkApprovalCreation",
     "RunEventPublisher",
     "RunEventService",
     "RunEventServiceError",

@@ -31,3 +31,6 @@ def test_alembic_configuration_points_to_migrations() -> None:
     assert (
         project_root / "migrations" / "versions" / "0013_llm_step_observability.py"
     ).is_file()
+    assert (
+        project_root / "migrations" / "versions" / "0014_review_source_run.py"
+    ).is_file()

@@ -1471,3 +1471,25 @@
 - 状态查询按`ORDER_QUERY`或`TASK_TRACKING`唯一调用对应Java只读Tool，返回的标识、状态和摘要均从已校验Tool结果投影，不调用模型补造业务事实。
 - 动态诊断在同一Run内让Action模型选择注册表中的LOW风险动作，再由确定性Workflow校验参数、资源归属、权限、重复调用及执行预算；模型调用、动作轮次和Tool调用分别形成有序Step，Action模型失败会保留稳定错误并使Turn失败，不会冒充正常信息不足。
 - 规范问答先校验完整索引身份，以服务端角色和当前日期执行元数据过滤，再运行Query Embedding、双路召回、RRF、Rerank和引用白名单回答；索引或Embedding未就绪返回稳定错误，不回退为无引用规范结论。
+
+---
+
+## 2026-09-06 — `[T770-T773] M7.6-F Review与Approval生产闭环`
+
+### 核心解决的问题
+
+把Review草稿从独立组件接入统一Agent入口，并让来源诊断、人工等待、确认写回和独立返工授权形成可追溯生命周期，
+避免复用诊断Run终态、未确认写入或把返工建议当成复核授权的一部分。
+
+### 实现的核心代码
+
+- `agent-service/app/services/production_agent_skills.py`、`app/workflows/review_draft.py`：Review生产分发、事实/规范刷新及结构化草稿生成。
+- `agent-service/app/services/review_draft_store.py`、`app/services/approval_run_lifecycle.py`：Approval草稿、来源Run、APPROVAL/WRITEBACK Step和等待/终态原子联动。
+- `agent-service/app/services/approval_confirmation.py`、`app/services/approval_orchestration.py`：确认执行、取消、失效和独立返工Approval编排。
+- `agent-service/app/api/approvals.py`、`migrations/versions/0014_review_source_run.py`：确认/取消/返工HTTP入口及Run来源关系。
+
+### 实现的核心功能
+
+- Review消息创建新的`WAITING_APPROVAL` Run并关联同一Session最近成功诊断，来源诊断保持`SUCCEEDED`；草稿生成只调用只读Java Tool、RAG和模型，不调用写Tool。
+- 用户确认后重新读取Java事实并以Approval CAS抢占唯一执行权，成功、写失败、业务冲突、过期和取消同步结束APPROVAL/WRITEBACK Step及Run，重复确认只返回已保存结果。
+- `CREATE_REWORK`只能从已成功且明确要求返工的复核显式创建独立Run和第二个Approval；重复创建返回既有活动授权，终态失败或取消后可重新授权，复核与返工分别确认、分别写入且各自幂等。

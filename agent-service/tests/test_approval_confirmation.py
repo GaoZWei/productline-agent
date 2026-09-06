@@ -71,6 +71,7 @@ def _snapshot(
 ) -> ApprovalConfirmationSnapshot:
     return ApprovalConfirmationSnapshot(
         approval_id="approval-confirm-003",
+        run_id="run-review-003",
         status=status,
         pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
         operation_type=OperationType.SUBMIT_REVIEW,
@@ -153,6 +154,7 @@ class _FakeStore:
                 return None
             self.snapshot = ApprovalConfirmationSnapshot(
                 approval_id=current.approval_id,
+                run_id=current.run_id,
                 status=ApprovalStatus.CONFIRMED,
                 pending_tool_name=current.pending_tool_name,
                 operation_type=current.operation_type,
@@ -181,6 +183,7 @@ class _FakeStore:
             self.transitions.append((expected_status, target_status))
             self.snapshot = ApprovalConfirmationSnapshot(
                 approval_id=current.approval_id,
+                run_id=current.run_id,
                 status=target_status,
                 pending_tool_name=current.pending_tool_name,
                 operation_type=current.operation_type,
@@ -214,6 +217,7 @@ class _FakeStore:
             self.operation_logs.append(detail)
             self.snapshot = ApprovalConfirmationSnapshot(
                 approval_id=current.approval_id,
+                run_id=current.run_id,
                 status=target_status,
                 pending_tool_name=current.pending_tool_name,
                 operation_type=current.operation_type,
@@ -323,9 +327,10 @@ async def test_confirmation_refreshes_facts_locks_executes_and_marks_succeeded()
     assert [event[0] for event in events.events] == [
         RunEventType.WRITEBACK_STARTED,
         RunEventType.WRITEBACK_COMPLETED,
+        RunEventType.RUN_COMPLETED,
     ]
     assert len({event[1] for event in events.events}) == 1
-    assert events.events[-1][2] == {
+    assert events.events[-2][2] == {
         "approval_id": "approval-confirm-003",
         "status": "SUCCEEDED",
         "replayed": False,

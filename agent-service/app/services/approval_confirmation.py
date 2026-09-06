@@ -14,7 +14,12 @@ from app.database import Database
 from app.errors import ToolErrorCode
 from app.eventing import RunEventSink
 from app.models import ApprovalRecord, ApprovalStatus, OperationType, PendingToolName
-from app.repositories import ApprovalRecordRepository, OperationLogRepository
+from app.repositories import (
+    AgentRunRepository,
+    AgentSessionRepository,
+    ApprovalRecordRepository,
+    OperationLogRepository,
+)
 from app.schemas import ReviewDraft
 from app.schemas.business import BusinessIdentity
 from app.schemas.events import RunEventType
@@ -27,6 +32,11 @@ from app.schemas.write_tools import (
 from app.services.approval_lifecycle import (
     ApprovalLifecycleError,
     ApprovalLifecycleService,
+)
+from app.services.approval_run_lifecycle import (
+    begin_approval_execution,
+    finish_approval_execution,
+    finish_waiting_approval,
 )
 from app.services.operation_log import (
     OperationFailure,
@@ -43,6 +53,7 @@ class ApprovalConfirmationSnapshot:
     """确认执行链需要的最小不可变Approval快照。"""
 
     approval_id: str
+    run_id: str
     status: ApprovalStatus
     pending_tool_name: PendingToolName
     operation_type: OperationType
@@ -53,6 +64,7 @@ class ApprovalConfirmationSnapshot:
     original_draft: ReviewDraft
     draft: ReviewDraft
     execution_result: dict[str, Any] | None
+    owner_user_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +162,15 @@ class DatabaseApprovalConfirmationStore:
     ) -> ApprovalConfirmationSnapshot | None:
         async with self._database.session() as session:
             approval = await ApprovalRecordRepository(session).get(approval_id)
-            return None if approval is None else _snapshot_from_record(approval)
+            if approval is None or approval.run_id is None:
+                return None
+            run = await AgentRunRepository(session).get(approval.run_id)
+            if run is None:
+                return None
+            owner = await AgentSessionRepository(session).get(run.session_id)
+            if owner is None:
+                return None
+            return _snapshot_from_record(approval, owner_user_id=owner.user_id)
 
     async def confirm_waiting(
         self,
@@ -196,6 +216,22 @@ class DatabaseApprovalConfirmationStore:
                 target_status=target_status,
                 changes={"updated_at": updated_at},
             )
+            if transitioned is not None:
+                run_id = _require_approval_run_id(transitioned)
+                if target_status is ApprovalStatus.EXECUTING:
+                    await begin_approval_execution(
+                        session,
+                        run_id=run_id,
+                        approval_id=transitioned.approval_id,
+                        tool_name=transitioned.pending_tool_name.value,
+                    )
+                elif target_status in {ApprovalStatus.EXPIRED, ApprovalStatus.STALE}:
+                    await finish_waiting_approval(
+                        session,
+                        run_id=run_id,
+                        approval_id=transitioned.approval_id,
+                        approval_status=target_status,
+                    )
             return None if transitioned is None else _snapshot_from_record(transitioned)
 
     async def finish_with_operation_log(
@@ -218,6 +254,17 @@ class DatabaseApprovalConfirmationStore:
             if transitioned is None:
                 return None
             await OperationLogRepository(session).create(record_from_detail(detail))
+            await finish_approval_execution(
+                session,
+                run_id=_require_approval_run_id(transitioned),
+                approval_id=transitioned.approval_id,
+                approval_status=target_status,
+                error_code=(
+                    detail.after_summary.failure.code
+                    if detail.after_summary.failure is not None
+                    else None
+                ),
+            )
             return _snapshot_from_record(transitioned)
 
 
@@ -242,7 +289,7 @@ class ApprovalConfirmationService:
         self._ttl = timedelta(seconds=approval_ttl_seconds)
         self._now = now
         self._event_sink = event_sink
-    # 主流程
+    # 主流程 核心业务编排
     async def confirm_and_execute(
         self,
         *,
@@ -255,7 +302,13 @@ class ApprovalConfirmationService:
         # 权限检查
         permissions = self._permissions(identity)
         snapshot = await self._require_snapshot(approval_id)
-        run_id = _confirmation_run_id(approval_id)
+        if snapshot.owner_user_id is not None and snapshot.owner_user_id != identity.user_id:
+            raise ApprovalConfirmationError(
+                code=ToolErrorCode.RESOURCE_NOT_FOUND.value,
+                message="approval was not found",
+                status_code=404,
+            )
+        run_id = snapshot.run_id
         # 根据当前状态决定如何处理
         if snapshot.status is ApprovalStatus.SUCCEEDED:
             # 校验确认人和草稿,直接返回历史 execution_result
@@ -268,6 +321,11 @@ class ApprovalConfirmationService:
                     "status": snapshot.status.value,
                     "replayed": True,
                 },
+            )
+            await self._publish_event(
+                RunEventType.RUN_COMPLETED,
+                run_id=run_id,
+                data={"approval_id": snapshot.approval_id, "status": "SUCCEEDED"},
             )
             return execution
         if snapshot.status is ApprovalStatus.WAITING_CONFIRMATION:
@@ -295,7 +353,7 @@ class ApprovalConfirmationService:
             identity=identity,
             permissions=permissions,
             trace_id=trace_id,
-            run_id=_confirmation_run_id(approval_id),
+            run_id=snapshot.run_id,
         )
         task = await self._read_task(snapshot.target_id, context)
         issues = await self._read_issues(snapshot.target_id, context)
@@ -365,6 +423,15 @@ class ApprovalConfirmationService:
                     "replayed": False,
                 },
             )
+            await self._publish_event(
+                RunEventType.RUN_FAILED,
+                run_id=run_id,
+                data={
+                    "approval_id": locked.approval_id,
+                    "status": target_status.value,
+                    "error_code": write_result.error.code.value,
+                },
+            )
             raise ApprovalConfirmationError(
                 code=write_result.error.code.value,
                 message=write_result.error.message,
@@ -389,6 +456,11 @@ class ApprovalConfirmationService:
                 "status": ApprovalStatus.SUCCEEDED.value,
                 "replayed": False,
             },
+        )
+        await self._publish_event(
+            RunEventType.RUN_COMPLETED,
+            run_id=run_id,
+            data={"approval_id": locked.approval_id, "status": "SUCCEEDED"},
         )
         return ApprovalConfirmationExecution(
             approval_id=locked.approval_id,
@@ -477,6 +549,15 @@ class ApprovalConfirmationService:
         )
         if expired is None:
             self._raise_current_conflict(await self._require_snapshot(snapshot.approval_id))
+        await self._publish_event(
+            RunEventType.RUN_FAILED,
+            run_id=snapshot.run_id,
+            data={
+                "approval_id": snapshot.approval_id,
+                "status": ApprovalStatus.EXPIRED.value,
+                "error_code": "APPROVAL_EXPIRED",
+            },
+        )
         raise ApprovalConfirmationError(
             code="APPROVAL_EXPIRED",
             message="approval confirmation window has expired",
@@ -509,6 +590,15 @@ class ApprovalConfirmationService:
         )
         if stale is None:
             self._raise_current_conflict(await self._require_snapshot(snapshot.approval_id))
+        await self._publish_event(
+            RunEventType.RUN_FAILED,
+            run_id=snapshot.run_id,
+            data={
+                "approval_id": snapshot.approval_id,
+                "status": ApprovalStatus.STALE.value,
+                "error_code": "APPROVAL_STALE",
+            },
+        )
 
     async def _execute_write(
         self,
@@ -601,11 +691,16 @@ class ApprovalConfirmationService:
         return timestamp
 
 # 数据库记录转快照
-def _snapshot_from_record(approval: ApprovalRecord) -> ApprovalConfirmationSnapshot:
+def _snapshot_from_record(
+    approval: ApprovalRecord,
+    *,
+    owner_user_id: str | None = None,
+) -> ApprovalConfirmationSnapshot:
     """把SQLAlchemy记录转换为不依赖Session的确认快照。"""
 
     return ApprovalConfirmationSnapshot(
         approval_id=approval.approval_id,
+        run_id=_require_approval_run_id(approval),
         status=approval.status,
         pending_tool_name=approval.pending_tool_name,
         operation_type=approval.operation_type,
@@ -617,7 +712,16 @@ def _snapshot_from_record(approval: ApprovalRecord) -> ApprovalConfirmationSnaps
         # 从数据库记录中提取当前有效草稿。
         draft=ApprovalLifecycleService.effective_review_draft(approval),
         execution_result=approval.execution_result,
+        owner_user_id=owner_user_id,
     )
+
+
+def _require_approval_run_id(approval: ApprovalRecord) -> str:
+    """生产Approval必须保留所属Run; 缺失表示历史证据不满足执行契约。"""
+
+    if approval.run_id is None:
+        raise ValueError("approval is not attached to an Agent Run")
+    return approval.run_id
 
 
 def _require_tool_data[DataT](result: ToolResult[Any], model: type[DataT]) -> DataT:
@@ -716,13 +820,6 @@ def _idempotency_key(snapshot: ApprovalConfirmationSnapshot) -> str:
 
     digest = hashlib.sha256(snapshot.approval_id.encode()).hexdigest()[:32]
     return f"approval:{snapshot.pending_tool_name.value}:{digest}"
-
-
-def _confirmation_run_id(approval_id: str) -> str:
-    """生成安全有界的确认执行ToolContext标识。"""
-
-    return f"approval-confirm-{hashlib.sha256(approval_id.encode()).hexdigest()[:32]}"
-
 
 def _error_status_code(status_code: int | None) -> int:
     """日志和HTTP错误只接受真实4xx/5xx; 拒绝把异常包装成200。"""

@@ -2694,6 +2694,20 @@ M7.6按依赖拆成七个批次。每个批次达到停止线后先验收，不�
 
 ### M7.6-F Review与Approval生产闭环
 
+### 解决的问题
+
+Review过去只在独立Workflow中生成草稿，生产消息入口既不能把草稿关联到最近一次成功诊断，也无法让确认、取消、
+过期和写回结果同步结束当前Run；返工建议还容易被误当成同一次授权。该阶段补齐独立Review/返工Run、可审查
+Approval和确认后唯一写回，使未确认、已取消或已失效的操作不会触发Java写接口。
+
+### 核心作用
+
+该闭环位于统一Agent路由与Java高风险写Tool之间：Review Skill接收已确认任务身份，查找同一Session最近成功诊断，
+重新读取Java任务与质检事实和带版本引用的现行规范，输出`SUBMIT_REVIEW`待确认草稿。确认服务以数据库比较更新抢占
+唯一执行权，并把Approval终态同步到APPROVAL/WRITEBACK Step及所属Run；显式返工请求从已成功复核创建新的
+`CREATE_REWORK` Run和Approval，不能复用复核确认。模型只能整理草稿，权限、版本、业务状态、幂等和最终写入仍由
+确定性服务及Java裁决。
+
 Review作为唯一写操作Skill最后接线，先建立来源Run和草稿，再分别完成确认、取消和返工授权，不复用模型建议代替
 用户确认。
 
@@ -2729,6 +2743,7 @@ Review作为唯一写操作Skill最后接线，先建立来源Run和草稿，再
 GET  /api/agent/capabilities
 POST /api/agent/messages
 POST /api/agent/approvals/{approval_id}/cancel
+POST /api/agent/approvals/{approval_id}/rework
 ```
 
 统一消息响应使用`kind`区分`ORDER_STATUS`、`DIAGNOSIS`、`SPECIFICATION_ANSWER`、

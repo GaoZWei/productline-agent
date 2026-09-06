@@ -186,6 +186,7 @@ class AgentRun(Base):
             name="ck_agent_runs_termination_not_blank",
         ),
         Index("ix_agent_runs_session_created", "session_id", "created_at"),
+        Index("ix_agent_runs_source_run_id", "source_run_id"),
     )
 
     run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -196,6 +197,10 @@ class AgentRun(Base):
     # 删除用户消息时, Run不会删除, 只把request_message_id设为NULL。 为了保留历史运行证据
     request_message_id: Mapped[str | None] = mapped_column(
         ForeignKey("agent_messages.message_id", ondelete="SET NULL"), nullable=True
+    )
+    # Review/返工Run只保存来源Run身份; 来源结果仍是历史证据, 不能被后续审批改写。
+    source_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_runs.run_id", ondelete="SET NULL"), nullable=True
     )
     # 状态
     status: Mapped[AgentRunStatus] = mapped_column(

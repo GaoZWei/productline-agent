@@ -3,6 +3,8 @@ import axios, { AxiosError } from "axios";
 import type {
   ApprovalConfirmationErrorResponse,
   ApprovalConfirmationResponse,
+  ApprovalCancellationResponse,
+  ApprovalAgentResult,
   ApprovalStatus,
   BlockingStage,
   OrderDiagnosisErrorResponse,
@@ -10,6 +12,7 @@ import type {
   OrderDiagnosisResponse,
   OperationLogDetail,
   ReviewApprovalDecision,
+  ReworkApprovalCreationResponse,
 } from "../types/agent";
 
 export const AGENT_API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL ?? "/agent-api";
@@ -103,6 +106,40 @@ export async function requestApprovalConfirmation(
   }
 }
 
+export async function requestApprovalCancellation(
+  approvalId: string,
+): Promise<ApprovalCancellationResponse> {
+  try {
+    const encodedApprovalId = encodeURIComponent(approvalId);
+    const response = await agentHttpClient.post<unknown>(
+      `/api/agent/approvals/${encodedApprovalId}/cancel`,
+    );
+    if (!isApprovalCancellationResponse(response.data)) {
+      throw responseValidationError(response.status, traceIdFrom(response.data));
+    }
+    return response.data;
+  } catch (reason) {
+    throw normalizeAgentError(reason);
+  }
+}
+
+export async function requestReworkApproval(
+  sourceApprovalId: string,
+): Promise<ReworkApprovalCreationResponse> {
+  try {
+    const encodedApprovalId = encodeURIComponent(sourceApprovalId);
+    const response = await agentHttpClient.post<unknown>(
+      `/api/agent/approvals/${encodedApprovalId}/rework`,
+    );
+    if (!isReworkApprovalCreationResponse(response.data)) {
+      throw responseValidationError(response.status, traceIdFrom(response.data));
+    }
+    return response.data;
+  } catch (reason) {
+    throw normalizeAgentError(reason);
+  }
+}
+
 export async function requestApprovalOperationLog(
   approvalId: string,
 ): Promise<OperationLogDetail> {
@@ -188,6 +225,79 @@ function isApprovalConfirmationResponse(value: unknown): value is ApprovalConfir
     value.status === "SUCCEEDED" &&
     isNonEmptyString(value.trace_id) &&
     isApprovalWriteResult(value.result)
+  );
+}
+
+function isApprovalCancellationResponse(value: unknown): value is ApprovalCancellationResponse {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.approval_id) &&
+    isNonEmptyString(value.run_id) &&
+    value.status === "CANCELLED" &&
+    value.run_status === "CANCELLED" &&
+    isNonEmptyString(value.trace_id)
+  );
+}
+
+function isReworkApprovalCreationResponse(
+  value: unknown,
+): value is ReworkApprovalCreationResponse {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.run_id) &&
+    isNonEmptyString(value.trace_id) &&
+    isApprovalAgentResult(value.result) &&
+    value.run_id === value.result.run_id &&
+    value.result.operation_type === "CREATE_REWORK"
+  );
+}
+
+function isApprovalAgentResult(value: unknown): value is ApprovalAgentResult {
+  return (
+    isRecord(value) &&
+    value.kind === "APPROVAL" &&
+    isNonEmptyString(value.approval_id) &&
+    isNonEmptyString(value.run_id) &&
+    isNonEmptyString(value.source_run_id) &&
+    isApprovalStatus(value.status) &&
+    ["SUBMIT_REVIEW", "CREATE_REWORK"].includes(String(value.operation_type)) &&
+    isNonEmptyString(value.target_id) &&
+    Number.isInteger(value.target_version) &&
+    Number(value.target_version) >= 0 &&
+    isReviewDraft(value.draft)
+  );
+}
+
+function isReviewDraft(value: unknown) {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.task_id) &&
+    isNonEmptyString(value.issue_id) &&
+    ["APPROVED", "REJECTED", "REWORK_REQUIRED"].includes(String(value.conclusion)) &&
+    isNonEmptyString(value.problem_summary) &&
+    isNonEmptyString(value.review_comment) &&
+    Array.isArray(value.specification_references) &&
+    value.specification_references.every(isKnowledgeCitation) &&
+    isRecord(value.suggested_rework) &&
+    typeof value.suggested_rework.required === "boolean" &&
+    (value.suggested_rework.type === null ||
+      value.suggested_rework.type === "COORDINATE_SYSTEM_FIX")
+  );
+}
+
+function isKnowledgeCitation(value: unknown) {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.document_id) &&
+    isNonEmptyString(value.document_name) &&
+    isNonEmptyString(value.document_version) &&
+    Array.isArray(value.section) &&
+    value.section.every(isNonEmptyString) &&
+    isNonEmptyString(value.chunk_id) &&
+    Array.isArray(value.chunk_ids) &&
+    value.chunk_ids.every(isNonEmptyString) &&
+    isNonEmptyString(value.content) &&
+    (value.relevance_score === null || typeof value.relevance_score === "number")
   );
 }
 

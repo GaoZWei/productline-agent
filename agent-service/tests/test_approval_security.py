@@ -70,6 +70,7 @@ def _snapshot(
     )
     return ApprovalConfirmationSnapshot(
         approval_id="approval-security-003",
+        run_id="run-review-003",
         status=status,
         pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
         operation_type=OperationType.SUBMIT_REVIEW,

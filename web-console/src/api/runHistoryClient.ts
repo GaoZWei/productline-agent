@@ -117,6 +117,7 @@ function isRunSummary(value: unknown): value is RunSummary {
     isRecord(value) &&
     isString(value.run_id) &&
     isString(value.session_id) &&
+    isNullableString(value.source_run_id) &&
     ["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "WAITING_APPROVAL", "CANCELLED"].includes(
       String(value.status),
     ) &&

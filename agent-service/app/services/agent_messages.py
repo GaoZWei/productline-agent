@@ -85,6 +85,8 @@ class AgentSkillExecution:
     token_usage: RunTokenUsage = field(default_factory=RunTokenUsage)  #  Skill内部模型Token使用量, 由Skill内部的ObservedModelInvoker收集
     tool_call_count: int = 0  #  Java Tool调用次数
     termination_reason: str = "COMPLETED"  #  动态Agent真实终止原因
+    # Review草稿已将当前Run推进到WAITING_APPROVAL。
+    awaiting_confirmation: bool = False
 
 
 class AgentSkillDispatcher(Protocol):
@@ -471,6 +473,7 @@ class AgentMessageService:
                 skill_usage = RunTokenUsage()
                 tool_call_count = 0
                 termination_reason = "CLARIFICATION_REQUIRED"
+                awaiting_confirmation = False
             # 6.8.可以分发：调用 Skill
             else:
                 skill = skill_for_intent(decision.intent)
@@ -540,12 +543,24 @@ class AgentMessageService:
                 skill_usage = skill_execution.token_usage
                 tool_call_count = skill_execution.tool_call_count
                 termination_reason = skill_execution.termination_reason
+                awaiting_confirmation = skill_execution.awaiting_confirmation
             # 6.8.4.汇总运行指标
             total_usage = RunTokenUsage.from_counts(
                 input_tokens=router_usage.input_tokens + skill_usage.input_tokens,
                 output_tokens=router_usage.output_tokens + skill_usage.output_tokens,
             )
-            # 6.8.5.标记运行成功终态
+            # 6.8.5.标记运行成功终态 只保存本轮的Token和Tool调用次数，不调用普通的_mark_succeeded()
+            if awaiting_confirmation:
+                await self._record_waiting_observability(
+                    run_id,
+                    token_usage=total_usage,
+                    tool_call_count=tool_call_count,
+                )
+                return AgentMessageExecution(
+                    run_id=run_id,
+                    session_id=session_id,
+                    result=result,
+                )
             await self._mark_succeeded(
                 run_id,
                 result=result,
@@ -642,6 +657,22 @@ class AgentMessageService:
                 cause=error,
             )
         raise AssertionError("unreachable")
+
+    async def _record_waiting_observability(
+        self,
+        run_id: str,
+        *,
+        token_usage: RunTokenUsage,
+        tool_call_count: int,
+    ) -> None:
+        """补齐Review Run指标, Approval确认前保持非终态。"""
+
+        async with self._database.session() as session, session.begin():
+            await RunLifecycleService(AgentRunRepository(session)).record_waiting_observability(
+                run_id,
+                token_usage=token_usage,
+                tool_call_count=tool_call_count,
+            )
     # 原子创建运行上下文服务：在事务中创建或锁定session
     async def _create_running_run(
         self,

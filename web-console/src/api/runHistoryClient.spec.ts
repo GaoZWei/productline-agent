@@ -65,6 +65,7 @@ function runSummary() {
   return {
     run_id: "run-history-003",
     session_id: "session-history-003",
+    source_run_id: null,
     status: "SUCCEEDED",
     order_id: "ORDER-003",
     task_id: "TASK-003",

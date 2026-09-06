@@ -6,7 +6,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import ApprovalStatus
+from app.models import AgentRunStatus, ApprovalStatus
+from app.schemas.agent_messages import ApprovalAgentResult
 from app.schemas.approval import ReviewDraft
 from app.schemas.workflow import StableCode, TraceIdentifier
 from app.schemas.write_tools import (
@@ -51,3 +52,21 @@ class ApprovalConfirmationErrorResponse(ApprovalExecutionApiSchema):
     code: StableCode
     message: Annotated[str, Field(min_length=1, max_length=2048)]
     retryable: bool
+
+
+class ApprovalCancellationResponse(ApprovalExecutionApiSchema):
+    """返回取消后的Approval和所属Run终态。"""
+
+    approval_id: ApprovalIdentifier
+    run_id: Annotated[str, Field(min_length=1, max_length=128)]
+    status: ApprovalStatus
+    run_status: AgentRunStatus
+    trace_id: TraceIdentifier
+
+
+class ReworkApprovalCreationResponse(ApprovalExecutionApiSchema):
+    """返回显式创建的独立返工Run和待确认草稿。"""
+
+    run_id: Annotated[str, Field(min_length=1, max_length=128)]
+    trace_id: TraceIdentifier
+    result: ApprovalAgentResult

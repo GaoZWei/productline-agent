@@ -125,6 +125,12 @@ export interface ReviewApproval {
   target_version: number; // 生成草稿时看到的业务版本
   draft: ReviewDraft; // 用户实际审查的内容
 }
+
+export interface ApprovalAgentResult extends Omit<ReviewApproval, "run_id"> {
+  kind: "APPROVAL";
+  run_id: string;
+  source_run_id: string;
+}
 // 确认事件数据
 export interface ReviewApprovalDecision {
   approval_id: string;
@@ -159,6 +165,20 @@ export interface ApprovalConfirmationResponse {
   status: "SUCCEEDED";
   trace_id: string;
   result: WriteReviewResult | CreateReworkTaskResult;
+}
+
+export interface ApprovalCancellationResponse {
+  approval_id: string;
+  run_id: string;
+  status: "CANCELLED";
+  run_status: "CANCELLED";
+  trace_id: string;
+}
+
+export interface ReworkApprovalCreationResponse {
+  run_id: string;
+  trace_id: string;
+  result: ApprovalAgentResult;
 }
 
 export interface ApprovalConfirmationErrorResponse {

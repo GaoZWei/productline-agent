@@ -14,16 +14,19 @@ from app.clients.business import BusinessHttpClient
 from app.database import Database
 from app.main import create_app
 from app.models import (
+    AgentRunStatus,
     AgentSession,
+    AgentStepStatus,
+    AgentStepType,
     ApprovalStatus,
     OperationType,
     PendingToolName,
 )
-from app.repositories import AgentRunRepository, ApprovalRecordRepository
+from app.repositories import AgentRunRepository, AgentStepRepository, ApprovalRecordRepository
 from app.schemas import ReviewDraft
 from app.schemas.business import BusinessIdentity
 from app.schemas.tools import QualityIssueList, ReviewResult, TaskDetail
-from app.services import ApprovalLifecycleService, RunLifecycleService
+from app.services import ApprovalLifecycleService, RunLifecycleService, StepLifecycleService
 from app.settings import Settings
 from app.tools import create_read_tool_registry
 from app.versioning import build_run_version_snapshot
@@ -123,11 +126,14 @@ async def test_confirmation_api_revalidates_writes_once_and_replays_result(
                     user_id="reviewer-001",
                 )
             )
-            await RunLifecycleService(AgentRunRepository(session)).create_run(
+            runs = AgentRunRepository(session)
+            run_lifecycle = RunLifecycleService(runs)
+            await run_lifecycle.create_run(
                 run_id="run-e2e-confirm",
                 session_id="session-e2e-confirm",
                 version_snapshot=version_snapshot,
             )
+            await run_lifecycle.mark_running("run-e2e-confirm")
             lifecycle = ApprovalLifecycleService(ApprovalRecordRepository(session))
             approval = await lifecycle.create_draft(
                 approval_id="approval-e2e-confirm",
@@ -139,6 +145,16 @@ async def test_confirmation_api_revalidates_writes_once_and_replays_result(
                 target_version=task.version,
             )
             await lifecycle.mark_waiting_confirmation(approval.approval_id)
+            steps = AgentStepRepository(session)
+            await StepLifecycleService(steps, runs).start_step(
+                step_id="step-approval-approval-e2e-confirm",
+                run_id="run-e2e-confirm",
+                sequence_number=1,
+                step_type=AgentStepType.APPROVAL,
+                step_name="wait_for_review_confirmation",
+                input_summary="approval=approval-e2e-confirm",
+            )
+            await run_lifecycle.mark_waiting_approval("run-e2e-confirm")
 
         application = create_app(confirmation_settings)
         async with application.router.lifespan_context(application):
@@ -184,10 +200,23 @@ async def test_confirmation_api_revalidates_writes_once_and_replays_result(
         assert len(reviews_after.reviews) == len(reviews_before.reviews) + 1
         async with database.session() as session:
             stored = await ApprovalRecordRepository(session).get("approval-e2e-confirm")
+            run = await AgentRunRepository(session).get("run-e2e-confirm")
+            step_records = await AgentStepRepository(session).list_by_run(
+                "run-e2e-confirm"
+            )
             assert stored is not None
             assert stored.status is ApprovalStatus.SUCCEEDED
             assert stored.confirmed_by_user_id == "reviewer-001"
             assert stored.execution_result == first.json()["result"]
+            assert run is not None
+            assert run.status is AgentRunStatus.SUCCEEDED
+            assert [step.step_type for step in step_records] == [
+                AgentStepType.APPROVAL,
+                AgentStepType.WRITEBACK,
+            ]
+            assert all(
+                step.status is AgentStepStatus.SUCCEEDED for step in step_records
+            )
     finally:
         await business_client.aclose()
         await database.dispose()

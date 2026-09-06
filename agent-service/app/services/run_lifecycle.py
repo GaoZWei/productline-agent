@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from app.models import AgentRun, AgentRunStatus
+from app.models import AgentRun, AgentRunStatus, ApprovalStatus
 from app.repositories import AgentRunRepository
 from app.schemas.context import PageContext
 from app.schemas.routing import RouterResult, RoutingDecision
@@ -112,7 +112,7 @@ class RunLifecycleService:
                     field_name="version_snapshot",
                 ),
                 page_context_snapshot=(
-                    # 进行标准JSON序列化和反序列化，确保数据格式一致
+                    # 进行标准JSON序列化和反序列化, 确保数据格式一致
                     self._json_snapshot(
                         page_context_snapshot.model_dump(mode="json"),
                         field_name="page_context_snapshot",
@@ -203,14 +203,136 @@ class RunLifecycleService:
             },
         )
 
-    async def mark_waiting_approval(self, run_id: str) -> AgentRun:
-        """仅允许带结果的成功诊断进入等待人工确认状态。"""
+    async def mark_waiting_approval(
+        self,
+        run_id: str,
+        *,
+        source_run_id: str | None = None,
+        final_result: dict[str, Any] | None = None,
+    ) -> AgentRun:
+        """让当前RUNNING写操作Run等待确认, 不改变来源Run的成功终态。"""
+
+        normalized_source_run_id = (
+            self._require_identifier(source_run_id, "source_run_id", 128)
+            if source_run_id is not None
+            else None
+        )
+        if normalized_source_run_id == run_id:
+            raise RunLifecycleValidationError(
+                field_name="source_run_id",
+                message="must identify another run",
+            )
+        changes: dict[str, Any] = {
+            "source_run_id": normalized_source_run_id,
+            "finished_at": None,
+            "termination_reason": "WAITING_CONFIRMATION",
+        }
+        if final_result is not None:
+            changes["final_result"] = self._json_snapshot(final_result)
+        return await self._transition(
+            run_id,
+            expected_status=AgentRunStatus.RUNNING,
+            target_status=AgentRunStatus.WAITING_APPROVAL,
+            changes=changes,
+        )
+
+    async def record_waiting_observability(
+        self,
+        run_id: str,
+        *,
+        token_usage: RunTokenUsage,
+        tool_call_count: int,
+    ) -> AgentRun:
+        """在等待用户期间补齐本轮模型与只读Tool用量, 不把Run提前结束。"""
+
+        if isinstance(tool_call_count, bool) or tool_call_count < 0:
+            raise RunLifecycleValidationError(
+                field_name="tool_call_count",
+                message="must be a nonnegative integer",
+            )
+        return await self._transition(
+            run_id,
+            expected_status=AgentRunStatus.WAITING_APPROVAL,
+            target_status=AgentRunStatus.WAITING_APPROVAL,
+            changes={
+                "input_token_count": token_usage.input_tokens,
+                "output_token_count": token_usage.output_tokens,
+                "total_token_count": token_usage.total_tokens,
+                "tool_call_count": tool_call_count,
+            },
+        )
+
+    async def resume_approval_execution(self, run_id: str) -> AgentRun:
+        """唯一抢到Approval执行锁的请求把等待Run恢复为RUNNING。"""
 
         return await self._transition(
             run_id,
-            expected_status=AgentRunStatus.SUCCEEDED,
-            target_status=AgentRunStatus.WAITING_APPROVAL,
-            changes={},
+            expected_status=AgentRunStatus.WAITING_APPROVAL,
+            target_status=AgentRunStatus.RUNNING,
+            changes={"termination_reason": None},
+        )
+
+    async def finish_approval_run(
+        self,
+        run_id: str,
+        *,
+        target_status: AgentRunStatus,
+        approval_status: ApprovalStatus,
+        error_code: str | None = None,
+        error_step: str | None = None,
+        expected_status: AgentRunStatus = AgentRunStatus.RUNNING,
+    ) -> AgentRun:
+        """按Approval终态结束Run, 同时保留草稿结果和此前观测指标。"""
+
+        if target_status not in {
+            AgentRunStatus.SUCCEEDED,
+            AgentRunStatus.FAILED,
+            AgentRunStatus.CANCELLED,
+        }:
+            raise RunLifecycleValidationError(
+                field_name="target_status",
+                message="must be an approval terminal run status",
+            )
+        current = await self._repository.get(run_id)
+        if current is None:
+            raise RunNotFoundError(run_id)
+        if current.started_at is None:
+            raise RunLifecycleValidationError(
+                field_name="started_at",
+                message="approval run must contain a start timestamp",
+            )
+        finished_at = self._timestamp()
+        duration_ms = int((finished_at - current.started_at).total_seconds() * 1000)
+        if duration_ms < 0:
+            raise RunLifecycleValidationError(
+                field_name="timestamp",
+                message="finish timestamp must not precede start timestamp",
+            )
+        normalized_error_code = (
+            self._require_identifier(error_code, "error_code", 64)
+            if error_code is not None
+            else None
+        )
+        normalized_error_step = (
+            self._require_identifier(error_step, "error_step", 128)
+            if error_step is not None
+            else None
+        )
+        final_result = current.final_result
+        if isinstance(final_result, dict) and final_result.get("kind") == "APPROVAL":
+            final_result = {**final_result, "status": approval_status.value}
+        return await self._transition(
+            run_id,
+            expected_status=expected_status,
+            target_status=target_status,
+            changes={
+                "finished_at": finished_at,
+                "duration_ms": duration_ms,
+                "termination_reason": f"APPROVAL_{target_status.value}",
+                "error_code": normalized_error_code,
+                "error_step": normalized_error_step,
+                "final_result": final_result,
+            },
         )
 
     # 标记为FAILED

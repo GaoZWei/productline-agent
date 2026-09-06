@@ -29,6 +29,7 @@ export type StepStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 export interface RunSummary {
   run_id: string;
   session_id: string;
+  source_run_id: string | null;
   status: RunStatus;
   order_id: string | null;
   task_id: string | null;

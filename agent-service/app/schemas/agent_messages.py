@@ -35,7 +35,7 @@ class AgentMessageSchema(BaseModel):
 class ClarificationChoice(AgentMessageSchema):
     """引用上一轮澄清Run, 并提交实体选择或意图确认中的一种。"""
 
-    source_run_id: RunIdentifier # 必须提供 source_run_id，不能是None
+    source_run_id: RunIdentifier  # 必须提供 source_run_id, 不能是None
     selection: EntitySelection | None = None
     confirm_intent: bool = False
 
@@ -131,12 +131,16 @@ class ClarificationAgentResult(AgentResultEnvelope):
 
 
 class ApprovalAgentResult(AgentResultEnvelope):
-    """Review Skill未来返回的可审查草稿, 不代表已经确认或写入。"""
+    """Review Skill返回的可审查草稿及来源Run, 不代表已经确认或写入。"""
 
     kind: Literal[AgentResultKind.APPROVAL] = AgentResultKind.APPROVAL
     approval_id: ApprovalIdentifier
+    run_id: RunIdentifier
+    source_run_id: RunIdentifier
     status: ApprovalStatus = Field(strict=False)
     operation_type: OperationType = Field(strict=False)
+    target_id: TaskIdentifier
+    target_version: Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
     draft: ReviewDraft
 
 

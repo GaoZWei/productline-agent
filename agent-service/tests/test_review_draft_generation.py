@@ -273,7 +273,7 @@ def _workflow(
             identity=BusinessIdentity(user_id="reviewer-001", role="INTERNAL_REVIEWER"),
             permissions=frozenset({"TASK_READ", "QUALITY_ISSUE_READ"}),
             trace_id="trace-draft-003",
-            run_id="run-diagnosis-003",
+            run_id="run-review-003",
         ),
         specification_workflow=specification,
         draft_model=model,
@@ -304,7 +304,8 @@ async def test_generates_waiting_approval_from_refreshed_facts_without_write_too
     result = await workflow.ainvoke(session_id="session-003", task_id="TASK-003")
 
     assert result.approval_id == "approval-draft-003"
-    assert result.run_id == "run-diagnosis-003"
+    assert result.run_id == "run-review-003"
+    assert result.source_run_id == "run-diagnosis-003"
     assert result.approval_status is ApprovalStatus.WAITING_CONFIRMATION
     assert result.run_status is AgentRunStatus.WAITING_APPROVAL
     assert result.draft.conclusion.value == "REWORK_REQUIRED"
@@ -317,11 +318,13 @@ async def test_generates_waiting_approval_from_refreshed_facts_without_write_too
     assert model.requests[0].quality_issues[0].issue_id == "ISSUE-001"
     assert model.requests[0].citations == (_citation(),)
     assert store.saved[0]["target_version"] == 7
+    assert store.saved[0]["run_id"] == "run-review-003"
+    assert store.saved[0]["source_run_id"] == "run-diagnosis-003"
     assert store.saved[0]["draft"] == result.draft
     assert events.events == [
         (
             RunEventType.APPROVAL_REQUIRED,
-            "run-diagnosis-003",
+            "run-review-003",
             {
                 "approval_id": "approval-draft-003",
                 "status": "WAITING_CONFIRMATION",

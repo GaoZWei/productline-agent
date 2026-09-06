@@ -116,6 +116,16 @@ class AgentRunRepository:
             .order_by(AgentRun.created_at, AgentRun.run_id)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def list_by_source_run(self, source_run_id: str) -> list[AgentRun]:
+        """按稳定顺序返回来源Run派生的后续Run。"""
+
+        statement = (
+            select(AgentRun)
+            .where(AgentRun.source_run_id == source_run_id)
+            .order_by(AgentRun.created_at, AgentRun.run_id)
+        )
+        return list((await self._session.scalars(statement)).all())
     # 列表查询接口
     async def list_for_user(
         self,
@@ -173,6 +183,27 @@ class AgentRunRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def recent_successful_results_by_session(
+        self,
+        session_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[AgentRun]:
+        """倒序返回少量成功结果, 调用方再按严格Schema识别目标结果类型。"""
+
+        statement = (
+            select(AgentRun)
+            .where(
+                AgentRun.session_id == session_id,
+                AgentRun.status == AgentRunStatus.SUCCEEDED,
+                AgentRun.final_result.is_not(None),
+                func.json_typeof(AgentRun.final_result) != "null",
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.run_id.desc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     async def delete(self, run_id: str) -> bool:
         """删除存在的 Run; 数据库级联删除其 Step。"""
 
@@ -194,6 +225,7 @@ class AgentRunRepository:
         """仅在当前状态符合预期时原子更新 Run, 防止并发终态互相覆盖。"""
         # 限制可修改字段
         allowed_changes = {
+            "source_run_id",
             "started_at",
             "finished_at",
             "final_result",
@@ -281,6 +313,14 @@ class AgentStepRepository:
             .order_by(AgentStep.sequence_number, AgentStep.step_id)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def next_sequence_number(self, run_id: str) -> int:
+        """返回当前Run下一个Step序号; 调用方需在锁定Run的事务中使用。"""
+
+        statement = select(func.coalesce(func.max(AgentStep.sequence_number), 0) + 1).where(
+            AgentStep.run_id == run_id
+        )
+        return int(await self._session.scalar(statement) or 1)
 
     async def transition_status(
         self,

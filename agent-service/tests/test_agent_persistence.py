@@ -63,6 +63,7 @@ from app.routing import BusinessSkill
 from app.schemas import (
     AgentMessageRequest,
     AgentResultKind,
+    ApprovalAgentResult,
     ClarificationChoice,
     Conclusion,
     EntitySelection,
@@ -97,6 +98,7 @@ from app.services import (
     AgentSkillExecution,
     AgentSkillRequest,
     ApprovalLifecycleService,
+    ApprovalOrchestrationService,
     DatabaseApprovalConfirmationStore,
     DatabaseApprovalExecutionStore,
     DatabaseReviewDraftStore,
@@ -414,7 +416,8 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
     assert set(Base.metadata.tables["agent_runs"].columns.keys()) == {
         "run_id",
         "session_id",
-        "request_message_id",
+            "request_message_id",
+            "source_run_id",
         "status",
         "version_snapshot",
         "page_context_snapshot",
@@ -1546,11 +1549,14 @@ async def test_confirmation_store_atomically_confirms_and_allows_one_execution_l
     try:
         async with database.session() as session, session.begin():
             session.add(AgentSession(session_id="session-confirm-cas", user_id="reviewer-001"))
-            await RunLifecycleService(AgentRunRepository(session)).create_run(
+            runs = AgentRunRepository(session)
+            run_lifecycle = RunLifecycleService(runs)
+            await run_lifecycle.create_run(
                 run_id="run-confirm-cas",
                 session_id="session-confirm-cas",
                 version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
             )
+            await run_lifecycle.mark_running("run-confirm-cas")
             lifecycle = ApprovalLifecycleService(ApprovalRecordRepository(session))
             approval = await lifecycle.create_draft(
                 approval_id="approval-confirm-cas",
@@ -1562,6 +1568,18 @@ async def test_confirmation_store_atomically_confirms_and_allows_one_execution_l
                 target_version=7,
             )
             await lifecycle.mark_waiting_confirmation(approval.approval_id)
+            steps = AgentStepRepository(session)
+            await StepLifecycleService(steps, runs).start_step(
+                step_id="step-approval-approval-confirm-cas",
+                run_id="run-confirm-cas",
+                sequence_number=1,
+                step_type=AgentStepType.APPROVAL,
+                step_name="wait_for_review_confirmation",
+                input_summary="approval=approval-confirm-cas",
+            )
+            await run_lifecycle.mark_waiting_approval(
+                "run-confirm-cas",
+            )
 
         store = DatabaseApprovalConfirmationStore(database)
         modified = ReviewDraft.model_validate(
@@ -1660,13 +1678,13 @@ async def test_review_draft_store_atomically_waits_approval_and_run(
             session.add(AgentSession(session_id="session-draft", user_id="reviewer-001"))
             run_service = RunLifecycleService(AgentRunRepository(session))
             await run_service.create_run(
-                run_id="run-draft",
+                run_id="run-diagnosis-draft",
                 session_id="session-draft",
                 version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
             )
-            await run_service.mark_running("run-draft")
+            await run_service.mark_running("run-diagnosis-draft")
             await run_service.mark_succeeded(
-                "run-draft",
+                "run-diagnosis-draft",
                 final_result={
                     "order_id": "ORDER-003",
                     "blocking_stage": "QUALITY_REVIEW",
@@ -1695,12 +1713,18 @@ async def test_review_draft_store_atomically_waits_approval_and_run(
                     "confidence": 1.0,
                 },
             )
+            await run_service.create_run(
+                run_id="run-draft",
+                session_id="session-draft",
+                version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+            )
+            await run_service.mark_running("run-draft")
 
         store = DatabaseReviewDraftStore(database)
         identity = BusinessIdentity(user_id="reviewer-001", role="INTERNAL_REVIEWER")
         source = await store.latest_diagnosis("session-draft", identity=identity)
         assert source is not None
-        assert source.run_id == "run-draft"
+        assert source.run_id == "run-diagnosis-draft"
         assert source.status is AgentRunStatus.SUCCEEDED
 
         with pytest.raises(SessionAccessDeniedError):
@@ -1714,7 +1738,8 @@ async def test_review_draft_store_atomically_waits_approval_and_run(
 
         persisted = await store.save_waiting_approval(
             approval_id="approval-draft",
-            run_id=source.run_id,
+            run_id="run-draft",
+            source_run_id=source.run_id,
             draft=ReviewDraft.model_validate(TEST_REVIEW_DRAFT),
             target_version=7,
         )
@@ -1723,24 +1748,33 @@ async def test_review_draft_store_atomically_waits_approval_and_run(
 
         async with database.session() as verification_session:
             run = await AgentRunRepository(verification_session).get("run-draft")
+            source_run = await AgentRunRepository(verification_session).get(
+                "run-diagnosis-draft"
+            )
             approval = await ApprovalRecordRepository(verification_session).get(
                 "approval-draft"
             )
             assert run is not None
             assert run.status is AgentRunStatus.WAITING_APPROVAL
+            assert run.source_run_id == "run-diagnosis-draft"
             assert run.final_result is not None
-            assert run.finished_at is not None
+            assert run.final_result["kind"] == "APPROVAL"
+            assert run.finished_at is None
+            assert source_run is not None
+            assert source_run.status is AgentRunStatus.SUCCEEDED
             assert approval is not None
             assert approval.status is ApprovalStatus.WAITING_CONFIRMATION
             assert approval.target_version == 7
 
         latest = await store.latest_diagnosis("session-draft", identity=identity)
         assert latest is not None
-        assert latest.status is AgentRunStatus.WAITING_APPROVAL
-        with pytest.raises(InvalidRunTransitionError):
+        assert latest.run_id == "run-diagnosis-draft"
+        assert latest.status is AgentRunStatus.SUCCEEDED
+        with pytest.raises(ValueError, match="relationship"):
             await store.save_waiting_approval(
                 approval_id="approval-duplicate",
-                run_id=latest.run_id,
+                run_id="run-draft",
+                source_run_id=latest.run_id,
                 draft=ReviewDraft.model_validate(TEST_REVIEW_DRAFT),
                 target_version=7,
             )
@@ -1750,6 +1784,131 @@ async def test_review_draft_store_atomically_waits_approval_and_run(
                 await ApprovalRecordRepository(final_session).get("approval-duplicate")
                 is None
             )
+
+        cancelled = await ApprovalOrchestrationService(database).cancel(
+            "approval-draft",
+            identity=BusinessIdentity(user_id="reviewer-001", role="REVIEWER"),
+        )
+        assert cancelled.status is ApprovalStatus.CANCELLED
+        assert cancelled.run_status is AgentRunStatus.CANCELLED
+        async with database.session() as final_session:
+            approval_step = await AgentStepRepository(final_session).get(
+                "step-approval-approval-draft"
+            )
+            cancelled_run = await AgentRunRepository(final_session).get("run-draft")
+            assert approval_step is not None
+            assert approval_step.status is AgentStepStatus.SUCCEEDED
+            assert approval_step.output_summary == "approval=cancelled"
+            assert cancelled_run is not None
+            assert cancelled_run.final_result is not None
+            assert cancelled_run.final_result["status"] == "CANCELLED"
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rework_request_creates_one_independent_waiting_approval(
+    migrated_database_url: str,
+) -> None:
+    database = Database(migrated_database_url)
+    review_result = WriteReviewResultOutput(
+        approval_id="approval-review-source",
+        task_id="TASK-003",
+        issue_id="ISSUE-001",
+        review_id="REVIEW-SOURCE-003",
+        status="REWORK_REQUIRED",
+        review_comment="完成坐标系统处理后重新提交复核",
+        task_version=8,
+        java_trace_id="trace-java-review-source",
+    )
+    source_result = ApprovalAgentResult(
+        approval_id="approval-review-source",
+        run_id="run-review-source",
+        source_run_id="run-diagnosis-source",
+        status=ApprovalStatus.SUCCEEDED,
+        operation_type=OperationType.SUBMIT_REVIEW,
+        target_id="TASK-003",
+        target_version=7,
+        draft=ReviewDraft.model_validate(TEST_REVIEW_DRAFT),
+    )
+    now = datetime.now(UTC)
+    try:
+        async with database.session() as session, session.begin():
+            session.add(AgentSession(session_id="session-rework", user_id="reviewer-001"))
+            session.add(
+                AgentRun(
+                    run_id="run-review-source",
+                    session_id="session-rework",
+                    status=AgentRunStatus.SUCCEEDED,
+                    version_snapshot=TEST_RUN_VERSION_SNAPSHOT.model_dump(mode="json"),
+                    final_result=source_result.model_dump(mode="json"),
+                    started_at=now,
+                    finished_at=now,
+                    duration_ms=0,
+                    termination_reason="APPROVAL_SUCCEEDED",
+                )
+            )
+            session.add(
+                ApprovalRecord(
+                    approval_id="approval-review-source",
+                    run_id="run-review-source",
+                    status=ApprovalStatus.SUCCEEDED,
+                    operation_type=OperationType.SUBMIT_REVIEW,
+                    original_draft=TEST_REVIEW_DRAFT,
+                    pending_tool_name=PendingToolName.WRITE_REVIEW_RESULT,
+                    target_id="TASK-003",
+                    target_version=7,
+                    confirmed_by_user_id="reviewer-001",
+                    confirmed_at=now,
+                    execution_result=review_result.model_dump(mode="json"),
+                )
+            )
+
+        service = ApprovalOrchestrationService(database)
+        identity = BusinessIdentity(user_id="reviewer-001", role="REVIEWER")
+        created = await service.create_rework(
+            "approval-review-source",
+            identity=identity,
+        )
+        replayed = await service.create_rework(
+            "approval-review-source",
+            identity=identity,
+        )
+
+        assert created.result.operation_type is OperationType.CREATE_REWORK
+        assert created.result.status is ApprovalStatus.WAITING_CONFIRMATION
+        assert created.result.source_run_id == "run-review-source"
+        assert replayed.run_id == created.run_id
+        assert replayed.result.approval_id == created.result.approval_id
+        async with database.session() as session:
+            run = await AgentRunRepository(session).get(created.run_id)
+            approval = await ApprovalRecordRepository(session).get(
+                created.result.approval_id
+            )
+            steps = await AgentStepRepository(session).list_by_run(created.run_id)
+            assert run is not None
+            assert run.status is AgentRunStatus.WAITING_APPROVAL
+            assert run.source_run_id == "run-review-source"
+            assert approval is not None
+            assert approval.operation_type is OperationType.CREATE_REWORK
+            assert approval.target_version == 8
+            assert len(steps) == 1
+            assert steps[0].step_type is AgentStepType.APPROVAL
+            assert steps[0].status is AgentStepStatus.RUNNING
+
+        cancelled = await service.cancel(
+            created.result.approval_id,
+            identity=identity,
+        )
+        recreated = await service.create_rework(
+            "approval-review-source",
+            identity=identity,
+        )
+        assert cancelled.status is ApprovalStatus.CANCELLED
+        assert recreated.run_id != created.run_id
+        assert recreated.result.approval_id != created.result.approval_id
+        assert recreated.result.status is ApprovalStatus.WAITING_CONFIRMATION
     finally:
         await database.dispose()
 

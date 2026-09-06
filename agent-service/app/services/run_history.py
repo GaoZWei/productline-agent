@@ -126,6 +126,7 @@ def run_summary_from_record(run: AgentRun) -> RunSummary:
     return RunSummary(
         run_id=run.run_id,
         session_id=run.session_id,
+        source_run_id=run.source_run_id,
         status=run.status,
         order_id=_optional_identifier(page_context.get("order_id"), _ORDER_ID_ADAPTER),
         task_id=_optional_identifier(page_context.get("task_id"), _TASK_ID_ADAPTER),

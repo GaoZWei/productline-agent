@@ -4,9 +4,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AgentApiError,
   agentHttpClient,
+  requestApprovalCancellation,
   requestApprovalConfirmation,
   requestApprovalOperationLog,
   requestOrderDiagnosis,
+  requestReworkApproval,
 } from "./agentClient";
 
 const mock = new MockAdapter(agentHttpClient);
@@ -154,6 +156,47 @@ describe("agent API client", () => {
       code: "APPROVAL_EXPIRED",
       traceId: "trace-confirm-expired",
       status: 410,
+    });
+  });
+
+  it("取消待确认单并校验Run同步终态", async () => {
+    mock.onPost("/api/agent/approvals/approval-confirm-003/cancel").reply(200, {
+      approval_id: "approval-confirm-003",
+      run_id: "run-review-003",
+      status: "CANCELLED",
+      run_status: "CANCELLED",
+      trace_id: "trace-cancel-003",
+    });
+
+    await expect(requestApprovalCancellation("approval-confirm-003")).resolves.toMatchObject({
+      status: "CANCELLED",
+      run_status: "CANCELLED",
+    });
+  });
+
+  it("显式创建独立返工Approval并校验来源Run", async () => {
+    mock.onPost("/api/agent/approvals/approval-confirm-003/rework").reply(200, {
+      run_id: "run-rework-003",
+      trace_id: "trace-rework-003",
+      result: {
+        kind: "APPROVAL",
+        approval_id: "approval-rework-003",
+        run_id: "run-rework-003",
+        source_run_id: "run-review-003",
+        status: "WAITING_CONFIRMATION",
+        operation_type: "CREATE_REWORK",
+        target_id: "TASK-003",
+        target_version: 8,
+        draft: reviewDraft(),
+      },
+    });
+
+    await expect(requestReworkApproval("approval-confirm-003")).resolves.toMatchObject({
+      run_id: "run-rework-003",
+      result: {
+        source_run_id: "run-review-003",
+        operation_type: "CREATE_REWORK",
+      },
     });
   });
 

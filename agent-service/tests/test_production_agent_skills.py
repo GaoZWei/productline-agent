@@ -9,6 +9,7 @@ import httpx
 import pytest
 from pydantic import AnyHttpUrl, BaseModel
 
+import app.services.production_agent_skills as production_skills
 from app.clients.business import BusinessHttpClient
 from app.clients.model import (
     ChatMessage,
@@ -17,11 +18,17 @@ from app.clients.model import (
     StructuredModelResult,
 )
 from app.database import Database
-from app.models import AgentStepType
+from app.models import AgentRunStatus, AgentStepType, ApprovalStatus
 from app.routing import BusinessSkill, Intent
 from app.routing.decision import build_routing_decision
 from app.routing.entity_merge import merge_routing_entities
-from app.schemas.agent_messages import AgentResultKind, OrderStatusResult, OrderStatusSubject
+from app.schemas.agent_messages import (
+    AgentResultKind,
+    ApprovalAgentResult,
+    OrderStatusResult,
+    OrderStatusSubject,
+)
+from app.schemas.approval import ReviewDraft
 from app.schemas.business import BusinessIdentity
 from app.schemas.routing import (
     EntityExtractionResult,
@@ -35,6 +42,7 @@ from app.services.knowledge_index_capabilities import KnowledgeIndexCapabilitySe
 from app.services.production_agent_skills import ProductionAgentSkillDispatcher
 from app.settings import Settings
 from app.tools import create_read_tool_registry
+from app.workflows.review_draft import ReviewDraftGenerationResult
 
 
 class _CaptureStepRecorder:
@@ -389,3 +397,77 @@ async def test_specification_skill_requires_query_embedding_configuration() -> N
     assert caught.value.code == "EMBEDDING_NOT_CONFIGURED"
     assert recorder.started == [(5, AgentStepType.RAG, "answer_specification")]
     assert recorder.failed[0][1] == "EMBEDDING_NOT_CONFIGURED"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_review_skill_returns_waiting_approval_in_current_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    draft = ReviewDraft.model_validate(
+        {
+            "task_id": "TASK-003",
+            "issue_id": "ISSUE-001",
+            "conclusion": "REWORK_REQUIRED",
+            "problem_summary": "存在未关闭的坐标系质量问题",
+            "review_comment": "完成坐标系统处理后重新提交复核",
+            "specification_references": [
+                {
+                    "document_id": "SPEC-COORD-001",
+                    "document_name": "坐标系统处理规范",
+                    "document_version": "2.0",
+                    "section": ["质量复核"],
+                    "chunk_id": "CHUNK-001",
+                    "chunk_ids": ["CHUNK-001"],
+                    "content": "问题关闭后重新提交复核。",
+                    "relevance_score": 0.9,
+                }
+            ],
+            "suggested_rework": {
+                "required": True,
+                "type": "COORDINATE_SYSTEM_FIX",
+            },
+        }
+    )
+
+    class _FakeReviewWorkflow:
+        def __init__(self, **values: object) -> None:
+            captured.update(values)
+
+        async def ainvoke(self, **values: object) -> ReviewDraftGenerationResult:
+            captured.update(values)
+            return ReviewDraftGenerationResult(
+                approval_id="approval-review-003",
+                run_id="run-skill-test",
+                source_run_id="run-diagnosis-003",
+                approval_status=ApprovalStatus.WAITING_CONFIRMATION,
+                run_status=AgentRunStatus.WAITING_APPROVAL,
+                target_id="TASK-003",
+                target_version=7,
+                draft=draft,
+            )
+
+    monkeypatch.setattr(
+        production_skills,
+        "ReviewDraftGenerationWorkflow",
+        _FakeReviewWorkflow,
+    )
+    recorder = _CaptureStepRecorder()
+    execution = await _dispatcher(object(), _SequenceStructuredClient(())).dispatch(
+        BusinessSkill.REVIEW,
+        _request(
+            _decision(Intent.REVIEW_GENERATION, RouterEntities(task_id="TASK-003")),
+            recorder,
+            message="为 TASK-003 生成复核草稿",
+        ),
+    )
+
+    assert isinstance(execution.result, ApprovalAgentResult)
+    assert execution.result.run_id == "run-skill-test"
+    assert execution.result.source_run_id == "run-diagnosis-003"
+    assert execution.result.status is ApprovalStatus.WAITING_CONFIRMATION
+    assert execution.awaiting_confirmation is True
+    assert execution.tool_call_count == 0
+    assert captured["session_id"] == "session-skill-test"
+    assert captured["task_id"] == "TASK-003"
