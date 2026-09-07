@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     model_name: str | None = Field(default=None, max_length=128)  # 空值表示未启用模型
     model_base_url: AnyHttpUrl | None = None  # 模型网关地址 OpenAI兼容API根地址
     model_api_key: SecretStr | None = None  # 访问密钥 本地无鉴权网关允许为空
+    model_response_format: Literal["json_schema", "json_object"] = "json_schema"  # 模型响应格式
+    model_thinking_mode: Literal["enabled", "disabled"] | None = None  # 模型思考模式
     model_temperature: float = Field(default=0.0, ge=0.0, le=2.0)  # 控制生成结果的随机程度
     model_max_output_tokens: int = Field(default=2048, ge=1, le=65536)  # 模型最大输出令牌数
     model_timeout_seconds: float = Field(default=30.0, gt=0, le=120)  # 单次 HTTP 超时时间
@@ -99,6 +101,16 @@ class Settings(BaseSettings):
             return value if value.get_secret_value().strip() else None
         if isinstance(value, str):
             normalized = value.strip()
+            return normalized or None
+        return value
+
+    @field_validator("model_thinking_mode", mode="before")
+    @classmethod
+    def empty_model_thinking_mode_uses_provider_default(cls, value: object) -> object:
+        """空值不发送供应商扩展字段, 避免破坏其他OpenAI兼容网关。"""
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
             return normalized or None
         return value
     # 不完整配置直接报错

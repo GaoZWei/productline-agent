@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -173,7 +174,7 @@ class OpenAICompatibleChatClient:
         messages: Sequence[ChatMessage],
         output_schema: type[OutputT],
     ) -> StructuredModelResult[OutputT]:
-        """请求严格JSON Schema输出, 并返回校验结果与实际调用指标。"""
+        """按供应商能力请求JSON输出, 并返回本地Schema校验结果与指标。"""
         # 检查模型是否已配置
         if self._client is None or self._settings.model_name is None:
             raise ModelClientError(
@@ -186,21 +187,35 @@ class OpenAICompatibleChatClient:
             raise ValueError("at least one chat message is required")
         if not issubclass(output_schema, BaseModel):
             raise TypeError("output_schema must be a Pydantic BaseModel type")
-        # 请求体构建
-        request_body = {
-            "model": self._settings.model_name,
-            "messages": [message.model_dump(mode="json") for message in normalized_messages],
-            "temperature": self._settings.model_temperature,
-            "max_tokens": self._settings.model_max_output_tokens,
-            "response_format": {
+        response_format = self._settings.model_response_format
+        request_messages = self._prepare_messages(
+            normalized_messages,
+            output_schema,
+            response_format=response_format,
+        )
+        # json_schema由供应商约束字段; json_object把Schema写入系统指令后由本地再次校验。
+        response_format_payload: dict[str, object]
+        if response_format == "json_schema":
+            response_format_payload = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": output_schema.__name__,
                     "strict": True,
-                    "schema": output_schema.model_json_schema(),
+                    "schema": output_schema.model_json_schema(mode="validation"),
                 },
-            },
+            }
+        else:  # deepseek使用 json_object格式的返回
+            response_format_payload = {"type": "json_object"}
+        # 请求体构建
+        request_body: dict[str, object] = {
+            "model": self._settings.model_name,
+            "messages": [message.model_dump(mode="json") for message in request_messages],
+            "temperature": self._settings.model_temperature,
+            "max_tokens": self._settings.model_max_output_tokens,
+            "response_format": response_format_payload,
         }
+        if self._settings.model_thinking_mode is not None:
+            request_body["thinking"] = {"type": self._settings.model_thinking_mode}
         started_at = self._clock()
         retry_count = 0
         while True:
@@ -260,6 +275,38 @@ class OpenAICompatibleChatClient:
                 if retry_count >= self._settings.model_max_retries:
                     raise error.after_retries(retry_count) from exc
                 retry_count = await self._wait_before_retry(retry_count, error)
+
+    @staticmethod
+    def _prepare_messages(
+        messages: tuple[ChatMessage, ...],
+        output_schema: type[BaseModel],
+        *,
+        response_format: Literal["json_schema", "json_object"],
+    ) -> tuple[ChatMessage, ...]:
+        """为仅支持JSON Object的供应商补充明确且可验证的输出契约。"""
+
+        if response_format == "json_schema":
+            return messages
+        schema_json = json.dumps(
+            output_schema.model_json_schema(mode="validation"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        instruction = (
+            "结构化输出要求: 只返回一个 JSON 对象, 不要返回 Markdown 或额外说明。"
+            f"输出必须严格符合以下 JSON Schema: {schema_json}"
+        )
+        prepared = list(messages)
+        for index, message in enumerate(prepared):
+            if message.role == "system":
+                prepared[index] = ChatMessage(
+                    role="system",
+                    content=f"{message.content}\n\n{instruction}",
+                )
+                return tuple(prepared)
+        return (ChatMessage(role="system", content=instruction), *messages)
 
     async def _wait_before_retry(
         self,

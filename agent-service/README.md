@@ -32,7 +32,9 @@ Base URL、1536维度、批大小、超时、重试和索引版本均可通过�
 
 结构化对话模型默认关闭：`MODEL_NAME`为空时，即使预先提供地址或密钥也不会被标记为已配置。启用时必须同时提供
 `MODEL_BASE_URL`，`MODEL_PROVIDER`固定为`openai_compatible`并兼容旧值`openai`；本地无鉴权网关允许
-`MODEL_API_KEY`为空，非空密钥使用`SecretStr`保存且不得进入日志或版本快照。调用超时、额外重试次数和指数退避可通过
+`MODEL_API_KEY`为空，非空密钥使用`SecretStr`保存且不得进入日志或版本快照。`MODEL_RESPONSE_FORMAT`默认
+`json_schema`；DeepSeek Chat Completions应配置为`json_object`，其他供应商按实际协议能力显式选择。可选
+`MODEL_THINKING_MODE`只在显式配置时发送供应商扩展字段，DeepSeek的路由与结构化抽取建议设为`disabled`。调用超时、额外重试次数和指数退避可通过
 `MODEL_TIMEOUT_SECONDS`、`MODEL_MAX_RETRIES`、`MODEL_INITIAL_BACKOFF_SECONDS`及
 `MODEL_MAX_BACKOFF_SECONDS`设置；默认只额外重试一次明确瞬时失败。
 
@@ -43,7 +45,8 @@ API Key。该结果只证明配置通过校验，不探测模型网络，也不�
 ## 结构化模型调用与LLM Step
 
 `app.clients.model.OpenAICompatibleChatClient`复用应用生命周期内的HTTP连接池，调用OpenAI兼容
-`POST /chat/completions`并使用`response_format=json_schema`请求严格结构化输出。供应商成功响应必须包含唯一选择、
+`POST /chat/completions`。`json_schema`模式把完整Schema交给供应商约束输出；DeepSeek使用的`json_object`模式只发送
+供应商接受的格式字段，并把同一Pydantic JSON Schema追加到系统指令。两种模式的成功响应都必须包含唯一选择、
 助手JSON正文和自洽Token用量，正文还要通过调用方Pydantic Schema；未配置、超时、瞬时上游失败、限流、鉴权、
 非法请求、响应外壳错误及输出JSON/Schema错误使用稳定机器码区分，异常文案不会复制供应商响应。
 
@@ -51,6 +54,17 @@ API Key。该结果只证明配置通过校验，不探测模型网络，也不�
 `ObservedModelInvoker`在真实请求边界创建`LLM` Step，成功时保存供应商实际返回的模型名、输入/输出/总Token、耗时和
 实际重试次数，失败时保存稳定错误码及能够确认的配置模型名与重试次数；Prompt、模型正文、API Key和供应商错误正文
 均不进入Step。Run历史接口和页面会展示这些独立指标；具体Protocol适配器见下节，但尚未装配到统一生产入口，因此固定诊断仍不调用该Client。
+
+DeepSeek示例配置：
+
+```dotenv
+MODEL_PROVIDER=openai_compatible
+MODEL_NAME=deepseek-v4-flash
+MODEL_BASE_URL=https://api.deepseek.com
+MODEL_RESPONSE_FORMAT=json_object
+MODEL_THINKING_MODE=disabled
+MODEL_API_KEY=通过本地环境提供，不提交到仓库
+```
 
 ## 现有模型Protocol适配器
 

@@ -82,7 +82,7 @@ def _valid_result() -> dict[str, object]:
 
 
 def test_system_prompt_is_versioned_and_derived_from_complete_catalog() -> None:
-    assert ROUTER_PROMPT_VERSION == "router-v3"
+    assert ROUTER_PROMPT_VERSION == "router-v4"
     for intent in Intent:
         assert intent.value in ROUTER_SYSTEM_PROMPT
     assert "必填参数=order_id; 目标Skill=DiagnosisSkill" in ROUTER_SYSTEM_PROMPT
@@ -92,6 +92,8 @@ def test_system_prompt_is_versioned_and_derived_from_complete_catalog() -> None:
     assert "不是当前业务事实" in ROUTER_SYSTEM_PROMPT
     assert "entities 只能包含 user_message 中明确出现的实体" in ROUTER_SYSTEM_PROMPT
     assert "绝不能复制页面或会话上下文中的实体" in ROUTER_SYSTEM_PROMPT
+    assert 'missing_fields为["order_id"]' in ROUTER_SYSTEM_PROMPT
+    assert "后续确定性代码会合并page_context" in ROUTER_SYSTEM_PROMPT
 
 
 def test_prompt_injects_page_and_session_as_bounded_json_data() -> None:

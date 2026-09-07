@@ -1937,3 +1937,25 @@ Review Skill先重新读取Java事实和当前RAG引用，再让结构化模型�
 **如何端到端证明“模型故障不冒充成功”？**
 
 回答要点：组件测试让统一请求返回可重试的`MODEL_UNAVAILABLE`，断言不渲染任何成功结果且重试创建新SSE；隔离Compose则故意不配置模型，通过Web代理调用统一消息并断言HTTP 503和`MODEL_NOT_CONFIGURED`，同时调用固定诊断验证显式确定性路径仍返回`QUALITY_REVIEW`。
+
+---
+
+## M7.6-A DeepSeek结构化输出适配：协议能力不同，本地信任边界不变
+
+### 解决的问题/对项目的价值
+
+OpenAI兼容只保证HTTP接口形状相近，不保证每个供应商都接受`json_schema`。DeepSeek Chat Completions要求`json_object`，固定发送前者会在Router执行前被400拒绝；本次用显式响应格式配置消除协议不匹配，同时保留原有供应商的默认行为。
+
+### 与 Agent 开发的关系
+
+JSON Object只能保证返回合法JSON，不能保证它符合Router、Action、Rerank、规范回答或Review草稿契约。因此Client把目标Pydantic Schema加入系统指令，并在响应进入业务适配器前继续做严格本地校验；DeepSeek可显式关闭不适合路由抽取的思考模式，Run版本快照同时记录响应格式和实际思考模式，使同一Prompt在不同供应商约束下仍可解释和复现。
+
+### 可能的面试问题
+
+**为什么不根据模型名或Base URL自动判断DeepSeek？**
+
+回答要点：模型可能经过企业网关、代理或使用自定义名称，字符串猜测容易误判且难以审计。显式`MODEL_RESPONSE_FORMAT`让部署者声明真实协议能力，默认值继续兼容已有环境，Run快照还能记录本次实际选择。
+
+**DeepSeek使用json_object后，结构化输出安全性是否下降？**
+
+回答要点：供应商侧从Schema强约束降为JSON语法约束，所以Client会把完整Schema放入高优先级系统指令；更关键的是输出始终通过严格Pydantic校验，后面还有实体来源、Tool白名单、引用白名单和Approval门禁。模型输出无效时失败或进入既有显式纠错，不会直接执行。

@@ -80,19 +80,23 @@ def _model_snapshot(settings: Settings) -> ModelRuntimeSnapshot:
             model_name=None,
             parameters={},
         )
+    parameters: dict[str, bool | int | float | str] = {
+        "response_format": settings.model_response_format,
+        "temperature": settings.model_temperature,
+        "max_output_tokens": settings.model_max_output_tokens,
+        "timeout_seconds": settings.model_timeout_seconds,
+        "max_retries": settings.model_max_retries,
+        "initial_backoff_seconds": settings.model_initial_backoff_seconds,
+        "max_backoff_seconds": settings.model_max_backoff_seconds,
+        "review_draft_prompt_version": REVIEW_DRAFT_PROMPT_VERSION,
+    }
+    if settings.model_thinking_mode is not None:
+        parameters["thinking_mode"] = settings.model_thinking_mode
     return ModelRuntimeSnapshot(
         configured=True,
         provider=settings.model_provider,
         model_name=settings.model_name,
-        parameters={
-            "temperature": settings.model_temperature,
-            "max_output_tokens": settings.model_max_output_tokens,
-            "timeout_seconds": settings.model_timeout_seconds,
-            "max_retries": settings.model_max_retries,
-            "initial_backoff_seconds": settings.model_initial_backoff_seconds,
-            "max_backoff_seconds": settings.model_max_backoff_seconds,
-            "review_draft_prompt_version": REVIEW_DRAFT_PROMPT_VERSION,
-        },
+        parameters=parameters,
     )
 
 

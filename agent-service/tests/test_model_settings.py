@@ -21,6 +21,8 @@ def test_empty_model_name_keeps_model_unconfigured_and_normalizes_legacy_provide
     assert settings.model_name is None
     assert settings.model_base_url is None
     assert settings.model_api_key is None
+    assert settings.model_response_format == "json_schema"
+    assert settings.model_thinking_mode is None
     assert settings.model_configured is False
 
 
@@ -99,3 +101,31 @@ def test_model_retry_backoff_and_timeout_are_bounded() -> None:
             model_initial_backoff_seconds=2.0,
             model_max_backoff_seconds=1.0,
         )
+
+
+@pytest.mark.unit
+def test_model_response_format_accepts_json_object_and_rejects_unknown_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MODEL_RESPONSE_FORMAT", "json_object")
+
+    assert Settings(environment="test").model_response_format == "json_object"
+
+    monkeypatch.setenv("MODEL_RESPONSE_FORMAT", "provider_default")
+    with pytest.raises(ValidationError, match=r"json_schema|json_object"):
+        Settings(environment="test")
+
+
+@pytest.mark.unit
+def test_optional_model_thinking_mode_normalizes_empty_and_validates_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MODEL_THINKING_MODE", "  disabled  ")
+    assert Settings(environment="test").model_thinking_mode == "disabled"
+
+    monkeypatch.setenv("MODEL_THINKING_MODE", "  ")
+    assert Settings(environment="test").model_thinking_mode is None
+
+    monkeypatch.setenv("MODEL_THINKING_MODE", "adaptive")
+    with pytest.raises(ValidationError, match=r"enabled|disabled"):
+        Settings(environment="test")

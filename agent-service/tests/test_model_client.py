@@ -38,6 +38,21 @@ def _settings() -> Settings:
     )
 
 
+def _json_object_settings() -> Settings:
+    """模拟DeepSeek等只接受JSON Object的OpenAI兼容供应商。"""
+
+    return Settings(
+        environment="test",
+        model_name="deepseek-chat",
+        model_base_url=AnyHttpUrl("https://api.deepseek.example/v1"),
+        model_api_key=SecretStr("test-model-secret"),
+        model_response_format="json_object",
+        model_thinking_mode="disabled",
+        model_timeout_seconds=1.0,
+        model_max_retries=0,
+    )
+
+
 def _success_response(
     *,
     content: str = '{"intent":"ORDER_STATUS","confidence":0.95}',
@@ -102,6 +117,67 @@ async def test_chat_client_sends_json_schema_and_returns_validated_output_and_us
     assert body["response_format"]["type"] == "json_schema"
     assert body["response_format"]["json_schema"]["strict"] is True
     assert body["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_chat_client_adapts_json_object_provider_and_keeps_local_schema_validation() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return _success_response()
+
+    client = OpenAICompatibleChatClient(
+        _json_object_settings(),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await client.complete_structured(
+            (ChatMessage(role="user", content="查询订单状态"),),
+            DecisionOutput,
+        )
+    finally:
+        await client.aclose()
+
+    assert result.output == DecisionOutput(intent="ORDER_STATUS", confidence=0.95)
+    body = json.loads(requests[0].content)
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["thinking"] == {"type": "disabled"}
+    assert body["messages"][0]["role"] == "system"
+    assert "JSON Schema" in body["messages"][0]["content"]
+    assert '"additionalProperties":false' in body["messages"][0]["content"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_json_object_instruction_extends_existing_system_message() -> None:
+    request_body: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_body.update(json.loads(request.content))
+        return _success_response()
+
+    client = OpenAICompatibleChatClient(
+        _json_object_settings(),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        await client.complete_structured(
+            (
+                ChatMessage(role="system", content="保留既有业务边界。"),
+                ChatMessage(role="user", content="查询订单状态"),
+            ),
+            DecisionOutput,
+        )
+    finally:
+        await client.aclose()
+
+    messages = request_body["messages"]
+    assert isinstance(messages, list)
+    assert len(messages) == 2
+    assert messages[0]["content"].startswith("保留既有业务边界。")
+    assert "JSON Schema" in messages[0]["content"]
 
 
 @pytest.mark.unit

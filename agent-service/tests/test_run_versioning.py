@@ -114,6 +114,8 @@ def test_configured_model_name_and_non_sensitive_parameters_are_frozen() -> None
             model_provider="openai_compatible",
             model_name="decision-model-v2",
             model_base_url=AnyHttpUrl("https://models.example.test/v1"),
+            model_response_format="json_object",
+            model_thinking_mode="disabled",
             model_temperature=0.2,
             model_max_output_tokens=4096,
         ),
@@ -125,6 +127,8 @@ def test_configured_model_name_and_non_sensitive_parameters_are_frozen() -> None
     assert snapshot.model.provider == "openai_compatible"
     assert snapshot.model.model_name == "decision-model-v2"
     assert snapshot.model.parameters == {
+        "response_format": "json_object",
+        "thinking_mode": "disabled",
         "temperature": 0.2,
         "max_output_tokens": 4096,
         "timeout_seconds": 30.0,

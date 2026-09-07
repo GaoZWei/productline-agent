@@ -1514,3 +1514,23 @@
 - 同一订单复用Session，每次统一消息和Approval确认使用新SSE流；切换订单会关闭旧流并用请求序号拒绝迟到结果，重试只重放当前失败请求。
 - 页面按`kind`分别展示Java状态事实、动态诊断证据、带版本Chunk的规范回答、服务端受控澄清候选和可编辑Approval；复核与返工分别二次确认，取消不写Java。
 - 四Skill集成验证Review基于同Session最近成功诊断创建独立等待Run，刷新Java任务/质检事实和规范引用后只保存草稿；Docker烟测验证动态模型未配置返回稳定错误且固定诊断仍可用。
+
+---
+
+## 2026-09-07 — `[T751-T753兼容修复] M7.6-A DeepSeek JSON Object适配`
+
+### 核心解决的问题
+
+修复公共模型Client固定发送`response_format=json_schema`导致DeepSeek Chat Completions拒绝统一Agent请求的问题，同时避免为了兼容供应商而取消本地结构校验。
+
+### 实现的核心代码
+
+- `agent-service/app/settings.py`、`app/clients/model.py`：结构化输出模式配置、JSON Object请求及Schema系统指令。
+- `agent-service/app/versioning.py`：把实际响应格式写入非敏感Run版本快照。
+- `.env.example`、`docker-compose.yml`：部署参数透传和DeepSeek模式说明。
+
+### 实现的核心功能
+
+- 默认保留原有`json_schema`协议，DeepSeek显式选择`json_object`，不再依赖模型名或网关地址进行隐式猜测。
+- JSON Object模式把目标Pydantic Schema加入系统指令，并可显式关闭DeepSeek思考模式；收到的正文仍执行严格本地校验，非法字段、类型或业务契约继续失败。
+- 当前DeepSeek配置已通过最小真实结构化调用和`ORDER-003`统一状态查询，协议拒绝不会被降级或伪装为成功。

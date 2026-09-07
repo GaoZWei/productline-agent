@@ -14,7 +14,7 @@ from app.schemas.routing import RouterResult
 from app.schemas.session import SessionContext
 
 # Prompt 版本号
-ROUTER_PROMPT_VERSION: Final = "router-v3"
+ROUTER_PROMPT_VERSION: Final = "router-v4"
 _RETRY_INSTRUCTION: Final = (
     "上一次响应不符合要求的 JSON Schema。"
     "请只返回一个修正后的 JSON 对象, 不要包含 Markdown 或解释。"
@@ -54,6 +54,14 @@ Prompt 版本: {ROUTER_PROMPT_VERSION}
 8. UNKNOWN 必须把 need_clarification 设为 true, 并且不能选择任何 Skill 或 Tool。
 9. 不要调用 Tool、判定权限或声称任何业务状态。
 10. 只返回一个符合所提供 RouterResult JSON Schema 的 JSON 对象。
+
+页面指代示例:
+- 输入user_message为“当前订单状态”, page_context.order_id为“ORDER-003”时,
+  ORDER-003并未出现在用户原文中。
+- 正确JSON输出中的entities全部为null, intent为ORDER_QUERY,
+  missing_fields为["order_id"], need_clarification为true。
+- 后续确定性代码会合并page_context; 你不能提前把页面值复制进entities,
+  也不能据此把missing_fields清空。
 """
 
 
