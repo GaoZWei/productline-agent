@@ -3,7 +3,7 @@ import { ElAlert, ElButton, ElLoading, ElSkeleton } from "element-plus";
 import { onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 
-import AgentDiagnosisDrawer from "./components/AgentDiagnosisDrawer.vue";
+import AgentWorkspaceDrawer from "./components/AgentWorkspaceDrawer.vue";
 import DeliveryStatusPanel from "./components/DeliveryStatusPanel.vue";
 import OrderSummary from "./components/OrderSummary.vue";
 import OrderSwitcher from "./components/OrderSwitcher.vue";
@@ -54,8 +54,8 @@ onMounted(() => store.initialize());
             运行历史
           </button>
         </nav>
-        <span class="environment">M2 · 诊断视图</span>
-        <span class="service-health"><i></i>Java 事实源 · Agent 诊断</span>
+        <span class="environment">M7 · Agent生产闭环</span>
+        <span class="service-health"><i></i>Java 事实源 · Agent 在线</span>
       </div>
     </header>
 
@@ -77,7 +77,7 @@ onMounted(() => store.initialize());
             <div v-if="traceId" class="trace-chip" title="用于关联 Java 服务日志">
               TRACE · {{ traceId }}
             </div>
-            <AgentDiagnosisDrawer :order="overview?.order" />
+            <AgentWorkspaceDrawer :order="overview?.order" />
           </div>
         </div>
 
@@ -114,7 +114,7 @@ onMounted(() => store.initialize());
 
         <footer class="page-footer">
           <span>事实数据均由 Java business-service 提供</span>
-          <span>诊断由固定 Workflow 生成，不执行写操作</span>
+          <span>Agent写操作必须经过人工确认与Java重新校验</span>
         </footer>
       </main>
     </div>

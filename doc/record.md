@@ -1493,3 +1493,24 @@
 - Review消息创建新的`WAITING_APPROVAL` Run并关联同一Session最近成功诊断，来源诊断保持`SUCCEEDED`；草稿生成只调用只读Java Tool、RAG和模型，不调用写Tool。
 - 用户确认后重新读取Java事实并以Approval CAS抢占唯一执行权，成功、写失败、业务冲突、过期和取消同步结束APPROVAL/WRITEBACK Step及Run，重复确认只返回已保存结果。
 - `CREATE_REWORK`只能从已成功且明确要求返工的复核显式创建独立Run和第二个Approval；重复创建返回既有活动授权，终态失败或取消后可重新授权，复核与返工分别确认、分别写入且各自幂等。
+
+---
+
+## 2026-09-07 — `[T774-T781] M7.6-G 统一页面与端到端验收`
+
+### 核心解决的问题
+
+把后端统一消息、五类结果、SSE和Approval能力接入订单页唯一Agent抽屉，使状态查询、动态诊断、规范问答、澄清和人工确认不再分散于未接线组件，并以可重复集成测试证明模型失败不会伪装成功。
+
+### 实现的核心代码
+
+- `web-console/src/api/agentClient.ts`、`src/types/agent.ts`：统一能力/消息Client、五类判别联合类型及运行时响应校验。
+- `web-console/src/components/AgentWorkspaceDrawer.vue`、`AgentResultView.vue`：Session/SSE编排、异步请求隔离、结果分派、澄清和Review/返工确认交互。
+- `agent-service/tests/test_agent_persistence.py`：真实PostgreSQL、Java HTTP边界、模型Stub和确定性Embedding下的四Skill统一入口集成。
+- `scripts/test-agent-page-e2e.sh`、`Makefile`：生产镜像、迁移、同源代理、固定诊断及模型失败语义的一键隔离验收。
+
+### 实现的核心功能
+
+- 同一订单复用Session，每次统一消息和Approval确认使用新SSE流；切换订单会关闭旧流并用请求序号拒绝迟到结果，重试只重放当前失败请求。
+- 页面按`kind`分别展示Java状态事实、动态诊断证据、带版本Chunk的规范回答、服务端受控澄清候选和可编辑Approval；复核与返工分别二次确认，取消不写Java。
+- 四Skill集成验证Review基于同Session最近成功诊断创建独立等待Run，刷新Java任务/质检事实和规范引用后只保存草稿；Docker烟测验证动态模型未配置返回稳定错误且固定诊断仍可用。

@@ -72,6 +72,101 @@ export interface OrderDiagnosisErrorResponse {
   retryable: boolean;
   error_step: string | null;
 }
+// 统一入口返回五类结果
+export type AgentResultKind =
+  | "ORDER_STATUS"
+  | "DIAGNOSIS"
+  | "SPECIFICATION_ANSWER"
+  | "CLARIFICATION"
+  | "APPROVAL";
+
+export type AgentIntent =
+  | "ORDER_QUERY"
+  | "TASK_TRACKING"
+  | "ORDER_DIAGNOSIS"
+  | "SPEC_QA"
+  | "REVIEW_GENERATION"
+  | "UNKNOWN";
+
+export type RoutingEntityField =
+  | "order_id"
+  | "task_id"
+  | "issue_id"
+  | "batch_id"
+  | "product_type"
+  | "satellite_type";
+
+export interface ClarificationOption {
+  value: string;
+  source: "USER_MESSAGE" | "CONFIRMED_SESSION" | "PAGE_CONTEXT" | "SESSION_CANDIDATE";
+}
+
+export interface ClarificationRequest {
+  reason:
+    | "UNKNOWN_INTENT"
+    | "ENTITY_CONFLICT"
+    | "MISSING_PARAMETER"
+    | "LOW_CONFIDENCE"
+    | "CONFIRM_INTENT"
+    | "MODEL_REQUEST";
+  question: string;
+  field: RoutingEntityField | null;
+  options: ClarificationOption[];
+}
+
+export interface ClarificationChoice {
+  source_run_id: string;
+  selection?: { field: RoutingEntityField; value: string };
+  confirm_intent?: boolean;
+}
+
+export interface AgentMessageRequest {
+  message: string;
+  session_id?: string;
+  page_context?: PageContext;
+  clarification?: ClarificationChoice;
+}
+
+export interface OrderStatusAgentResult {
+  kind: "ORDER_STATUS";
+  subject: "ORDER" | "TASK";
+  order_id: string;
+  task_id: string | null;
+  status: string;
+  summary: string;
+}
+
+export interface DiagnosisAgentResult {
+  kind: "DIAGNOSIS";
+  diagnosis: DiagnosisResult;
+}
+
+export type SpecificationQaStatus =
+  | "ANSWERED"
+  | "INSUFFICIENT_CONTEXT"
+  | "RERANK_UNAVAILABLE"
+  | "GENERATION_FAILED";
+
+export interface SpecificationQaResult {
+  status: SpecificationQaStatus;
+  question: string;
+  rewritten_query: string;
+  answer: string;
+  citations: KnowledgeCitation[];
+  rerank_degraded: boolean;
+}
+
+export interface SpecificationAnswerAgentResult {
+  kind: "SPECIFICATION_ANSWER";
+  specification_answer: SpecificationQaResult;
+}
+
+export interface ClarificationAgentResult {
+  kind: "CLARIFICATION";
+  intent: AgentIntent;
+  confidence: number;
+  clarification: ClarificationRequest;
+}
 // 规范引用：它表示一条可以追溯的规范依据
 export interface KnowledgeCitation {
   document_id: string; // 哪份规范引用
@@ -130,6 +225,50 @@ export interface ApprovalAgentResult extends Omit<ReviewApproval, "run_id"> {
   kind: "APPROVAL";
   run_id: string;
   source_run_id: string;
+}
+// 信息结果类型
+export type AgentMessageResult =
+  | OrderStatusAgentResult
+  | DiagnosisAgentResult
+  | SpecificationAnswerAgentResult
+  | ClarificationAgentResult
+  | ApprovalAgentResult;
+// 统一响应数据
+export interface AgentMessageResponse {
+  run_id: string; // 当前这一轮Agent执行ID
+  session_id: string; // 多轮会话上下文
+  trace_id: string; // 跨Web、Python、Java排查日志
+  result: AgentMessageResult;
+}
+
+export interface ModelCapabilities {
+  configured: boolean;
+  provider: "openai_compatible" | null;
+  model_name: string | null;
+}
+
+export interface KnowledgeIndexIdentity {
+  provider: string;
+  model: string;
+  dimension: number;
+  index_version: string;
+}
+
+export interface KnowledgeIndexCapabilities {
+  ready: boolean;
+  status: "NOT_INDEXED" | "INCOMPLETE" | "INDEX_MISMATCH" | "READY";
+  expected_document_count: number;
+  document_count: number;
+  chunk_count: number;
+  expected_index: KnowledgeIndexIdentity;
+  stored_index: KnowledgeIndexIdentity | null;
+}
+
+export interface AgentCapabilitiesResponse {
+  message_api_enabled: true;
+  result_kinds: AgentResultKind[];
+  model: ModelCapabilities;
+  knowledge_index: KnowledgeIndexCapabilities;
 }
 // 确认事件数据
 export interface ReviewApprovalDecision {

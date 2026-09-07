@@ -1,6 +1,9 @@
 import axios, { AxiosError } from "axios";
 
 import type {
+  AgentCapabilitiesResponse,
+  AgentMessageRequest,
+  AgentMessageResponse,
   ApprovalConfirmationErrorResponse,
   ApprovalConfirmationResponse,
   ApprovalCancellationResponse,
@@ -28,6 +31,23 @@ const BLOCKING_STAGES = new Set<BlockingStage>([
   "NONE",
   "INSUFFICIENT_INFORMATION",
 ]);
+
+const AGENT_RESULT_KINDS = [
+  "ORDER_STATUS",
+  "DIAGNOSIS",
+  "SPECIFICATION_ANSWER",
+  "CLARIFICATION",
+  "APPROVAL",
+] as const;
+
+const AGENT_INTENTS = [
+  "ORDER_QUERY",
+  "TASK_TRACKING",
+  "ORDER_DIAGNOSIS",
+  "SPEC_QA",
+  "REVIEW_GENERATION",
+  "UNKNOWN",
+] as const;
 
 export class AgentApiError extends Error {
   readonly code: string;
@@ -71,6 +91,35 @@ export const agentHttpClient = axios.create({
   },
 });
 
+export async function requestAgentCapabilities(): Promise<AgentCapabilitiesResponse> {
+  try {
+    const response = await agentHttpClient.get<unknown>("/api/agent/capabilities");
+    if (!isAgentCapabilitiesResponse(response.data)) {
+      throw responseValidationError(response.status, traceIdFrom(response.data));
+    }
+    return response.data;
+  } catch (reason) {
+    throw normalizeAgentError(reason);
+  }
+}
+// 发送统一消息
+export async function requestAgentMessage(
+  request: AgentMessageRequest,
+  eventStreamId?: string,
+): Promise<AgentMessageResponse> {
+  try {
+    const response = await agentHttpClient.post<unknown>("/api/agent/messages", request, {
+      headers: eventStreamId ? { "X-Event-Stream-Id": eventStreamId } : undefined,
+    });
+    if (!isAgentMessageResponse(response.data)) {
+      throw responseValidationError(response.status, traceIdFrom(response.data));
+    }
+    return response.data;
+  } catch (reason) {
+    throw normalizeAgentError(reason);
+  }
+}
+
 export async function requestOrderDiagnosis(
   request: OrderDiagnosisRequest,
   eventStreamId?: string,
@@ -90,12 +139,14 @@ export async function requestOrderDiagnosis(
 
 export async function requestApprovalConfirmation(
   decision: ReviewApprovalDecision,
+  eventStreamId?: string,
 ): Promise<ApprovalConfirmationResponse> {
   try {
     const approvalId = encodeURIComponent(decision.approval_id);
     const response = await agentHttpClient.post<unknown>(
       `/api/agent/approvals/${approvalId}/confirm`,
       { draft: decision.draft },
+      { headers: eventStreamId ? { "X-Event-Stream-Id": eventStreamId } : undefined },
     );
     if (!isApprovalConfirmationResponse(response.data)) {
       throw responseValidationError(response.status, traceIdFrom(response.data));
@@ -226,6 +277,166 @@ function isApprovalConfirmationResponse(value: unknown): value is ApprovalConfir
     isNonEmptyString(value.trace_id) &&
     isApprovalWriteResult(value.result)
   );
+}
+
+function isAgentCapabilitiesResponse(value: unknown): value is AgentCapabilitiesResponse {
+  if (
+    !isRecord(value) ||
+    value.message_api_enabled !== true ||
+    !Array.isArray(value.result_kinds) ||
+    !isRecord(value.model) ||
+    typeof value.model.configured !== "boolean" ||
+    !isRecord(value.knowledge_index)
+  ) {
+    return false;
+  }
+  const resultKinds = value.result_kinds;
+  if (
+    resultKinds.length !== AGENT_RESULT_KINDS.length ||
+    !AGENT_RESULT_KINDS.every((kind) => resultKinds.includes(kind))
+  ) {
+    return false;
+  }
+  const modelValid = value.model.configured
+    ? value.model.provider === "openai_compatible" && isNonEmptyString(value.model.model_name)
+    : value.model.provider === null && value.model.model_name === null;
+  const knowledge = value.knowledge_index;
+  const statusValid = ["NOT_INDEXED", "INCOMPLETE", "INDEX_MISMATCH", "READY"].includes(
+    String(knowledge.status),
+  );
+  return (
+    modelValid &&
+    statusValid &&
+    typeof knowledge.ready === "boolean" &&
+    knowledge.ready === (knowledge.status === "READY") &&
+    Number.isInteger(knowledge.expected_document_count) &&
+    Number(knowledge.expected_document_count) > 0 &&
+    Number.isInteger(knowledge.document_count) &&
+    Number(knowledge.document_count) >= 0 &&
+    Number.isInteger(knowledge.chunk_count) &&
+    Number(knowledge.chunk_count) >= 0 &&
+    isKnowledgeIndexIdentity(knowledge.expected_index) &&
+    (knowledge.stored_index === null || isKnowledgeIndexIdentity(knowledge.stored_index))
+  );
+}
+
+function isKnowledgeIndexIdentity(value: unknown) {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.provider) &&
+    isNonEmptyString(value.model) &&
+    Number.isInteger(value.dimension) &&
+    Number(value.dimension) > 0 &&
+    isNonEmptyString(value.index_version)
+  );
+}
+
+function isAgentMessageResponse(value: unknown): value is AgentMessageResponse {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.run_id) &&
+    isNonEmptyString(value.session_id) &&
+    isNonEmptyString(value.trace_id) &&
+    isAgentMessageResult(value.result)
+  );
+}
+// 根据 kind 做第二层校验
+function isAgentMessageResult(value: unknown) {
+  if (!isRecord(value) || !AGENT_RESULT_KINDS.includes(value.kind as never)) return false;
+  if (value.kind === "ORDER_STATUS") {
+    return (
+      ["ORDER", "TASK"].includes(String(value.subject)) &&
+      isNonEmptyString(value.order_id) &&
+      (value.task_id === null || isNonEmptyString(value.task_id)) &&
+      (value.subject === "ORDER" ? value.task_id === null : isNonEmptyString(value.task_id)) &&
+      isNonEmptyString(value.status) &&
+      isNonEmptyString(value.summary)
+    );
+  }
+  if (value.kind === "DIAGNOSIS") return isDiagnosisResult(value.diagnosis);
+  if (value.kind === "SPECIFICATION_ANSWER") { // ANSWERED规范回答必须至少携带一个 Citation
+    return isSpecificationQaResult(value.specification_answer);
+  }
+  if (value.kind === "CLARIFICATION") return isClarificationResult(value);
+  return isApprovalAgentResult(value);
+}
+
+function isSpecificationQaResult(value: unknown) {
+  if (
+    !isRecord(value) ||
+    !["ANSWERED", "INSUFFICIENT_CONTEXT", "RERANK_UNAVAILABLE", "GENERATION_FAILED"].includes(
+      String(value.status),
+    ) ||
+    !isNonEmptyString(value.question) ||
+    !isNonEmptyString(value.rewritten_query) ||
+    !isNonEmptyString(value.answer) ||
+    !Array.isArray(value.citations) ||
+    !value.citations.every(isKnowledgeCitation) ||
+    typeof value.rerank_degraded !== "boolean"
+  ) {
+    return false;
+  }
+  return value.status === "ANSWERED"
+    ? value.citations.length > 0 && !value.rerank_degraded
+    : value.citations.length === 0 &&
+        value.rerank_degraded === (value.status === "RERANK_UNAVAILABLE");
+}
+
+function isClarificationResult(value: Record<string, unknown>) {
+  if (
+    !AGENT_INTENTS.includes(value.intent as never) ||
+    typeof value.confidence !== "number" ||
+    value.confidence < 0 ||
+    value.confidence > 1 ||
+    !isRecord(value.clarification)
+  ) {
+    return false;
+  }
+  const clarification = value.clarification;
+  if (
+    ![
+      "UNKNOWN_INTENT",
+      "ENTITY_CONFLICT",
+      "MISSING_PARAMETER",
+      "LOW_CONFIDENCE",
+      "CONFIRM_INTENT",
+      "MODEL_REQUEST",
+    ].includes(String(clarification.reason)) ||
+    !isNonEmptyString(clarification.question) ||
+    !Array.isArray(clarification.options) ||
+    !clarification.options.every(isClarificationOption)
+  ) {
+    return false;
+  }
+  const hasField = isRoutingEntityField(clarification.field);
+  if (clarification.reason === "ENTITY_CONFLICT") {
+    return hasField && clarification.options.length >= 2;
+  }
+  if (clarification.reason === "MISSING_PARAMETER") {
+    return hasField && clarification.options.length === 0;
+  }
+  return clarification.field === null && clarification.options.length === 0;
+}
+
+function isClarificationOption(value: unknown) {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.value) &&
+    ["USER_MESSAGE", "CONFIRMED_SESSION", "PAGE_CONTEXT", "SESSION_CANDIDATE"].includes(
+      String(value.source),
+    )
+  );
+}
+
+function isRoutingEntityField(value: unknown) {
+  return [
+    "order_id",
+    "task_id",
+    "issue_id",
+    "batch_id",
+    "product_type",
+    "satellite_type",
+  ].includes(String(value));
 }
 
 function isApprovalCancellationResponse(value: unknown): value is ApprovalCancellationResponse {
@@ -478,7 +689,10 @@ function isOrderDiagnosisResponse(value: unknown): value is OrderDiagnosisRespon
   ) {
     return false;
   }
-  const diagnosis = value.diagnosis;
+  return isDiagnosisResult(value.diagnosis);
+}
+
+function isDiagnosisResult(diagnosis: unknown) {
   return (
     isRecord(diagnosis) &&
     isNonEmptyString(diagnosis.order_id) &&

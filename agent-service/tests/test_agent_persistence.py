@@ -3259,7 +3259,7 @@ class _CatalogQueryEmbeddingGenerator:
 
 
 def _production_skill_model_transport() -> httpx.MockTransport:
-    """按公共结构化Schema返回Router、Action、Rerank和规范回答Stub。"""
+    """按公共结构化Schema返回Router、Action、Rerank、规范回答和Review草稿Stub。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         request_body = json.loads(request.content)
@@ -3267,7 +3267,15 @@ def _production_skill_model_transport() -> httpx.MockTransport:
         user_payload = json.loads(request_body["messages"][-1]["content"])
         if schema_name == "RouterResult":
             message = user_payload["user_message"]
-            if "诊断" in message:
+            if "复核" in message:
+                output = {
+                    "intent": "REVIEW_GENERATION",
+                    "confidence": 0.98,
+                    "entities": {"task_id": "TASK-003"},
+                    "missing_fields": [],
+                    "need_clarification": False,
+                }
+            elif "诊断" in message:
                 output = {
                     "intent": "ORDER_DIAGNOSIS",
                     "confidence": 0.98,
@@ -3320,6 +3328,19 @@ def _production_skill_model_transport() -> httpx.MockTransport:
                 "answer": "坐标系问题应先完成返工处理, 再重新提交复核。",
                 "citation_ids": [user_payload["citations"][0]["chunk_id"]],
             }
+        elif schema_name == "ReviewDraft":
+            output = {
+                "task_id": user_payload["task"]["task_id"],
+                "issue_id": user_payload["quality_issues"][0]["issue_id"],
+                "conclusion": "REWORK_REQUIRED",
+                "problem_summary": "存在未关闭的坐标系质量问题",
+                "review_comment": "建议完成坐标系处理后重新提交复核",
+                "specification_references": [user_payload["citations"][0]],
+                "suggested_rework": {
+                    "required": True,
+                    "type": "COORDINATE_SYSTEM_FIX",
+                },
+            }
         else:  # pragma: no cover - 新增模型协议时应显式扩展测试Stub
             raise AssertionError(f"unexpected schema: {schema_name}")
         return httpx.Response(
@@ -3356,7 +3377,7 @@ def _production_skill_model_transport() -> httpx.MockTransport:
 async def test_agent_read_skills_execute_through_unified_http(
     migrated_database_url: str,
 ) -> None:
-    """三个只读Skill经统一HTTP执行, 并保存实际嵌套Step和引用结果。"""
+    """四个生产Skill经统一HTTP执行, Review只保存待确认草稿而不触发Java写入。"""
 
     seed_database = Database(migrated_database_url)
     try:
@@ -3383,8 +3404,37 @@ async def test_agent_read_skills_execute_through_unified_http(
         transport=_production_skill_model_transport(),
     )
 
+    business_paths: list[str] = []
+
     def business_handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/orders/ORDER-003"
+        business_paths.append(request.url.path)
+        facts = {
+            "/api/orders/ORDER-003": {
+                "orderId": "ORDER-003",
+                "productType": "DOM",
+                "status": "BLOCKED",
+            },
+            "/api/tasks/TASK-003": {
+                "taskId": "TASK-003",
+                "orderId": "ORDER-003",
+                "status": "COMPLETED",
+                "version": 7,
+            },
+            "/api/tasks/TASK-003/quality-issues": {
+                "taskId": "TASK-003",
+                "issues": [
+                    {
+                        "issueId": "ISSUE-001",
+                        "taskId": "TASK-003",
+                        "issueType": "COORDINATE_SYSTEM",
+                        "status": "OPEN",
+                        "description": "坐标系不一致",
+                    }
+                ],
+            },
+        }
+        assert request.method == "GET"
+        assert request.url.path in facts
         return httpx.Response(
             200,
             request=request,
@@ -3393,11 +3443,7 @@ async def test_agent_read_skills_execute_through_unified_http(
                 "success": True,
                 "code": "SUCCESS",
                 "message": "ok",
-                "data": {
-                    "orderId": "ORDER-003",
-                    "productType": "DOM",
-                    "status": "BLOCKED",
-                },
+                "data": facts[request.url.path],
                 "trace_id": request.headers["X-Trace-Id"],
                 "retryable": False,
             },
@@ -3445,13 +3491,23 @@ async def test_agent_read_skills_execute_through_unified_http(
                     json={"message": "坐标系问题应如何处理"},
                     headers={**headers, "X-Trace-Id": "trace-production-specification"},
                 )
+                review_response = await api_client.post(
+                    "/api/agent/messages",
+                    json={
+                        "message": "为 TASK-003 生成复核草稿",
+                        "session_id": diagnosis_response.json()["session_id"],
+                    },
+                    headers={**headers, "X-Trace-Id": "trace-production-review"},
+                )
 
             assert order_response.status_code == 200, order_response.text
             assert diagnosis_response.status_code == 200, diagnosis_response.text
             assert specification_response.status_code == 200, specification_response.text
+            assert review_response.status_code == 200, review_response.text
             order_body = order_response.json()
             diagnosis_body = diagnosis_response.json()
             specification_body = specification_response.json()
+            review_body = review_response.json()
             assert order_body["result"] == {
                 "kind": "ORDER_STATUS",
                 "subject": "ORDER",
@@ -3470,11 +3526,28 @@ async def test_agent_read_skills_execute_through_unified_http(
             assert specification["citations"]
             assert specification["citations"][0]["document_version"]
             assert specification["citations"][0]["chunk_id"]
+            approval = review_body["result"]
+            assert approval["kind"] == "APPROVAL"
+            assert approval["status"] == "WAITING_CONFIRMATION"
+            assert approval["operation_type"] == "SUBMIT_REVIEW"
+            assert approval["target_id"] == "TASK-003"
+            assert approval["target_version"] == 7
+            assert approval["source_run_id"] == diagnosis_body["run_id"]
+            assert approval["draft"]["issue_id"] == "ISSUE-001"
+            assert approval["draft"]["specification_references"]
+            assert review_body["run_id"] != diagnosis_body["run_id"]
+            assert business_paths == [
+                "/api/orders/ORDER-003",
+                "/api/orders/ORDER-003",
+                "/api/tasks/TASK-003",
+                "/api/tasks/TASK-003/quality-issues",
+            ]
 
             run_ids = (
                 order_body["run_id"],
                 diagnosis_body["run_id"],
                 specification_body["run_id"],
+                review_body["run_id"],
             )
             async with application.state.database.session() as session:
                 runs = [await AgentRunRepository(session).get(run_id) for run_id in run_ids]
@@ -3482,10 +3555,19 @@ async def test_agent_read_skills_execute_through_unified_http(
                     await AgentStepRepository(session).list_by_run(run_id)
                     for run_id in run_ids
                 ]
+                stored_approvals = await ApprovalRecordRepository(session).list_by_run(
+                    review_body["run_id"]
+                )
 
             assert all(run is not None for run in runs)
-            assert [run.tool_call_count for run in runs if run is not None] == [1, 1, 0]
-            assert [run.total_token_count for run in runs if run is not None] == [16, 48, 48]
+            assert [run.tool_call_count for run in runs if run is not None] == [1, 1, 0, 2]
+            assert [run.total_token_count for run in runs if run is not None] == [16, 48, 48, 64]
+            assert runs[3] is not None
+            assert runs[3].status is AgentRunStatus.WAITING_APPROVAL
+            assert runs[3].source_run_id == diagnosis_body["run_id"]
+            assert len(stored_approvals) == 1
+            assert stored_approvals[0].status is ApprovalStatus.WAITING_CONFIRMATION
+            assert stored_approvals[0].target_id == "TASK-003"
             assert [step.step_type for step in steps[0]][-2:] == [
                 AgentStepType.WORKFLOW,
                 AgentStepType.TOOL,
@@ -3495,6 +3577,15 @@ async def test_agent_read_skills_execute_through_unified_http(
                 AgentStepType.RAG,
                 AgentStepType.LLM,
                 AgentStepType.LLM,
+            ]
+            assert AgentStepType.APPROVAL in [step.step_type for step in steps[3]]
+            assert [
+                step.step_name
+                for step in steps[3]
+                if step.step_type is AgentStepType.TOOL
+            ] == [
+                "get_task_detail",
+                "get_quality_issues",
             ]
     finally:
         await business_client.aclose()

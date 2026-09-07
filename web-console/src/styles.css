@@ -544,6 +544,60 @@ input {
   font-size: 10px;
 }
 
+.fixed-diagnosis-action,
+.agent-result-primary-action,
+.clarification-options button {
+  padding: 8px 11px;
+  color: var(--blue-dark);
+  background: #ffffff;
+  border: 1px solid #b2ccff;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.fixed-diagnosis-action:disabled,
+.agent-result-primary-action:disabled,
+.clarification-options button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.agent-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.agent-capabilities span {
+  padding: 5px 8px;
+  color: #b54708;
+  background: var(--warning-soft);
+  border: 1px solid #fedf89;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.agent-capabilities span[data-ready="true"] {
+  color: #027a48;
+  background: var(--success-soft);
+  border-color: #abefc6;
+}
+
+.agent-capabilities small {
+  width: 100%;
+  overflow: hidden;
+  color: #98a2b3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-loading {
   display: flex;
   gap: 14px;
@@ -878,6 +932,101 @@ input {
 .diagnosis-list code,
 .diagnosis-trace {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.agent-result-view {
+  margin-top: 15px;
+}
+
+.agent-result-card {
+  padding: 18px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.agent-result-card > header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-result-card > header strong {
+  color: var(--blue-dark);
+  font-size: 11px;
+}
+
+.agent-result-card h3 {
+  margin: 13px 0 7px;
+  color: #172b4d;
+  font-size: 17px;
+}
+
+.agent-result-card p {
+  color: #475467;
+  line-height: 1.65;
+}
+
+.agent-result-card > small,
+.result-meta {
+  color: #98a2b3;
+  font-size: 10px;
+}
+
+.order-status-result {
+  border-left: 4px solid var(--success);
+}
+
+.specification-result,
+.clarification-result {
+  border-left: 4px solid var(--blue);
+}
+
+.specification-answer {
+  white-space: pre-wrap;
+}
+
+.specification-result .approval-citations {
+  margin-top: 14px;
+}
+
+.clarification-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.clarification-options button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.clarification-options small {
+  color: #667085;
+  font-size: 9px;
+}
+
+.agent-result-primary-action {
+  width: 100%;
+  margin-top: 12px;
+  color: #ffffff;
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.agent-action-message {
+  margin: 12px 0 0;
+  padding: 11px 13px;
+  color: #027a48;
+  background: var(--success-soft);
+  border: 1px solid #abefc6;
+  border-radius: 8px;
+  font-size: 11px;
 }
 
 .knowledge-citation-card {

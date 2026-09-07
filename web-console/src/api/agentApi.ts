@@ -1,4 +1,6 @@
 import {
+  requestAgentCapabilities,
+  requestAgentMessage,
   requestApprovalConfirmation,
   requestApprovalCancellation,
   requestApprovalOperationLog,
@@ -6,6 +8,9 @@ import {
   requestOrderDiagnosis,
 } from "./agentClient";
 import type {
+  AgentCapabilitiesResponse,
+  AgentMessageRequest,
+  AgentMessageResponse,
   ApprovalConfirmationResponse,
   ApprovalCancellationResponse,
   OrderDiagnosisResponse,
@@ -14,6 +19,17 @@ import type {
   ReviewApprovalDecision,
   ReworkApprovalCreationResponse,
 } from "../types/agent";
+
+export function getAgentCapabilities(): Promise<AgentCapabilitiesResponse> {
+  return requestAgentCapabilities();
+}
+
+export function sendAgentMessage(
+  message: AgentMessageRequest,
+  eventStreamId?: string,
+): Promise<AgentMessageResponse> {
+  return requestAgentMessage(message, eventStreamId);
+}
 
 export function diagnoseOrder(
   orderId: string,
@@ -35,8 +51,9 @@ export function diagnoseOrder(
 
 export function confirmReviewApproval(
   decision: ReviewApprovalDecision,
+  eventStreamId?: string,
 ): Promise<ApprovalConfirmationResponse> {
-  return requestApprovalConfirmation(decision);
+  return requestApprovalConfirmation(decision, eventStreamId);
 }
 
 export function cancelReviewApproval(
