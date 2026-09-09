@@ -12,13 +12,20 @@ from app.evaluation.router import (
     EXPECTED_CATEGORY_COUNTS,
     EvaluationFailureType,
     RouterEvaluationCase,
+    RouterEvaluationCategory,
     RouterEvaluationDataError,
     RouterEvaluationPrediction,
     evaluate_router,
     load_router_evaluation_cases,
 )
 from app.routing import Intent
-from app.schemas import ClarificationReason, RouterEntities, RoutingDecisionStatus
+from app.schemas import (
+    ClarificationReason,
+    PageContext,
+    PageType,
+    RouterEntities,
+    RoutingDecisionStatus,
+)
 
 _DATASET_PATH = Path(__file__).parents[2] / "evaluation" / "router_cases.jsonl"
 
@@ -136,6 +143,16 @@ async def test_perfect_controlled_predictions_produce_diagonal_matrix() -> None:
     assert report.parameters_complete == 60
     assert report.intent_accuracy == 1.0
     assert report.parameter_completeness == 1.0
+    assert report.parameter_extraction_expected == 26
+    assert report.parameter_extraction_correct == 26
+    assert report.parameter_extraction_rate == 1.0
+    assert report.parameter_completion_expected == 22
+    assert report.parameter_completion_correct == 22
+    assert report.parameter_completion_rate == 1.0
+    assert report.clarification_trigger_correct == 60
+    assert report.clarification_trigger_accuracy == 1.0
+    assert report.wrong_tool_routes == 0
+    assert report.wrong_tool_routing_rate == 0.0
     assert report.failures == ()
     for expected_intent, row in report.confusion_matrix.items():
         assert row[expected_intent] > 0
@@ -159,6 +176,13 @@ async def test_metrics_confusion_matrix_and_safe_failure_file(
     assert report.parameters_complete == 58
     assert report.intent_accuracy == pytest.approx(59 / 60)
     assert report.parameter_completeness == pytest.approx(58 / 60)
+    assert report.parameter_extraction_correct == 24
+    assert report.parameter_extraction_rate == pytest.approx(24 / 26)
+    assert report.parameter_completion_rate == 1.0
+    assert report.clarification_trigger_correct == 59
+    assert report.clarification_trigger_accuracy == pytest.approx(59 / 60)
+    assert report.wrong_tool_routes == 0
+    assert report.wrong_tool_routing_rate == 0.0
     assert report.confusion_matrix[Intent.ORDER_DIAGNOSIS][Intent.UNKNOWN] == 1
     assert tuple(failure.case_id for failure in report.failures) == (
         "router-001",
@@ -197,3 +221,97 @@ async def test_evaluator_rejects_prediction_for_another_case() -> None:
 
     with pytest.raises(RouterEvaluationDataError):
         await evaluate_router((case,), WrongCaseSubject())
+
+
+@pytest.mark.asyncio
+async def test_m79_metrics_separate_extraction_completion_clarification_and_tool_route() -> None:
+    cases = (
+        RouterEvaluationCase(
+            case_id="router-901",
+            category=RouterEvaluationCategory.EXPLICIT_INTENT,
+            user_message="查询ORDER-003",
+            expected_intent=Intent.ORDER_QUERY,
+            expected_entities=RouterEntities(order_id="ORDER-003"),
+            expected_status=RoutingDecisionStatus.READY,
+        ),
+        RouterEvaluationCase(
+            case_id="router-902",
+            category=RouterEvaluationCategory.PAGE_REFERENCE,
+            user_message="查询当前订单",
+            page_context=PageContext(
+                current_system="production-system",
+                current_page=PageType.ORDER_DETAIL,
+                order_id="ORDER-002",
+                user_role="REVIEWER",
+            ),
+            expected_intent=Intent.ORDER_QUERY,
+            expected_entities=RouterEntities(order_id="ORDER-002"),
+            expected_status=RoutingDecisionStatus.READY,
+        ),
+        RouterEvaluationCase(
+            case_id="router-903",
+            category=RouterEvaluationCategory.MISSING_PARAMETER,
+            user_message="查询订单",
+            expected_intent=Intent.ORDER_QUERY,
+            expected_entities=RouterEntities(),
+            expected_status=RoutingDecisionStatus.NEEDS_CLARIFICATION,
+            expected_clarification_reason=ClarificationReason.MISSING_PARAMETER,
+        ),
+        RouterEvaluationCase(
+            case_id="router-904",
+            category=RouterEvaluationCategory.UNRELATED,
+            user_message="今天天气如何",
+            expected_intent=Intent.UNKNOWN,
+            expected_entities=RouterEntities(),
+            expected_status=RoutingDecisionStatus.NEEDS_CLARIFICATION,
+            expected_clarification_reason=ClarificationReason.UNKNOWN_INTENT,
+        ),
+    )
+    predictions = {
+        "router-901": RouterEvaluationPrediction(
+            case_id="router-901",
+            intent=Intent.ORDER_DIAGNOSIS,
+            entities=RouterEntities(order_id="ORDER-003"),
+            status=RoutingDecisionStatus.READY,
+        ),
+        "router-902": RouterEvaluationPrediction(
+            case_id="router-902",
+            intent=Intent.ORDER_QUERY,
+            entities=RouterEntities(order_id="ORDER-002"),
+            status=RoutingDecisionStatus.READY,
+        ),
+        "router-903": RouterEvaluationPrediction(
+            case_id="router-903",
+            intent=Intent.ORDER_QUERY,
+            entities=RouterEntities(),
+            status=RoutingDecisionStatus.READY,
+        ),
+        "router-904": RouterEvaluationPrediction(
+            case_id="router-904",
+            intent=Intent.UNKNOWN,
+            entities=RouterEntities(),
+            status=RoutingDecisionStatus.NEEDS_CLARIFICATION,
+            clarification_reason=ClarificationReason.UNKNOWN_INTENT,
+        ),
+    }
+
+    class _MetricSubject:
+        async def predict(
+            self,
+            case: RouterEvaluationCase,
+        ) -> RouterEvaluationPrediction:
+            return predictions[case.case_id]
+
+    report = await evaluate_router(cases, _MetricSubject())
+
+    assert report.intent_accuracy == 0.75
+    assert report.parameter_extraction_expected == 1
+    assert report.parameter_extraction_correct == 1
+    assert report.parameter_extraction_rate == 1.0
+    assert report.parameter_completion_expected == 1
+    assert report.parameter_completion_correct == 1
+    assert report.parameter_completion_rate == 1.0
+    assert report.clarification_trigger_correct == 3
+    assert report.clarification_trigger_accuracy == 0.75
+    assert report.wrong_tool_routes == 2
+    assert report.wrong_tool_routing_rate == 0.5

@@ -48,6 +48,22 @@ EXPECTED_CATEGORY_COUNTS: Final[dict[RouterEvaluationCategory, int]] = {
     RouterEvaluationCategory.INTENT_CONFUSION: 4,
     RouterEvaluationCategory.UNRELATED: 3,
 }
+# 定义两组评测类别
+# 参数提取：检查模型能否从用户本轮消息中识别订单号、任务号等
+_PARAMETER_EXTRACTION_CATEGORIES: Final = frozenset(
+    {
+        RouterEvaluationCategory.EXPLICIT_INTENT,
+        RouterEvaluationCategory.PARAPHRASE,
+        RouterEvaluationCategory.INTENT_CONFUSION,
+    }
+)
+# 参数补全：检查页面上下文或Session能否补全“这个订单”“刚才的任务”等指代
+_PARAMETER_COMPLETION_CATEGORIES: Final = frozenset(
+    {
+        RouterEvaluationCategory.PAGE_REFERENCE,
+        RouterEvaluationCategory.SESSION_REFERENCE,
+    }
+)
 
 EvaluationCategoryValue = Annotated[RouterEvaluationCategory, Field(strict=False)]
 IntentValue = Annotated[Intent, Field(strict=False)]
@@ -161,7 +177,7 @@ class RouterEvaluationFailure(EvaluationSchema):
     expected_clarification_reason: ClarificationReasonValue | None = None
     predicted_clarification_reason: ClarificationReasonValue | None = None
 
-
+# 新增了每项指标的计数和比率
 class RouterEvaluationReport(EvaluationSchema):
     """一次路由评测的可重复聚合指标和混淆矩阵。"""
 
@@ -170,6 +186,16 @@ class RouterEvaluationReport(EvaluationSchema):
     parameters_complete: Annotated[int, Field(ge=0)]
     intent_accuracy: Annotated[float, Field(ge=0.0, le=1.0)]
     parameter_completeness: Annotated[float, Field(ge=0.0, le=1.0)]
+    parameter_extraction_expected: Annotated[int, Field(ge=0)]
+    parameter_extraction_correct: Annotated[int, Field(ge=0)]
+    parameter_extraction_rate: Annotated[float, Field(ge=0.0, le=1.0)]
+    parameter_completion_expected: Annotated[int, Field(ge=0)]
+    parameter_completion_correct: Annotated[int, Field(ge=0)]
+    parameter_completion_rate: Annotated[float, Field(ge=0.0, le=1.0)]
+    clarification_trigger_correct: Annotated[int, Field(ge=0)]
+    clarification_trigger_accuracy: Annotated[float, Field(ge=0.0, le=1.0)]
+    wrong_tool_routes: Annotated[int, Field(ge=0)]
+    wrong_tool_routing_rate: Annotated[float, Field(ge=0.0, le=1.0)]
     confusion_matrix: dict[IntentValue, dict[IntentValue, int]]
     failures: tuple[RouterEvaluationFailure, ...] = ()
 
@@ -225,6 +251,56 @@ def _entity_values(entities: RouterEntities) -> dict[str, object]:
 
     return entities.model_dump(mode="json", exclude_none=True)
 
+# 参数字段计算 比较每个期望字段是否与预测值一致
+def _matching_expected_entity_count(
+    case: RouterEvaluationCase,
+    prediction: RouterEvaluationPrediction,
+) -> tuple[int, int]:
+    """返回期望实体字段数及其中值完全一致的字段数。"""
+
+    expected = _entity_values(case.expected_entities)
+    predicted = _entity_values(prediction.entities)
+    return len(expected), sum(
+        1 for field, expected_value in expected.items()
+        if predicted.get(field) == expected_value
+    )
+
+# 澄清触发准确率计算 只比较是否应该澄清，不比较澄清原因
+def _is_clarification_trigger_correct(
+    case: RouterEvaluationCase,
+    prediction: RouterEvaluationPrediction,
+) -> bool:
+    """只比较是否触发澄清; 澄清原因仍由失败样本单独判断。"""
+
+    expected = case.expected_status is RoutingDecisionStatus.NEEDS_CLARIFICATION
+    predicted = prediction.status is RoutingDecisionStatus.NEEDS_CLARIFICATION
+    return expected is predicted
+
+# 错误路由准确率计算 判断Router是否会进入错误业务Skill
+def _is_wrong_tool_route(
+    case: RouterEvaluationCase,
+    prediction: RouterEvaluationPrediction,
+) -> bool:
+    """判断预测是否已经READY并会进入非预期业务Skill。"""
+
+    if prediction.status is not RoutingDecisionStatus.READY:
+        return False
+    predicted_skill = skill_for_intent(prediction.intent)
+    if predicted_skill is None:
+        return False
+    expected_skill = (
+        skill_for_intent(case.expected_intent)
+        if case.expected_status is RoutingDecisionStatus.READY
+        else None
+    )
+    return predicted_skill is not expected_skill
+
+
+def _rate(correct: int, expected: int) -> float:
+    """对没有适用样本的字段级指标返回稳定零值。"""
+
+    return correct / expected if expected else 0.0
+
 
 def _failure_types(
     case: RouterEvaluationCase,
@@ -265,7 +341,7 @@ def _write_failure_samples(
     )
     path.write_text(content, encoding="utf-8")
 
-# 核心评测算法
+# 核心评测算法：主循环如何累计
 async def evaluate_router(
     cases: Sequence[RouterEvaluationCase],
     subject: RouterEvaluationSubject,
@@ -281,6 +357,12 @@ async def evaluate_router(
 
     intent_correct = 0
     parameters_complete = 0
+    parameter_extraction_expected = 0
+    parameter_extraction_correct = 0
+    parameter_completion_expected = 0
+    parameter_completion_correct = 0
+    clarification_trigger_correct = 0
+    wrong_tool_routes = 0
     confusion_matrix = _empty_confusion_matrix()
     failures: list[RouterEvaluationFailure] = []
     # 2. 逐条调用Subject预测
@@ -300,6 +382,17 @@ async def evaluate_router(
             case.expected_entities
         ):
             parameters_complete += 1
+        expected_fields, correct_fields = _matching_expected_entity_count(case, prediction)
+        if case.category in _PARAMETER_EXTRACTION_CATEGORIES:
+            parameter_extraction_expected += expected_fields
+            parameter_extraction_correct += correct_fields
+        elif case.category in _PARAMETER_COMPLETION_CATEGORIES:
+            parameter_completion_expected += expected_fields
+            parameter_completion_correct += correct_fields
+        if _is_clarification_trigger_correct(case, prediction):
+            clarification_trigger_correct += 1
+        if _is_wrong_tool_route(case, prediction):
+            wrong_tool_routes += 1
         failure_types = _failure_types(case, prediction)
         if failure_types:
             failures.append(
@@ -325,12 +418,29 @@ async def evaluate_router(
     if failure_path is not None:
         _write_failure_samples(failure_path, failures)
     total_cases = len(cases)
+    # 报告构造：累计所有指标的计数和比率
     return RouterEvaluationReport(
         total_cases=total_cases,
         intent_correct=intent_correct,
         parameters_complete=parameters_complete,
         intent_accuracy=intent_correct / total_cases,
         parameter_completeness=parameters_complete / total_cases,
+        parameter_extraction_expected=parameter_extraction_expected,
+        parameter_extraction_correct=parameter_extraction_correct,
+        parameter_extraction_rate=_rate(
+            parameter_extraction_correct,
+            parameter_extraction_expected,
+        ),
+        parameter_completion_expected=parameter_completion_expected,
+        parameter_completion_correct=parameter_completion_correct,
+        parameter_completion_rate=_rate(
+            parameter_completion_correct,
+            parameter_completion_expected,
+        ),
+        clarification_trigger_correct=clarification_trigger_correct,
+        clarification_trigger_accuracy=clarification_trigger_correct / total_cases,
+        wrong_tool_routes=wrong_tool_routes,
+        wrong_tool_routing_rate=wrong_tool_routes / total_cases,
         confusion_matrix=confusion_matrix,
         failures=tuple(failures),
     )

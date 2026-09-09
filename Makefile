@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-sse-events test-run-timeline test-run-history test-model-runtime test-model-adapters knowledge-ingest test-knowledge-ingestion test-agent-messages test-agent-read-skills test-agent-review test-agent-page test-agent-java-fault-matrix test-eval-runner test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-knowledge-hybrid test-knowledge-rerank test-knowledge-citations test-specification-qa eval-rag test-approval test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
+.PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-sse-events test-run-timeline test-run-history test-model-runtime test-model-adapters knowledge-ingest test-knowledge-ingestion test-agent-messages test-agent-read-skills test-agent-review test-agent-page test-agent-java-fault-matrix test-eval-runner test-eval-metrics test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-knowledge-hybrid test-knowledge-rerank test-knowledge-citations test-specification-qa eval-rag test-approval test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
 	@awk 'BEGIN {FS = ":.*## "; printf "用法: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -102,6 +102,9 @@ test-agent-java-fault-matrix: test-java-faults ## 验证 M7.7 场景01～08 Java
 
 test-eval-runner: ## 验证 T782 统一评测套件注册、选择、顺序执行和失败边界
 	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_eval_runner.py
+
+test-eval-metrics: ## 验证 M7.9 路由指标口径、计数和边界
+	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_router_eval.py
 
 test-workflow-schemas: ## 单独验证 M2.4 Workflow 状态与诊断 Schema
 	cd agent-service && uv run --frozen pytest -q tests/test_workflow_schemas.py

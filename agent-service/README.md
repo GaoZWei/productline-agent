@@ -359,6 +359,11 @@ M3.7在`evaluation/router_cases.jsonl`保存60条固定路由期望，严格覆�
 样本。仓库当前只用可控Subject验收评测基础设施，没有具体模型Provider，因此不声明真实模型准确率。
 `make eval-router`可重复验证数据分布、指标和失败输出。
 
+M7.9在同一固定集上进一步区分字段级指标：明确表达、同义表达和意图混淆用于计算参数提取率，页面与会话指代
+用于计算参数补全率；澄清触发准确率只比较`READY/NEEDS_CLARIFICATION`，具体原因差异仍写入失败样本；错误
+Tool路由率统计全部用例中已`READY`且会进入非预期业务Skill的比例。报告同时保存分子和分母，避免只看四舍五入
+比率；可控Subject只验证公式，真实质量仍需实际Router运行。`make test-eval-metrics`验证当前路由指标口径。
+
 ## 演示规范文档
 
 M4.1在仓库根目录`knowledge-base/`准备14份当前有效规范和2份历史失效规范，覆盖DOM生产、质量、坐标系、
@@ -526,6 +531,7 @@ make eval-rag
 make test-agent-e2e
 make test-agent-java-fault-matrix
 make test-eval-runner
+make test-eval-metrics
 ```
 
 `make test-agent-e2e`使用独立 Compose 项目启动临时 PostgreSQL 和真实 Java 服务，在 pytest
