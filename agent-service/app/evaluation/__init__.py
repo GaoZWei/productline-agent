@@ -29,11 +29,23 @@ from app.evaluation.router import (
     evaluate_router,
     load_router_evaluation_cases,
 )
+from app.evaluation.runner import (
+    EvalRunner,
+    EvalRunnerConfigurationError,
+    EvalSuiteExecutionError,
+    EvalSuiteResultError,
+    EvaluationSuite,
+)
 
 __all__ = [
     "EXPECTED_CATEGORY_COUNTS",
     "EXPECTED_RAG_CASE_COUNT",
+    "EvalRunner",
+    "EvalRunnerConfigurationError",
+    "EvalSuiteExecutionError",
+    "EvalSuiteResultError",
     "EvaluationFailureType",
+    "EvaluationSuite",
     "KnowledgeRagEvaluationSubject",
     "RagEvaluationCase",
     "RagEvaluationDataError",

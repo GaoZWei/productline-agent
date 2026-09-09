@@ -431,6 +431,13 @@ M4.12在`evaluation/rag_cases.jsonl`固定保存50条问题及其预期文档、
 无结果、文档未命中和章节未命中，输出只包含稳定身份与章节，不保存问题或正文。仓库用可控Subject验证
 评测数学和四策略执行链，不把替身结果声明为真实Provider质量；`make eval-rag`可重复运行完整验收。
 
+## 统一评测执行入口
+
+M7.8的`EvalRunner`把领域评测器包装为名称唯一的异步`EvaluationSuite`，先校验全部注册项或显式选择项，再按
+注册顺序或调用方选择顺序串行执行。串行语义避免共享数据库状态、外部模型配额和并发完成顺序影响可重复性；单个
+Suite异常只对外暴露稳定Suite名称并停止后续执行，任务取消则原样传播。每个Suite当前必须返回Pydantic报告，
+Runner以只读映射交付结果；统一结果Schema、领域Suite接线、JSON/Markdown导出和历史对比由T783～T793继续实现。
+
 ## 固定 Workflow 节点
 
 `OrderDiagnosisWorkflow`使用LangGraph `StateGraph`固定串联：
@@ -518,6 +525,7 @@ make test-specification-qa
 make eval-rag
 make test-agent-e2e
 make test-agent-java-fault-matrix
+make test-eval-runner
 ```
 
 `make test-agent-e2e`使用独立 Compose 项目启动临时 PostgreSQL 和真实 Java 服务，在 pytest
