@@ -78,6 +78,9 @@ make test-java-errors
 | `X-Demo-Delay-Ms: 500` | 响应前延迟 500 毫秒，默认最大 2000 毫秒 |
 | `X-Demo-Fault: timeout` | 默认保持连接 5000 毫秒后继续正常查询，用于触发短超时客户端 |
 | `X-Demo-Fault: server-error` | 返回统一 `500/INTERNAL_SERVER_ERROR` |
+| `X-Demo-Fault: resource-not-found` | 返回统一 `404/RESOURCE_NOT_FOUND` |
+| `X-Demo-Fault: business-conflict` | 返回统一 `409/BUSINESS_CONFLICT` |
+| `X-Demo-Fault: invalid-json` | 返回 HTTP 200 和故意损坏的 JSON 正文 |
 | `X-Demo-Fault: invalid-response` | 返回 HTTP 200，但故意缺少必需的 `data` 字段 |
 | `X-Demo-Fault: permission-denied` | 返回统一 `403/PERMISSION_DENIED` |
 

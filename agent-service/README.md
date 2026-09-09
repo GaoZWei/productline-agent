@@ -517,12 +517,17 @@ make test-knowledge-citations
 make test-specification-qa
 make eval-rag
 make test-agent-e2e
+make test-agent-java-fault-matrix
 ```
 
 `make test-agent-e2e`使用独立 Compose 项目启动临时 PostgreSQL 和真实 Java 服务，在 pytest
 进程内运行完整 Agent API 生命周期，验证五个固定订单、Run/Step持久化、订单不存在、Java超时和
 非法响应。异常通过测试专用Transport注入Java已有演示故障Header，不暴露新的生产API入口；完成后
 自动删除本次容器、网络、数据卷和临时业务镜像。
+
+`make test-agent-java-fault-matrix`先运行Java故障注入集成测试，再在隔离Compose环境中参数化验证连接失败、
+读取超时、500、403、404、409、错误JSON和字段缺失。矩阵同时断言HTTP与稳定错误码、`retryable`、物理请求
+次数及失败Run/TOOL Step；注入器默认关闭且只处理GET，不会向写接口注入故障。
 
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP
 边界及 PostgreSQL 持久化。`make test-agent-persistence` 使用随机宿主端口和临时数据目录启动

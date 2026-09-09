@@ -21,6 +21,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 @SpringBootTest(
@@ -100,6 +101,23 @@ class DemoFaultSimulationIntegrationTest extends PostgresIntegrationTestSupport 
     }
 
     @Test
+    void returnsMalformedJsonForInvalidJsonFault() {
+        HttpHeaders headers = faultHeaders("invalid-json", "trace-demo-invalid-json");
+
+        ResponseEntity<String> response =
+                restTemplate.exchange(
+                        uri(ORDER_PATH),
+                        HttpMethod.GET,
+                        new HttpEntity<>(headers),
+                        String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getContentType())
+                .matches(contentType -> contentType.isCompatibleWith(MediaType.APPLICATION_JSON));
+        assertThat(response.getBody()).isEqualTo("{invalid-json");
+    }
+
+    @Test
     void returnsUnified403ForPermissionFault() {
         HttpHeaders headers = faultHeaders("permission-denied", "trace-demo-permission");
 
@@ -109,6 +127,30 @@ class DemoFaultSimulationIntegrationTest extends PostgresIntegrationTestSupport 
         assertEnvelope(response, "PERMISSION_DENIED");
         assertThat(response.getBody().path("trace_id").asText())
                 .isEqualTo("trace-demo-permission");
+    }
+
+    @Test
+    void returnsUnified404ForResourceNotFoundFault() {
+        HttpHeaders headers = faultHeaders("resource-not-found", "trace-demo-not-found");
+
+        ResponseEntity<JsonNode> response = get(ORDER_PATH, headers);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertEnvelope(response, "RESOURCE_NOT_FOUND");
+        assertThat(response.getBody().path("trace_id").asText())
+                .isEqualTo("trace-demo-not-found");
+    }
+
+    @Test
+    void returnsUnified409ForBusinessConflictFault() {
+        HttpHeaders headers = faultHeaders("business-conflict", "trace-demo-conflict");
+
+        ResponseEntity<JsonNode> response = get(ORDER_PATH, headers);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertEnvelope(response, "BUSINESS_CONFLICT");
+        assertThat(response.getBody().path("trace_id").asText())
+                .isEqualTo("trace-demo-conflict");
     }
 
     @Test

@@ -1534,3 +1534,24 @@
 - 默认保留原有`json_schema`协议，DeepSeek显式选择`json_object`，不再依赖模型名或网关地址进行隐式猜测。
 - JSON Object模式把目标Pydantic Schema加入系统指令，并可显式关闭DeepSeek思考模式；收到的正文仍执行严格本地校验，非法字段、类型或业务契约继续失败。
 - 当前DeepSeek配置已通过最小真实结构化调用和`ORDER-003`统一状态查询，协议拒绝不会被降级或伪装为成功。
+
+---
+
+## 2026-09-07 — `[M7.7-01～08] Java与Tool故障矩阵`
+
+### 核心解决的问题
+
+把Java连接、超时、HTTP业务错误和响应契约损坏从零散测试收口成可重复的全链路矩阵，使Agent失败时可以定位到
+`load_order` Tool步骤，并区分瞬时故障、确定性上游错误和响应校验错误。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/fault/DemoFaultInterceptor.java`：默认关闭且仅限GET的404、409、错误JSON等故障模拟。
+- `agent-service/tests/e2e/test_order_diagnosis.py`：八类故障的参数化HTTP、错误码、重试次数及Run/Step断言。
+- `Makefile`：`test-agent-java-fault-matrix`隔离验收入口。
+
+### 实现的核心功能
+
+- 连接失败与读取超时只进行一次有限重试，403、404、409、500及响应校验错误不盲目重试。
+- 每类失败都保存`FAILED` Run和失败TOOL Step，向调用方返回稳定错误码与安全提示，不泄露非法响应正文。
+- Java注入测试证明故障开关默认无效且不会作用于写请求，避免异常演练产生错误业务写入。

@@ -39,13 +39,17 @@ pytestmark = pytest.mark.e2e
 
 
 class DemoFaultTransport(httpx.AsyncBaseTransport):
-    """只在E2E边界给真实Java GET请求注入已启用的演示故障。"""
+    """在E2E边界注入连接失败或真实Java只读故障, 并统计物理请求。"""
 
     def __init__(self, fault: str) -> None:
         self._fault = fault
         self._transport = httpx.AsyncHTTPTransport()
+        self.request_count = 0
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.request_count += 1
+        if self._fault == "connection-failure":
+            raise httpx.ConnectError("simulated connection failure", request=request)
         request.headers["X-Demo-Fault"] = self._fault
         return await self._transport.handle_async_request(request)
 
@@ -138,36 +142,122 @@ async def test_missing_order_returns_resource_not_found_at_load_order(
     await _assert_failed_run(e2e_application, payload.run_id, payload.code, "load_order")
 
 
-async def test_java_timeout_is_located_at_tool_step(e2e_application: FastAPI) -> None:
-    """真实Java慢响应必须映射为可重试超时并定位到Tool Step。"""
-
-    async with _fault_registry(e2e_application, "timeout", read_timeout=0.1):
-        response = await _diagnose(e2e_application, "ORDER-003", "模拟Java超时")
-
-    assert response.status_code == 504
-    payload = OrderDiagnosisErrorResponse.model_validate_json(response.content)
-    assert payload.code == "TOOL_TIMEOUT"
-    assert payload.retryable is True
-    assert payload.error_step == "load_order"
-    assert payload.run_id is not None
-    await _assert_failed_run(e2e_application, payload.run_id, payload.code, "load_order")
-
-
-async def test_invalid_java_response_is_rejected_at_tool_step(
+@pytest.mark.parametrize(
+    (
+        "fault",
+        "expected_status",
+        "expected_code",
+        "expected_retryable",
+        "expected_requests",
+        "expected_message",
+    ),
+    [
+        pytest.param(
+            "connection-failure",
+            502,
+            "UPSTREAM_UNAVAILABLE",
+            True,
+            2,
+            "business service is unavailable",
+            id="01-connection-failure",
+        ),
+        pytest.param(
+            "timeout",
+            504,
+            "TOOL_TIMEOUT",
+            True,
+            2,
+            "business service request timed out",
+            id="02-read-timeout",
+        ),
+        pytest.param(
+            "server-error",
+            502,
+            "UPSTREAM_UNAVAILABLE",
+            False,
+            1,
+            "internal server error",
+            id="03-java-500",
+        ),
+        pytest.param(
+            "permission-denied",
+            403,
+            "PERMISSION_DENIED",
+            False,
+            1,
+            "demo permission denied",
+            id="04-java-403",
+        ),
+        pytest.param(
+            "resource-not-found",
+            404,
+            "RESOURCE_NOT_FOUND",
+            False,
+            1,
+            "demo resource not found: fault",
+            id="05-java-404",
+        ),
+        pytest.param(
+            "business-conflict",
+            409,
+            "BUSINESS_CONFLICT",
+            False,
+            1,
+            "demo business conflict",
+            id="06-java-409",
+        ),
+        pytest.param(
+            "invalid-json",
+            502,
+            "RESPONSE_VALIDATION_ERROR",
+            False,
+            1,
+            "business service returned an invalid response",
+            id="07-invalid-json",
+        ),
+        pytest.param(
+            "invalid-response",
+            502,
+            "RESPONSE_VALIDATION_ERROR",
+            False,
+            1,
+            "business service returned an invalid response",
+            id="08-missing-field",
+        ),
+    ],
+)
+async def test_java_fault_matrix_persists_safe_failed_run_and_step(
     e2e_application: FastAPI,
+    fault: str,
+    expected_status: int,
+    expected_code: str,
+    expected_retryable: bool,
+    expected_requests: int,
+    expected_message: str,
 ) -> None:
-    """Java HTTP 200缺字段也不得作为事实进入Workflow。"""
+    """场景01至08必须形成一致、安全且可定位的失败证据。"""
 
-    async with _fault_registry(e2e_application, "invalid-response"):
-        response = await _diagnose(e2e_application, "ORDER-003", "模拟Java字段错误")
+    injected = _fault_registry(
+        e2e_application,
+        fault,
+        read_timeout=0.1 if fault == "timeout" else None,
+    )
+    async with injected:
+        response = await _diagnose(
+            e2e_application,
+            "ORDER-003",
+            f"M7.7故障矩阵{fault}",
+        )
 
-    assert response.status_code == 502
+    assert response.status_code == expected_status
     payload = OrderDiagnosisErrorResponse.model_validate_json(response.content)
-    assert payload.code == "RESPONSE_VALIDATION_ERROR"
-    assert payload.retryable is False
+    assert payload.code == expected_code
+    assert payload.retryable is expected_retryable
+    assert payload.message == expected_message
     assert payload.error_step == "load_order"
     assert payload.run_id is not None
     await _assert_failed_run(e2e_application, payload.run_id, payload.code, "load_order")
+    assert injected.request_count == expected_requests
 
 
 class _fault_registry:
@@ -187,7 +277,14 @@ class _fault_registry:
             settings = settings.model_copy(
                 update={"business_read_timeout_seconds": read_timeout}
             )
-        self._client = BusinessHttpClient(settings, transport=DemoFaultTransport(fault))
+        self._transport = DemoFaultTransport(fault)
+        self._client = BusinessHttpClient(settings, transport=self._transport)
+
+    @property
+    def request_count(self) -> int:
+        """返回重试策略实际产生的物理Java请求数。"""
+
+        return self._transport.request_count
 
     async def __aenter__(self) -> None:
         self._application.state.tool_registry = create_read_tool_registry(self._client)

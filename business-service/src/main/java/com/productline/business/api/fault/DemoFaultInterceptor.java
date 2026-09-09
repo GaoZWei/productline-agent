@@ -1,13 +1,7 @@
 package com.productline.business.api.fault;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.productline.business.api.error.InvalidRequestException;
-import com.productline.business.api.error.PermissionDeniedException;
-import com.productline.business.api.trace.TraceIdFilter;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpMethod;
@@ -16,6 +10,17 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.productline.business.api.error.BusinessConflictException;
+import com.productline.business.api.error.InvalidRequestException;
+import com.productline.business.api.error.PermissionDeniedException;
+import com.productline.business.api.error.ResourceNotFoundException;
+import com.productline.business.api.trace.TraceIdFilter;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+// 故障拦截器
 @Component
 public class DemoFaultInterceptor implements HandlerInterceptor {
 
@@ -25,8 +30,11 @@ public class DemoFaultInterceptor implements HandlerInterceptor {
     private static final String API_PREFIX = "/api/";
     private static final String TIMEOUT = "timeout";
     private static final String SERVER_ERROR = "server-error";
+    private static final String INVALID_JSON = "invalid-json";
     private static final String INVALID_RESPONSE = "invalid-response";
     private static final String PERMISSION_DENIED = "permission-denied";
+    private static final String RESOURCE_NOT_FOUND = "resource-not-found";
+    private static final String BUSINESS_CONFLICT = "business-conflict";
     private static final Logger LOGGER = LoggerFactory.getLogger(DemoFaultInterceptor.class);
 
     private final DemoFaultProperties properties;
@@ -54,12 +62,17 @@ public class DemoFaultInterceptor implements HandlerInterceptor {
 
         String faultType = fault.trim();
         LOGGER.warn("Applying demo fault, type={}, path={}", faultType, request.getRequestURI());
-        // 分派四种故障类型
+        // 只分派显式白名单中的演示故障，未知值按参数错误处理。
         return switch (faultType) {
             case TIMEOUT -> simulateTimeout();
             case SERVER_ERROR -> throw new IllegalStateException("demo server fault");
+            case INVALID_JSON -> writeInvalidJson(response);
             case INVALID_RESPONSE -> writeInvalidResponse(request, response);
             case PERMISSION_DENIED -> throw new PermissionDeniedException("demo permission denied");
+            case RESOURCE_NOT_FOUND ->
+                    throw new ResourceNotFoundException("demo resource", "fault");
+            case BUSINESS_CONFLICT ->
+                    throw new BusinessConflictException("demo business conflict");
             default -> throw new InvalidRequestException("unsupported X-Demo-Fault value");
         };
     }
@@ -105,6 +118,13 @@ public class DemoFaultInterceptor implements HandlerInterceptor {
         response.setStatus(HttpStatus.OK.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(), body);
+        return false;
+    }
+
+    private boolean writeInvalidJson(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpStatus.OK.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write("{invalid-json");
         return false;
     }
 
