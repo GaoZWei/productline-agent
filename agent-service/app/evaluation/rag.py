@@ -65,7 +65,7 @@ class RagEvaluationCase(_RagEvaluationSchema):
 
     case_id: CaseIdentifier  # 用例编号
     question: Annotated[str, Field(min_length=1, max_length=2000)]  # 用户可能提出的问题
-    filters: KnowledgeSearchFilter  # 检索范围，包括产品、卫星、权限和生效时间
+    filters: KnowledgeSearchFilter  # 检索范围, 包括产品、卫星、权限和生效时间
     expected_document_id: DocumentIdentifier  # 正确答案应来自哪份规范
     expected_section: Annotated[
         tuple[MetadataText, ...],
@@ -91,16 +91,19 @@ class RagRetrievedFragment(_RagEvaluationSchema):
             raise ValueError("retrieved fragment contains duplicate chunk identities")
         return self
 
-
+# 检索策略执行结果定义
 class RagEvaluationPrediction(_RagEvaluationSchema):
-    """一个策略对一条用例返回的有序TopK片段。"""
+    """一个策略对一条用例返回的TopK片段及可选链路质量观测。"""
 
     case_id: CaseIdentifier
     strategy: StrategyValue
     results: Annotated[
         tuple[RagRetrievedFragment, ...],
         Field(max_length=_EVALUATION_TOP_K, strict=False),
-    ]
+    ]  # 有序的 Top-5 检索片段
+    # None表示当前Subject没有覆盖该链路; 不得把“未采集”冒充失败.
+    version_filter_passed: bool | None = None  # 是否正确过滤了历史或错误版本
+    citation_document_correct: bool | None = None  # 最终回答引用的文档是否正确
 
     @model_validator(mode="after")
     def validate_result_identity(self) -> Self:
@@ -156,7 +159,7 @@ class RagEvaluationFailure(_RagEvaluationSchema):
         Field(strict=False),
     ] = ()
 
-
+# 保存一个检索策略的所有统计结果
 class RagStrategyMetrics(_RagEvaluationSchema):
     """一个检索策略在同一批用例上的聚合指标。"""
 
@@ -166,9 +169,15 @@ class RagStrategyMetrics(_RagEvaluationSchema):
     reciprocal_rank_sum: Annotated[float, Field(ge=0.0)]
     retrieved_fragments: Annotated[int, Field(ge=0)]
     irrelevant_fragments: Annotated[int, Field(ge=0)]
+    version_filter_evaluated_cases: Annotated[int, Field(ge=0)]
+    version_filter_correct_cases: Annotated[int, Field(ge=0)]
+    citation_document_evaluated_cases: Annotated[int, Field(ge=0)]
+    citation_document_correct_cases: Annotated[int, Field(ge=0)]
     hit_at_5: Annotated[float, Field(ge=0.0, le=1.0)]
     mrr: Annotated[float, Field(ge=0.0, le=1.0)]
     irrelevant_fragment_ratio: Annotated[float, Field(ge=0.0, le=1.0)]
+    version_filter_accuracy: Annotated[float, Field(ge=0.0, le=1.0)]
+    citation_document_accuracy: Annotated[float, Field(ge=0.0, le=1.0)]
 
 
 class RagEvaluationReport(_RagEvaluationSchema):
@@ -186,6 +195,12 @@ class RagEvaluationDataError(ValueError):
 
 class RagEvaluationExecutionError(RuntimeError):
     """策略执行发生降级, 当前结果不能冒充对应策略质量。"""
+
+# 零分母处理
+def _rate(numerator: int, denominator: int) -> float:
+    """无适用观测时返回稳定零值; 同时由分母字段保留“未采集”语义."""
+
+    return numerator / denominator if denominator else 0.0
 
 # 评测数据校验逻辑
 def load_rag_evaluation_cases(
@@ -224,7 +239,7 @@ def load_rag_evaluation_cases(
             raise RagEvaluationDataError("rag evaluation dataset must contain rag-001 to rag-050")
     return tuple(cases)
 
-# 检索命中核心判断
+# 相关性判断 要求文档和完整章节路径同时正确
 def _is_relevant(case: RagEvaluationCase, result: RagRetrievedFragment) -> bool:
     """文档和完整章节路径必须同时命中才算相关片段。"""
     # 必须同时满足 文档ID正确 和 完整章节路径正确
@@ -239,13 +254,13 @@ def _failure_reason(
     results: Sequence[RagRetrievedFragment],
 ) -> RagFailureReason:
     """区分无结果、文档未命中和文档命中但章节错误。"""
-    # 第一层：没有任何结果
+    # 第一层: 没有任何结果
     if not results:
         return RagFailureReason.NO_RESULTS
-    # 第二层：有结果，但文档全错
+    # 第二层: 有结果, 但文档全错
     if all(result.document_id != case.expected_document_id for result in results):
         return RagFailureReason.DOCUMENT_MISS
-    # 第三层：出现了正确文档，但章节都不正确
+    # 第三层: 出现了正确文档, 但章节都不正确
     return RagFailureReason.SECTION_MISS
 
 
@@ -259,7 +274,7 @@ def _write_failure_samples(
     content = "".join(f"{failure.model_dump_json()}\n" for failure in failures)
     path.write_text(content, encoding="utf-8")
 
-# 核心评测算法！！！！！！
+# 核心评测算法
 async def evaluate_rag(
     cases: Sequence[RagEvaluationCase],  # 固定的评测问题集合
     subject: RagEvaluationSubject,  # 被评测的检索实现
@@ -267,14 +282,14 @@ async def evaluate_rag(
     strategies: Sequence[RagEvaluationStrategy] = _DEFAULT_STRATEGIES,  # 需要评测的策略集合
     failure_path: Path | None = None,  # 可选的失败样本输出路径
 ) -> RagEvaluationReport:
-    """顺序运行四策略并计算Hit@5、MRR和无关片段占比。"""
-    # 固定本次评测输入，确保可重复性
+    """顺序运行策略并计算检索、版本过滤和引用文档五项指标。"""
+    # 固定本次评测输入, 确保可重复性
     fixed_cases = tuple(cases)
     fixed_strategies = tuple(strategies)
     # 先校验用例和策略是否符合要求
     if not fixed_cases:
         raise RagEvaluationDataError("rag evaluation requires at least one case")
-    # 校验用例ID是否唯一，检查重复用例
+    # 校验用例ID是否唯一, 检查重复用例
     if len({case.case_id for case in fixed_cases}) != len(fixed_cases):
         raise RagEvaluationDataError("rag evaluation cases contain duplicate ids")
     # 检查是否包含重复策略
@@ -286,10 +301,16 @@ async def evaluate_rag(
     # 运行每个策略的检索
     for strategy in fixed_strategies:
         hit_count = 0  # 记录每个策略在 Top 5 中至少找到一次正确章节的用例数量
-        reciprocal_rank_sum = 0.0  # 所有用例“第一个正确结果的倒数排名”之和，后面累加再除以用例数量，得到MRR
+        # 累计所有用例第一个正确结果的倒数排名, 最后除以用例数得到MRR.
+        reciprocal_rank_sum = 0.0
         retrieved_fragments = 0  # 当前策略在全部用例中总共返回了多少片段
-        irrelevant_fragments = 0  # 这些返回片段中，有多少不满足“文档和章节同时正确”的条件
-        for case in fixed_cases:
+        irrelevant_fragments = 0  # 返回片段中不满足“文档和章节同时正确”的数量
+        version_filter_evaluated_cases = 0
+        version_filter_correct_cases = 0
+        citation_document_evaluated_cases = 0
+        citation_document_correct_cases = 0
+        for case in fixed_cases:  
+            # 每次调用都强制使用 top_k=5 参数
             prediction = await subject.retrieve(case, strategy, top_k=_EVALUATION_TOP_K)
             # 核对预测结果身份
             if prediction.case_id != case.case_id or prediction.strategy is not strategy:
@@ -302,6 +323,15 @@ async def evaluate_rag(
             irrelevant_fragments += sum(
                 1 for result in results if not _is_relevant(case, result)
             )
+            # 版本指标累计
+            if prediction.version_filter_passed is not None:
+                version_filter_evaluated_cases += 1
+                version_filter_correct_cases += int(prediction.version_filter_passed)
+            if prediction.citation_document_correct is not None:
+                citation_document_evaluated_cases += 1
+                citation_document_correct_cases += int(
+                    prediction.citation_document_correct
+                )
             # 只寻找第一个正确结果的排名
             relevant_rank = next(  # 只取第一个值
                 (
@@ -315,7 +345,7 @@ async def evaluate_rag(
             if relevant_rank is not None:
                 hit_count += 1
                 reciprocal_rank_sum += 1.0 / relevant_rank
-                continue  # 一旦命中，这条用例就不需要创建失败样本，直接进入下一条用例
+                continue  # 一旦命中, 不创建失败样本, 直接进入下一条用例
             # 未命中时创建一个失败对象
             failures.append(
                 RagEvaluationFailure(
@@ -338,12 +368,23 @@ async def evaluate_rag(
             reciprocal_rank_sum=reciprocal_rank_sum,
             retrieved_fragments=retrieved_fragments,
             irrelevant_fragments=irrelevant_fragments,
+            version_filter_evaluated_cases=version_filter_evaluated_cases,
+            version_filter_correct_cases=version_filter_correct_cases,
+            citation_document_evaluated_cases=citation_document_evaluated_cases,
+            citation_document_correct_cases=citation_document_correct_cases,
             hit_at_5=hit_count / total_cases,
             mrr=reciprocal_rank_sum / total_cases,
-            irrelevant_fragment_ratio=(
-                irrelevant_fragments / retrieved_fragments
-                if retrieved_fragments
-                else 0.0
+            irrelevant_fragment_ratio=_rate(
+                irrelevant_fragments,
+                retrieved_fragments,
+            ),
+            version_filter_accuracy=_rate(
+                version_filter_correct_cases,
+                version_filter_evaluated_cases,
+            ),
+            citation_document_accuracy=_rate(
+                citation_document_correct_cases,
+                citation_document_evaluated_cases,
             ),
         )
     # 生成报告
@@ -460,7 +501,7 @@ class KnowledgeRagEvaluationSubject:
         self,
         case: RagEvaluationCase,
     ) -> tuple[VectorSearchHit, ...]:
-        # 先把问题转换为向量，然后调用search_vectors方法进行检索
+        # 先把问题转换为向量, 然后调用search_vectors方法进行检索
         query_embedding = await self._embedding_generator.generate_query(case.question)
         return await self._repository.search_vectors(
             query_embedding,

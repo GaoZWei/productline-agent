@@ -87,6 +87,43 @@ class _StaticSubject:
         )
 
 
+class _ObservedSubject(_StaticSubject):
+    """为M7.9公式测试提供不包含正文的链路级观测。"""
+
+    def __init__(
+        self,
+        outputs: dict[
+            tuple[RagEvaluationStrategy, str],
+            tuple[RagRetrievedFragment, ...],
+        ],
+        observations: dict[
+            tuple[RagEvaluationStrategy, str],
+            tuple[bool | None, bool | None],
+        ],
+    ) -> None:
+        super().__init__(outputs)
+        self.observations = observations
+
+    async def retrieve(
+        self,
+        case: RagEvaluationCase,
+        strategy: RagEvaluationStrategy,
+        *,
+        top_k: int,
+    ) -> RagEvaluationPrediction:
+        version_filter_passed, citation_document_correct = self.observations.get(
+            (strategy, case.case_id),
+            (None, None),
+        )
+        return RagEvaluationPrediction(
+            case_id=case.case_id,
+            strategy=strategy,
+            results=self.outputs.get((strategy, case.case_id), ())[:top_k],
+            version_filter_passed=version_filter_passed,
+            citation_document_correct=citation_document_correct,
+        )
+
+
 class _ExpectedTargetSubject:
     async def retrieve(
         self,
@@ -221,6 +258,61 @@ async def test_metrics_compare_four_strategies_and_write_safe_failures(
     assert "question" not in failure_text
     assert "content" not in failure_text
     assert "rag-002" in failure_text
+
+
+@pytest.mark.asyncio
+async def test_metrics_count_only_observed_version_and_citation_cases() -> None:
+    cases = (
+        _case("rag-001", "DOC-A", ("规范A", "章节A")),
+        _case("rag-002", "DOC-B", ("规范B", "章节B")),
+        _case("rag-003", "DOC-C", ("规范C", "章节C")),
+    )
+    relevant_a = _fragment("CHUNK-A", "DOC-A", ("规范A", "章节A"))
+    relevant_b = _fragment("CHUNK-B", "DOC-B", ("规范B", "章节B"))
+    strategy = RagEvaluationStrategy.HYBRID_RERANK
+    subject = _ObservedSubject(
+        {
+            (strategy, "rag-001"): (relevant_a,),
+            (strategy, "rag-002"): (relevant_b,),
+            (strategy, "rag-003"): (),
+        },
+        {
+            (strategy, "rag-001"): (True, True),
+            (strategy, "rag-002"): (False, False),
+            # rag-003没有执行完整问答链路; 不应被当成两个失败样本.
+            (strategy, "rag-003"): (None, None),
+        },
+    )
+
+    report = await evaluate_rag(cases, subject, strategies=(strategy,))
+
+    metric = report.strategy_metrics[strategy]
+    assert metric.version_filter_evaluated_cases == 2
+    assert metric.version_filter_correct_cases == 1
+    assert metric.version_filter_accuracy == 0.5
+    assert metric.citation_document_evaluated_cases == 2
+    assert metric.citation_document_correct_cases == 1
+    assert metric.citation_document_accuracy == 0.5
+
+
+@pytest.mark.asyncio
+async def test_unobserved_version_and_citation_metrics_have_zero_denominators() -> None:
+    case = _case("rag-001", "DOC-A", ("规范A", "章节A"))
+    strategy = RagEvaluationStrategy.VECTOR
+
+    report = await evaluate_rag(
+        (case,),
+        _StaticSubject({}),
+        strategies=(strategy,),
+    )
+
+    metric = report.strategy_metrics[strategy]
+    assert metric.version_filter_evaluated_cases == 0
+    assert metric.version_filter_correct_cases == 0
+    assert metric.version_filter_accuracy == 0.0
+    assert metric.citation_document_evaluated_cases == 0
+    assert metric.citation_document_correct_cases == 0
+    assert metric.citation_document_accuracy == 0.0
 
 
 @pytest.mark.asyncio
