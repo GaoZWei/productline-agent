@@ -36,6 +36,12 @@ from app.evaluation.runner import (
     EvalSuiteResultError,
     EvaluationSuite,
 )
+from app.evaluation.tools import (
+    ToolEvaluationDataError,
+    ToolEvaluationOutcome,
+    ToolEvaluationReport,
+    evaluate_tool_metrics,
+)
 
 __all__ = [
     "EXPECTED_CATEGORY_COUNTS",
@@ -64,8 +70,12 @@ __all__ = [
     "RouterEvaluationPrediction",
     "RouterEvaluationReport",
     "RouterEvaluationSubject",
+    "ToolEvaluationDataError",
+    "ToolEvaluationOutcome",
+    "ToolEvaluationReport",
     "evaluate_rag",
     "evaluate_router",
+    "evaluate_tool_metrics",
     "load_rag_evaluation_cases",
     "load_router_evaluation_cases",
 ]

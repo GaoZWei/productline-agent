@@ -104,7 +104,7 @@ test-eval-runner: ## 验证 T782 统一评测套件注册、选择、顺序执�
 	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_eval_runner.py
 
 test-eval-metrics: ## 验证 M7.9 路由指标口径、计数和边界
-	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_router_eval.py
+	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_router_eval.py tests/evaluation/test_tool_metrics.py
 
 test-workflow-schemas: ## 单独验证 M2.4 Workflow 状态与诊断 Schema
 	cd agent-service && uv run --frozen pytest -q tests/test_workflow_schemas.py
