@@ -1,5 +1,17 @@
 """可重复运行的Agent评测基础设施。"""
 
+from app.evaluation.agents import (
+    AgentEvaluationDataError,
+    AgentEvaluationOutcome,
+    AgentEvaluationReport,
+    evaluate_agent_metrics,
+)
+from app.evaluation.observability import (
+    ObservabilityEvaluationDataError,
+    ObservabilityEvaluationOutcome,
+    ObservabilityEvaluationReport,
+    evaluate_observability_metrics,
+)
 from app.evaluation.rag import (
     EXPECTED_RAG_CASE_COUNT,
     KnowledgeRagEvaluationSubject,
@@ -46,6 +58,9 @@ from app.evaluation.tools import (
 __all__ = [
     "EXPECTED_CATEGORY_COUNTS",
     "EXPECTED_RAG_CASE_COUNT",
+    "AgentEvaluationDataError",
+    "AgentEvaluationOutcome",
+    "AgentEvaluationReport",
     "EvalRunner",
     "EvalRunnerConfigurationError",
     "EvalSuiteExecutionError",
@@ -53,6 +68,9 @@ __all__ = [
     "EvaluationFailureType",
     "EvaluationSuite",
     "KnowledgeRagEvaluationSubject",
+    "ObservabilityEvaluationDataError",
+    "ObservabilityEvaluationOutcome",
+    "ObservabilityEvaluationReport",
     "RagEvaluationCase",
     "RagEvaluationDataError",
     "RagEvaluationExecutionError",
@@ -73,6 +91,8 @@ __all__ = [
     "ToolEvaluationDataError",
     "ToolEvaluationOutcome",
     "ToolEvaluationReport",
+    "evaluate_agent_metrics",
+    "evaluate_observability_metrics",
     "evaluate_rag",
     "evaluate_router",
     "evaluate_tool_metrics",

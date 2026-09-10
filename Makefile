@@ -103,8 +103,8 @@ test-agent-java-fault-matrix: test-java-faults ## 验证 M7.7 场景01～08 Java
 test-eval-runner: ## 验证 T782 统一评测套件注册、选择、顺序执行和失败边界
 	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_eval_runner.py
 
-test-eval-metrics: ## 验证 M7.9 路由、Tool和RAG指标口径、计数与边界
-	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_router_eval.py tests/evaluation/test_tool_metrics.py tests/evaluation/test_rag_eval.py
+test-eval-metrics: ## 验证 M7.9 全部领域指标口径、计数与边界
+	cd agent-service && uv run --frozen pytest -q tests/evaluation
 
 test-workflow-schemas: ## 单独验证 M2.4 Workflow 状态与诊断 Schema
 	cd agent-service && uv run --frozen pytest -q tests/test_workflow_schemas.py

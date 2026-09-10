@@ -1639,3 +1639,25 @@
 - 保留Hit@5、MRR和Top-5无关片段占比，按策略增加版本过滤正确率和引用文档正确率及可审计分子、分母。
 - `None`表示Subject没有执行对应完整链路且不进入分母，明确的`False`才计为失败，无适用观测时比率稳定返回零值。
 - 当前仅验证指标契约与公式，实际版本过滤和最终引用观测仍由T786从确定性链路采集，模型不能自报正确性。
+
+---
+
+## 2026-09-10 — `[M7.9-Agent与观测指标] 量化编排质量和故障可诊断性`
+
+### 核心解决的问题
+
+为Agent整体成功、Tool调用效率、诊断耗时、阶段判断以及异常定位建立统一口径，避免只用最终响应成功或测试通过数掩盖
+无效动作、重复调用和不可定位故障。
+
+### 实现的核心代码
+
+- `agent-service/app/evaluation/agents.py`：`AgentEvaluationOutcome`、`AgentEvaluationReport`和六项指标聚合器。
+- `agent-service/app/evaluation/observability.py`：异常步骤、错误类型和排查中位时长的观测契约与聚合器。
+- `agent-service/tests/evaluation/test_agent_metrics.py`、`test_observability_metrics.py`：混合公式、零分母、数据一致性和敏感字段拒绝测试。
+- `agent-service/app/evaluation/__init__.py`、`Makefile`：公共导出及M7.9全部指标统一验收入口。
+
+### 实现的核心功能
+
+- Agent指标分别按用例、全部Tool尝试、有计时用例和有预期阶段用例建立稳定分母，并保存所有可审计计数。
+- Tool尝试必须完整归类为已执行、参数无效或重复拒绝；异常步骤只有与预期Step一致才算可定位，错误类型按稳定错误码比较。
+- 排查耗时采用中位数降低极端慢样本影响；Outcome不保存原始参数、业务响应或异常正文，真实采集仍由后续领域接线负责。
