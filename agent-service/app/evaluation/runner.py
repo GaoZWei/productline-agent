@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from pydantic import BaseModel
+
+from app.evaluation.reporting import (
+    EvaluationRunMetadata,
+    UnifiedEvaluationReport,
+    build_unified_evaluation_report,
+)
+
 # 名称校验
 _SUITE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # 统一执行函数类型 不接受运行时参数、异步函数、返回可序列化的Pydantic报告
@@ -38,8 +45,8 @@ class EvalSuiteResultError(TypeError):
 class EvaluationSuite:
     """一个命名评测套件及其无参数异步执行入口。"""
 
-    name: str
-    execute: EvaluationExecutor
+    name: str  # 稳定名称
+    execute: EvaluationExecutor # 无参数异步函数
 
     def __post_init__(self) -> None:
         """在进入Runner前拒绝不稳定名称和不可调用入口。"""
@@ -80,24 +87,34 @@ class EvalRunner:
         selected_suites: Sequence[str] | None = None,
     ) -> Mapping[str, BaseModel]:
         """按注册或显式选择顺序执行, 并返回只读的套件报告映射。"""
-        # 第一步：解析要运行的Suite列表
+        # 第一步: 解析要运行的Suite列表
         suites = self._select_suites(selected_suites)
-        # 第二步：创建本次结果容器
+        # 第二步: 创建本次结果容器
         reports: dict[str, BaseModel] = {}
-        # 第三步：串行执行每个Suite
+        # 第三步: 串行执行每个Suite
         for suite in suites:
             try:
                 report = await suite.execute()
-            # 第四步：包装执行异常
+            # 第四步: 包装执行异常
             except Exception as error:
                 raise EvalSuiteExecutionError(suite.name) from error
-            # 第五步：校验报告类型
+            # 第五步: 校验报告类型
             if not isinstance(report, BaseModel):
                 raise EvalSuiteResultError(suite.name)
-            # 每完成一个Suite，就以Suite名称保存结果
+            # 每完成一个Suite, 就以Suite名称保存结果
             reports[suite.name] = report
-        # 第六步：返回只读映射
+        # 第六步: 返回只读映射
         return MappingProxyType(reports)
+    # 生成统一报告
+    async def run_report(
+        self,
+        metadata: EvaluationRunMetadata,
+        selected_suites: Sequence[str] | None = None,
+    ) -> UnifiedEvaluationReport:
+        """运行Suite并生成包含Subject和数据版本的统一报告。"""
+
+        reports = await self.run(selected_suites)
+        return build_unified_evaluation_report(metadata, reports)
     # 在任何Suite运行前检查
     def _select_suites(
         self,

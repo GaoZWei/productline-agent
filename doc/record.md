@@ -1683,3 +1683,25 @@
 - Tool非法参数与运行内重复调用均在外部业务执行前拒绝；模型超时、非JSON和Schema错误保留稳定LLM Step与重试事实。
 - Embedding失败、向量超时、关键词失败和Rerank失败可定位到RAG Step；空召回、全低分与Rerank超时走安全结果而不生成无依据结论。
 - Agent重复决策和最大轮数受预算保护；Approval过期不写Java，并发重复确认最多一次写回；SSE断连只释放订阅资源。
+
+---
+
+## 2026-09-13 — `[T783～T793] M7.8统一评测框架闭环`
+
+### 核心解决的问题
+
+把Router、Tool、RAG、诊断、Agent策略、Approval和异常注入纳入同一套执行与报告契约，使各领域结果能够稳定导出、
+追溯数据版本并跨次比较，同时避免把可控替身或离线回放成绩误报为真实Provider质量。
+
+### 实现的核心代码
+
+- `agent-service/app/evaluation/suites.py`：七类Suite适配器、固定目录校验和`standard_evaluation_suites`。
+- `agent-service/app/evaluation/reporting.py`：`UnifiedEvaluationReport`、Subject元数据、安全导出和报告比较。
+- `agent-service/app/evaluation/acceptance.py`：诊断与Approval验收Outcome、失败摘要和成功率聚合。
+- `agent-service/app/evaluation/runner.py`、`agent-service/app/cli/evaluation_report.py`：统一报告执行及离线渲染/对比入口。
+
+### 实现的核心功能
+
+- 七类Suite按固定顺序运行并复用既有领域指标；固定数据集Subject和运行观测Provider保持清晰边界。
+- 统一报告强制记录Subject类型、名称和每个Suite的数据版本，拒绝敏感Payload，并支持确定性JSON与Markdown输出。
+- 两次报告按兼容Suite的数值路径输出原值与差值，显式报告增删Suite、报告类型和版本变化，不擅自判定指标优劣。

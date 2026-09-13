@@ -458,9 +458,22 @@ M4.12在`evaluation/rag_cases.jsonl`固定保存50条问题及其预期文档、
 ## 统一评测执行入口
 
 M7.8的`EvalRunner`把领域评测器包装为名称唯一的异步`EvaluationSuite`，先校验全部注册项或显式选择项，再按
-注册顺序或调用方选择顺序串行执行。串行语义避免共享数据库状态、外部模型配额和并发完成顺序影响可重复性；单个
-Suite异常只对外暴露稳定Suite名称并停止后续执行，任务取消则原样传播。每个Suite当前必须返回Pydantic报告，
-Runner以只读映射交付结果；统一结果Schema、领域Suite接线、JSON/Markdown导出和历史对比由T783～T793继续实现。
+注册顺序或调用方选择顺序串行执行。`standard_evaluation_suites`固定注册Router、Tool、RAG、诊断、Agent策略、
+Approval和异常注入七类Suite：Router与RAG固定数据集由Subject执行，其余领域从强类型Outcome Provider采集最小观测并复用
+M7.9指标。单个Suite异常只暴露稳定名称并停止后续执行，任务取消仍原样传播。
+
+`EvalRunner.run_report`把领域报告包装为`UnifiedEvaluationReport`，强制记录Subject类型、名称和每个Suite的数据版本，
+并拒绝Prompt、正文、Token等敏感字段。报告支持确定性JSON、带非真实Provider免责声明的Markdown，以及两次报告间按
+Suite和数值路径计算原值与差值；报告类型变化时不比较不兼容指标。离线使用方式：
+
+```bash
+make eval-report ARGS='render --input report.json --markdown-output report.md'
+make eval-report ARGS='compare --baseline before.json --candidate after.json --output diff.json'
+make eval-all
+```
+
+`eval-all`验证统一框架和全部领域指标口径，但不会访问真实模型、数据库或业务服务；生产质量报告必须由调用方传入真实
+Subject或真实Run/Step/Tool账本观测，并将`subject_kind`标为`LIVE_PROVIDER`或`INTEGRATION`，不能把测试替身满分当成线上质量。
 
 ## 固定 Workflow 节点
 
