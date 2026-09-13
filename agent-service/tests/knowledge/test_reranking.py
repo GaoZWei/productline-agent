@@ -244,7 +244,7 @@ async def test_invalid_model_scores_fail_closed(output: object) -> None:
 
 
 @pytest.mark.unit
-async def test_provider_failure_is_wrapped_without_exposing_provider_message() -> None:
+async def test_m77_s14_rerank_failure_is_wrapped_without_provider_message() -> None:
     candidate = _retrieval_result(
         "CHUNK-A",
         document_id="DOC-A",
@@ -260,6 +260,32 @@ async def test_provider_failure_is_wrapped_without_exposing_provider_message() -
         )
 
     assert "provider secret response" not in str(error.value)
+
+
+@pytest.mark.unit
+async def test_all_low_score_fragments_are_blocked() -> None:
+    candidates = (
+        _retrieval_result("CHUNK-A", document_id="DOC-A", content="A", rrf_score=0.04),
+        _retrieval_result("CHUNK-B", document_id="DOC-B", content="B", rrf_score=0.03),
+    )
+    reranker = _StaticReranker(
+        {
+            "scores": [
+                {"candidate_id": "CHUNK-A", "score": 0.49},
+                {"candidate_id": "CHUNK-B", "score": 0.10},
+            ]
+        }
+    )
+
+    outcome = await rerank_retrieval_results(
+        "坐标系要求",
+        candidates,
+        reranker,
+        min_score=0.50,
+    )
+
+    assert outcome.results == ()
+    assert outcome.degraded is False
 
 
 @pytest.mark.unit

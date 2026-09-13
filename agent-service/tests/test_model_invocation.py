@@ -99,6 +99,23 @@ class FailingClient:
         )
 
 
+class FixedFailureClient:
+    """为故障矩阵返回指定模型错误并保留实际重试次数。"""
+
+    model_name = "configured-model"
+
+    def __init__(self, error: ModelClientError) -> None:
+        self.error = error
+
+    async def complete_structured[OutputT: BaseModel](
+        self,
+        messages: Sequence[ChatMessage],
+        output_schema: type[OutputT],
+    ) -> StructuredModelResult[OutputT]:
+        del messages, output_schema
+        raise self.error
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_observed_invoker_records_success_metrics_without_prompt_or_output() -> None:
@@ -162,4 +179,60 @@ async def test_observed_invoker_records_stable_failure_and_actual_retries() -> N
         model_name="configured-model",
         token_usage=RunTokenUsage(),
         retry_count=2,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_code", "retryable", "retry_count"),
+    [
+        (ModelErrorCode.TIMEOUT, True, 1),
+        (ModelErrorCode.INVALID_OUTPUT, False, 0),
+        (ModelErrorCode.INVALID_RESPONSE, False, 0),
+    ],
+)
+async def test_model_protocol_failures_leave_a_stable_failed_llm_step(
+    error_code: ModelErrorCode,
+    retryable: bool,
+    retry_count: int,
+) -> None:
+    recorder = RecordingStepRecorder()
+    invoker = ObservedModelInvoker(
+        FixedFailureClient(
+            ModelClientError(
+                code=error_code,
+                message="safe structured model failure",
+                retryable=retryable,
+                retry_count=retry_count,
+            )
+        ),
+        recorder,
+    )
+
+    with pytest.raises(ModelClientError) as caught:
+        await invoker.complete_structured(
+            (ChatMessage(role="user", content="question"),),
+            StructuredAnswer,
+            step_id="step-m77-model-failure",
+            run_id="run-m77-model-failure",
+            sequence_number=1,
+            step_name="route_intent",
+            input_summary="message_length=8",
+        )
+
+    assert caught.value.code is error_code
+    assert recorder.calls[0][0] == "start"
+    assert recorder.calls[1] == (
+        "failed",
+        {
+            "step_id": "step-m77-model-failure",
+            "error_code": error_code.value,
+            "output_summary": f"retryable={str(retryable).lower()}",
+            "observation": LLMStepObservation(
+                model_name="configured-model",
+                token_usage=RunTokenUsage(),
+                retry_count=retry_count,
+            ),
+        },
     )

@@ -106,7 +106,7 @@ async def test_event_service_streams_ordered_events_and_cleans_terminal_subscrip
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_event_service_emits_heartbeat_and_removes_disconnected_subscriber() -> None:
+async def test_m77_s24_sse_disconnect_removes_subscriber() -> None:
     service = RunEventService(heartbeat_seconds=0.01, now=lambda: _EVENT_TIME)
     await service.open_stream("stream-heartbeat-001", owner_user_id="reviewer-001")
     subscription = await service.subscribe(

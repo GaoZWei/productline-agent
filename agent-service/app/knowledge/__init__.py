@@ -50,6 +50,8 @@ from app.knowledge.reranking import (
     rerank_retrieval_results,
 )
 from app.knowledge.retrieval import (
+    KnowledgeRetrievalError,
+    KnowledgeRetrievalErrorCode,
     KnowledgeRetrievalPipeline,
     KnowledgeRetriever,
     KnowledgeSearchChannels,
@@ -88,6 +90,8 @@ __all__ = [
     "KeywordQuery",
     "KeywordQueryError",
     "KeywordSearchHit",
+    "KnowledgeRetrievalError",
+    "KnowledgeRetrievalErrorCode",
     "KnowledgeRetrievalPipeline",
     "KnowledgeRetriever",
     "KnowledgeSearchChannels",

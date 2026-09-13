@@ -403,7 +403,7 @@ def test_agent_execution_limits_have_stable_defaults_and_reject_invalid_values()
 
 
 @pytest.mark.asyncio
-async def test_dynamic_graph_stops_infinite_planning_at_six_decision_rounds() -> None:
+async def test_m77_s21_dynamic_graph_stops_at_maximum_decision_rounds() -> None:
     calls: list[str] = []
     client = BusinessHttpClient(_settings(), transport=_golden_transport(calls))
     registry = create_read_tool_registry(client)
@@ -476,7 +476,7 @@ async def test_dynamic_graph_stops_before_exceeding_tool_call_limit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dynamic_graph_blocks_duplicate_logical_call_before_tool_execution() -> None:
+async def test_m77_s20_dynamic_graph_blocks_duplicate_agent_decision() -> None:
     calls: list[str] = []
     client = BusinessHttpClient(_settings(), transport=_golden_transport(calls))
     registry = create_read_tool_registry(client)

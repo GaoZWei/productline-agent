@@ -282,7 +282,7 @@ async def test_http_failures_map_to_stable_errors_without_response_body_leakage(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_timeout_is_retried_only_to_configured_limit() -> None:
+async def test_m77_s17_model_timeout_is_retried_only_to_configured_limit() -> None:
     calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -326,6 +326,7 @@ async def test_timeout_is_retried_only_to_configured_limit() -> None:
             ModelErrorCode.INVALID_OUTPUT,
         ),
     ],
+    ids=("invalid-envelope", "m77_s18_non_json", "m77_s19_schema_error"),
 )
 async def test_invalid_envelope_json_or_schema_is_not_retried(
     response_factory: Callable[[], httpx.Response],

@@ -10,8 +10,12 @@ import pytest
 from pydantic import JsonValue
 
 from app.knowledge import (
+    EmbeddingErrorCode,
     EmbeddingIndexDescriptor,
+    EmbeddingProviderError,
     KeywordSearchHit,
+    KnowledgeRetrievalError,
+    KnowledgeRetrievalErrorCode,
     KnowledgeRetrievalPipeline,
     KnowledgeSearchFilter,
     QueryEmbedding,
@@ -216,7 +220,7 @@ async def test_specification_skill_runs_full_qa_flow_with_page_metadata_and_cita
 
 
 @pytest.mark.unit
-async def test_no_relevant_result_returns_safe_answer_without_calling_generation_model() -> None:
+async def test_m77_s15_empty_retrieval_returns_safe_answer_without_generation() -> None:
     answer_model = _StaticAnswerModel({"unexpected": True})
     workflow = SpecificationQaWorkflow(
         retriever=_StaticRetriever(()),
@@ -226,6 +230,34 @@ async def test_no_relevant_result_returns_safe_answer_without_calling_generation
 
     result = await workflow.ainvoke(
         "没有对应规范的问题",
+        effective_at=date(2026, 8, 20),
+        permission_scope=PermissionScope.INTERNAL_REVIEWER,
+    )
+
+    assert result.status is SpecificationQaStatus.INSUFFICIENT_CONTEXT
+    assert result.citations == ()
+    assert "未检索到足够相关的现行规范" in result.answer
+    assert answer_model.requests == []
+
+
+@pytest.mark.unit
+async def test_m77_s16_all_low_score_fragments_return_safe_answer() -> None:
+    candidate = _retrieval(
+        "CHUNK-A",
+        document_id="DOC-QUALITY-001",
+        document_name="通用质量规范",
+        score=0.04,
+        content="与当前问题相关性不足的通用说明。",
+    )
+    answer_model = _StaticAnswerModel({"unexpected": True})
+    workflow = SpecificationQaWorkflow(
+        retriever=_StaticRetriever((candidate,)),
+        reranker=_StaticReranker({"CHUNK-A": 0.49}),
+        answer_model=answer_model,
+    )
+
+    result = await workflow.ainvoke(
+        "坐标系要求",
         effective_at=date(2026, 8, 20),
         permission_scope=PermissionScope.INTERNAL_REVIEWER,
     )
@@ -379,6 +411,66 @@ class _QueryEmbeddingGenerator:
         )
 
 
+class _FailingQueryEmbeddingGenerator(_QueryEmbeddingGenerator):
+    async def generate_query(self, query: str) -> QueryEmbedding:
+        self.queries.append(query)
+        raise EmbeddingProviderError(
+            code=EmbeddingErrorCode.UPSTREAM_UNAVAILABLE,
+            message="embedding provider is unavailable",
+            retryable=True,
+        )
+
+
+class _FailingPipelineRepository(_PipelineRepository):
+    def __init__(
+        self,
+        *,
+        keyword_error: Exception | None = None,
+        vector_error: Exception | None = None,
+    ) -> None:
+        super().__init__()
+        self.keyword_error = keyword_error
+        self.vector_error = vector_error
+        self.vector_calls = 0
+
+    async def search_keywords(
+        self,
+        query: str,
+        *,
+        filters: KnowledgeSearchFilter,
+        top_k: int = 10,
+    ) -> tuple[KeywordSearchHit, ...]:
+        if self.keyword_error is not None:
+            raise self.keyword_error
+        return await super().search_keywords(query, filters=filters, top_k=top_k)
+
+    async def search_vectors(
+        self,
+        query_embedding: QueryEmbedding,
+        *,
+        filters: KnowledgeSearchFilter,
+        top_k: int = 10,
+        min_similarity: float = -1.0,
+    ) -> tuple[VectorSearchHit, ...]:
+        self.vector_calls += 1
+        if self.vector_error is not None:
+            raise self.vector_error
+        return await super().search_vectors(
+            query_embedding,
+            filters=filters,
+            top_k=top_k,
+            min_similarity=min_similarity,
+        )
+
+
+def _knowledge_filters() -> KnowledgeSearchFilter:
+    return KnowledgeSearchFilter(
+        product_type="DOM",
+        effective_at=date(2026, 8, 20),
+        permission_scope=PermissionScope.INTERNAL_REVIEWER,
+    )
+
+
 @pytest.mark.unit
 async def test_retrieval_pipeline_executes_both_channels_with_same_metadata_filter() -> None:
     repository = _PipelineRepository()
@@ -404,6 +496,62 @@ async def test_retrieval_pipeline_executes_both_channels_with_same_metadata_filt
     assert results[0].chunk_ids == ("CHUNK-A",)
     assert results[0].keyword_rank == 1
     assert results[0].vector_rank == 1
+
+
+@pytest.mark.unit
+async def test_m77_s11_embedding_failure_keeps_provider_code_and_skips_vector_search() -> None:
+    repository = _FailingPipelineRepository()
+    embedding_generator = _FailingQueryEmbeddingGenerator()
+    pipeline = KnowledgeRetrievalPipeline(
+        repository=repository,
+        embedding_generator=embedding_generator,
+    )
+
+    with pytest.raises(EmbeddingProviderError) as caught:
+        await pipeline.retrieve("坐标系要求", filters=_knowledge_filters())
+
+    assert caught.value.code is EmbeddingErrorCode.UPSTREAM_UNAVAILABLE
+    assert caught.value.retryable is True
+    assert repository.vector_calls == 0
+
+
+@pytest.mark.unit
+async def test_m77_s12_vector_search_timeout_has_retryable_channel_error() -> None:
+    repository = _FailingPipelineRepository(vector_error=TimeoutError("database detail"))
+    pipeline = KnowledgeRetrievalPipeline(
+        repository=repository,
+        embedding_generator=_QueryEmbeddingGenerator(),
+    )
+
+    with pytest.raises(KnowledgeRetrievalError) as caught:
+        await pipeline.retrieve("坐标系要求", filters=_knowledge_filters())
+
+    assert caught.value.code is KnowledgeRetrievalErrorCode.VECTOR_SEARCH_TIMEOUT
+    assert caught.value.retryable is True
+    assert str(caught.value) == "vector knowledge search timed out"
+    assert "database detail" not in str(caught.value)
+
+
+@pytest.mark.unit
+async def test_m77_s13_keyword_search_failure_stops_downstream_channels_safely() -> None:
+    repository = _FailingPipelineRepository(
+        keyword_error=RuntimeError("database credential detail")
+    )
+    embedding_generator = _QueryEmbeddingGenerator()
+    pipeline = KnowledgeRetrievalPipeline(
+        repository=repository,
+        embedding_generator=embedding_generator,
+    )
+
+    with pytest.raises(KnowledgeRetrievalError) as caught:
+        await pipeline.retrieve("坐标系要求", filters=_knowledge_filters())
+
+    assert caught.value.code is KnowledgeRetrievalErrorCode.KEYWORD_SEARCH_FAILED
+    assert caught.value.retryable is False
+    assert str(caught.value) == "keyword knowledge search failed"
+    assert "credential" not in str(caught.value)
+    assert embedding_generator.queries == []
+    assert repository.vector_calls == 0
 
 
 def _spec_decision(*, confidence: float = 0.95) -> RoutingDecision:

@@ -26,6 +26,9 @@ class RerankValidationError(ValueError):
 class RerankExecutionError(RuntimeError):
     """非超时的模型调用失败, 且不向上游暴露供应商原始信息。"""
 
+    code = "RERANK_EXECUTION_ERROR"
+    retryable = False
+
 
 class RerankDegradationReason(StrEnum):
     """允许调用方区分正常重排与受控降级。"""

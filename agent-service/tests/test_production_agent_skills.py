@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from datetime import date
 from typing import Any, cast
 
 import httpx
@@ -18,6 +19,13 @@ from app.clients.model import (
     StructuredModelResult,
 )
 from app.database import Database
+from app.knowledge import (
+    EmbeddingErrorCode,
+    EmbeddingProviderError,
+    KnowledgeRetrievalError,
+    KnowledgeRetrievalErrorCode,
+    RerankExecutionError,
+)
 from app.models import AgentRunStatus, AgentStepType, ApprovalStatus
 from app.routing import BusinessSkill, Intent
 from app.routing.decision import build_routing_decision
@@ -30,6 +38,7 @@ from app.schemas.agent_messages import (
 )
 from app.schemas.approval import ReviewDraft
 from app.schemas.business import BusinessIdentity
+from app.schemas.knowledge import PermissionScope
 from app.schemas.routing import (
     EntityExtractionResult,
     RouterEntities,
@@ -397,6 +406,99 @@ async def test_specification_skill_requires_query_embedding_configuration() -> N
     assert caught.value.code == "EMBEDDING_NOT_CONFIGURED"
     assert recorder.started == [(5, AgentStepType.RAG, "answer_specification")]
     assert recorder.failed[0][1] == "EMBEDDING_NOT_CONFIGURED"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("injected_error", "expected_code", "expected_retryable"),
+    [
+        (
+            EmbeddingProviderError(
+                code=EmbeddingErrorCode.UPSTREAM_UNAVAILABLE,
+                message="embedding provider is unavailable",
+                retryable=True,
+            ),
+            "EMBEDDING_UPSTREAM_UNAVAILABLE",
+            True,
+        ),
+        (
+            KnowledgeRetrievalError(
+                code=KnowledgeRetrievalErrorCode.VECTOR_SEARCH_TIMEOUT,
+                message="vector knowledge search timed out",
+                retryable=True,
+            ),
+            "VECTOR_SEARCH_TIMEOUT",
+            True,
+        ),
+        (
+            KnowledgeRetrievalError(
+                code=KnowledgeRetrievalErrorCode.KEYWORD_SEARCH_FAILED,
+                message="keyword knowledge search failed",
+                retryable=False,
+            ),
+            "KEYWORD_SEARCH_FAILED",
+            False,
+        ),
+        (
+            RerankExecutionError("reranker execution failed"),
+            "RERANK_EXECUTION_ERROR",
+            False,
+        ),
+    ],
+)
+async def test_specification_failures_record_stable_rag_step(
+    monkeypatch: pytest.MonkeyPatch,
+    injected_error: Exception,
+    expected_code: str,
+    expected_retryable: bool,
+) -> None:
+    class _FailingSpecificationQaWorkflow:
+        def __init__(self, **values: object) -> None:
+            del values
+
+        async def ainvoke(self, *args: object, **values: object) -> object:
+            del args, values
+            raise injected_error
+
+    async def _ready(_: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        production_skills,
+        "SpecificationQaWorkflow",
+        _FailingSpecificationQaWorkflow,
+    )
+    monkeypatch.setattr(
+        production_skills._ProductionSpecificationWorkflow,
+        "_ensure_ready",
+        _ready,
+    )
+    recorder = _CaptureStepRecorder()
+    workflow = production_skills._ProductionSpecificationWorkflow(
+        database=cast(Database, object()),
+        capability_service=cast(KnowledgeIndexCapabilityService, object()),
+        embedding_generator=cast(Any, object()),
+        model_client=cast(Any, _SequenceStructuredClient(())),
+        recorder=cast(Any, recorder),
+        sequence=production_skills._StepSequence(5),
+        collector=production_skills._TokenCollector(),
+        run_id="run-skill-test",
+        event_sink=None,
+    )
+
+    with pytest.raises(AgentSkillExecutionError) as caught:
+        await workflow.ainvoke(
+            "坐标系要求",
+            effective_at=date(2026, 9, 11),
+            permission_scope=PermissionScope.INTERNAL_REVIEWER,
+        )
+
+    assert caught.value.code == expected_code
+    assert caught.value.retryable is expected_retryable
+    assert caught.value.error_step == "answer_specification"
+    assert recorder.started == [(5, AgentStepType.RAG, "answer_specification")]
+    assert recorder.failed == [("step-skill-skill-test-5", expected_code)]
 
 
 @pytest.mark.unit

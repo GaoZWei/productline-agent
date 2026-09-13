@@ -155,7 +155,7 @@ async def test_base_tool_exposes_metadata_and_returns_validated_output() -> None
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_invalid_input_returns_parameter_error_without_calling_tool() -> None:
+async def test_m77_s09_invalid_tool_input_fails_before_business_call() -> None:
     tool = EchoTool()
 
     result = await tool.execute({"text": "", "extra": "invalid"}, tool_context())

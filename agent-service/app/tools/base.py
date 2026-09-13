@@ -127,7 +127,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     trace_id=context.trace_id,
                 )
             )
-        # 第二步: 输入 Schema 校验
+        # 第二步: 输入 Schema 校验（ Tool参数校验 ）
         try:
             validated_input = self.input_model.model_validate(raw_input)
         except ValidationError:
@@ -139,7 +139,7 @@ class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
                     trace_id=context.trace_id,
                 )
             )
-        # 第三步: 使用校验后的输入拦截同一 Run 中的重复逻辑调用。
+        # 第三步: 使用校验后的输入拦截同一 Run 中的重复逻辑调用（Tool重复调用校验）
         fingerprint = build_tool_call_fingerprint(self.name, validated_input)
         if not context.tool_call_ledger.try_reserve(
             fingerprint,

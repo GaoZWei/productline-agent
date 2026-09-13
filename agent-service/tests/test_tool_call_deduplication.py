@@ -111,7 +111,7 @@ def test_tool_context_owns_a_private_run_scoped_ledger() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_same_tool_and_arguments_are_blocked_within_one_run(
+async def test_m77_s10_same_tool_and_arguments_are_blocked_within_one_run(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     tool = DedupTool()

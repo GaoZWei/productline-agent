@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Awaitable
+from enum import StrEnum
 from typing import Protocol
 
 from app.knowledge.embeddings import QueryEmbedding
@@ -14,6 +15,29 @@ from app.schemas.knowledge import KnowledgeSearchFilter
 DEFAULT_CHANNEL_TOP_K = 20
 DEFAULT_HYBRID_TOP_K = 10
 DEFAULT_MIN_VECTOR_SIMILARITY = -1.0
+
+# 检索通道错误模型
+class KnowledgeRetrievalErrorCode(StrEnum):
+    """不暴露数据库细节的稳定检索通道错误码。"""
+
+    KEYWORD_SEARCH_FAILED = "KEYWORD_SEARCH_FAILED"
+    VECTOR_SEARCH_TIMEOUT = "VECTOR_SEARCH_TIMEOUT"
+    VECTOR_SEARCH_FAILED = "VECTOR_SEARCH_FAILED"
+
+
+class KnowledgeRetrievalError(RuntimeError):
+    """标识具体失败通道及其是否适合由上层重试。"""
+
+    def __init__(
+        self,
+        *,
+        code: KnowledgeRetrievalErrorCode,  # 错误类型
+        message: str,  # 可安全暴露的错误描述
+        retryable: bool,  # 是否具有瞬时性错误
+    ) -> None:
+        self.code = code
+        self.retryable = retryable
+        super().__init__(message)
 
 
 class QueryEmbeddingGenerator(Protocol):
@@ -93,20 +117,40 @@ class KnowledgeRetrievalPipeline:
     ) -> tuple[RetrievalResult, ...]:
         """对两条通道复用同一过滤器, 并返回带文档身份的混合结果。"""
         # 从关键词通道召回
-        keyword_hits = await self._repository.search_keywords(
-            query,
-            filters=filters,
-            top_k=self._channel_top_k,
-        )
+        try:
+            keyword_hits = await self._repository.search_keywords(
+                query,
+                filters=filters,
+                top_k=self._channel_top_k,
+            )
+        except Exception as error:
+            raise KnowledgeRetrievalError(
+                code=KnowledgeRetrievalErrorCode.KEYWORD_SEARCH_FAILED,
+                message="keyword knowledge search failed",
+                retryable=False,
+            ) from error
         # 生成Query Embedding 把自然语言查询转换成向量
         query_embedding = await self._embedding_generator.generate_query(query)
         # 从向量通道召回
-        vector_hits = await self._repository.search_vectors(
-            query_embedding,
-            filters=filters,
-            top_k=self._channel_top_k,
-            min_similarity=self._min_vector_similarity,
-        )
+        try:
+            vector_hits = await self._repository.search_vectors(
+                query_embedding,
+                filters=filters,
+                top_k=self._channel_top_k,
+                min_similarity=self._min_vector_similarity,
+            )
+        except TimeoutError as error:
+            raise KnowledgeRetrievalError(
+                code=KnowledgeRetrievalErrorCode.VECTOR_SEARCH_TIMEOUT,
+                message="vector knowledge search timed out",
+                retryable=True,
+            ) from error
+        except Exception as error:
+            raise KnowledgeRetrievalError(
+                code=KnowledgeRetrievalErrorCode.VECTOR_SEARCH_FAILED,
+                message="vector knowledge search failed",
+                retryable=False,
+            ) from error
         # 融合结果
         return fuse_hybrid_results(
             keyword_hits,

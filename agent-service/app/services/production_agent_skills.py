@@ -16,9 +16,12 @@ from app.eventing import RunEventSink
 from app.knowledge import (
     EmbeddingProviderError,
     KeywordSearchHit,
+    KnowledgeRetrievalError,
     KnowledgeRetrievalPipeline,
     QueryEmbedding,
     QueryEmbeddingGenerator,
+    RerankExecutionError,
+    RerankValidationError,
     VectorSearchHit,
 )
 from app.model_adapters import (
@@ -431,7 +434,7 @@ class _ProductionSpecificationWorkflow:
                 f"permission_scope={permission_scope.value};effective_at={effective_at.isoformat()}"
             ),
         )
-        # 检查Query Embedding是否配置、知识库是否入库、catalog是否就绪、chunk是否存在、provider是否可用
+        # 检查Query Embedding配置及知识库、catalog、chunk、provider是否就绪。
         try:
             if self._embedding_generator is None:
                 raise AgentSkillExecutionError(
@@ -493,6 +496,34 @@ class _ProductionSpecificationWorkflow:
                 code=error.code.value,
                 message=str(error),
                 retryable=error.retryable,
+                error_step="answer_specification",
+                token_usage=self._collector.total,
+            ) from error
+        except KnowledgeRetrievalError as error:
+            await self._recorder.mark_failed(
+                step_id,
+                error_code=error.code.value,
+                output_summary="specification_execution=failed",
+            )
+            raise AgentSkillExecutionError(
+                code=error.code.value,
+                message=str(error),
+                retryable=error.retryable,
+                error_step="answer_specification",
+                token_usage=self._collector.total,
+            ) from error
+        except (RerankExecutionError, RerankValidationError) as error:
+            error_code = getattr(error, "code", "RERANK_RESPONSE_VALIDATION_ERROR")
+            retryable = bool(getattr(error, "retryable", False))
+            await self._recorder.mark_failed(
+                step_id,
+                error_code=error_code,
+                output_summary="specification_execution=failed",
+            )
+            raise AgentSkillExecutionError(
+                code=error_code,
+                message="specification rerank failed",
+                retryable=retryable,
                 error_step="answer_specification",
                 token_usage=self._collector.total,
             ) from error
@@ -568,7 +599,7 @@ class ProductionAgentSkillDispatcher:
                 run_id=request.run_id,
             ),
         )
-        # 确定性分发器（静态确定的skill）
+        # 确定性分发器(静态确定的skill)
         if skill is BusinessSkill.ORDER_STATUS:
             return await self._dispatch_order_status(request, observed_registry)
         if skill is BusinessSkill.DIAGNOSIS:
@@ -623,7 +654,7 @@ class ProductionAgentSkillDispatcher:
             result=result,
             tool_call_count=context.tool_call_ledger.recorded_call_count,
         )
-    # 动态诊断核心代码 模型只选择下一步，不直接生成事实
+    # 动态诊断核心代码 模型只选择下一步, 不直接生成事实
     async def _dispatch_diagnosis(
         self,
         request: AgentSkillRequest,
@@ -632,13 +663,13 @@ class ProductionAgentSkillDispatcher:
         collector: _TokenCollector,
     ) -> AgentSkillExecution:
         entities = request.decision.entities.to_router_entities()
-        # 首先验证意图必须是ORDER_DIAGNOSIS，而且必须存在order_id
+        # 首先验证意图必须是ORDER_DIAGNOSIS, 而且必须存在order_id
         if request.decision.intent is not Intent.ORDER_DIAGNOSIS or entities.order_id is None:
             raise AgentSkillExecutionError(
                 code="SKILL_DISPATCH_INVALID",
                 message="diagnosis routing decision is missing order_id",
             )
-        # 创建ToolContext，用于后续的Tool调用
+        # 创建ToolContext, 用于后续的Tool调用
         context = ToolContext(
             identity=request.identity,
             permissions=_DIAGNOSIS_PERMISSIONS,
@@ -748,7 +779,7 @@ class ProductionAgentSkillDispatcher:
         """刷新Java事实和现行规范后生成草稿, 保存Approval但不调用写Tool。"""
 
         entities = request.decision.entities.to_router_entities()
-        # 确认Router给出的意图是REVIEW_GENERATION，并且存在task_id。
+        # 确认Router给出的意图是REVIEW_GENERATION, 并且存在task_id。
         if request.decision.intent is not Intent.REVIEW_GENERATION or entities.task_id is None:
             raise AgentSkillExecutionError(
                 code="SKILL_DISPATCH_INVALID",
@@ -761,7 +792,7 @@ class ProductionAgentSkillDispatcher:
             trace_id=request.trace_id,
             run_id=request.run_id,
         )
-        # 给Review模型套上观测包装器，记录模型名称、Token和LLM Step
+        # 给Review模型套上观测包装器, 记录模型名称、Token和LLM Step
         observed_draft_client = _SequencedObservedModelClient(
             self._model_client,
             request.step_recorder,

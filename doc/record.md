@@ -1661,3 +1661,25 @@
 - Agent指标分别按用例、全部Tool尝试、有计时用例和有预期阶段用例建立稳定分母，并保存所有可审计计数。
 - Tool尝试必须完整归类为已执行、参数无效或重复拒绝；异常步骤只有与预期Step一致才算可定位，错误类型按稳定错误码比较。
 - 排查耗时采用中位数降低极端慢样本影响；Outcome不保存原始参数、业务响应或异常正文，真实采集仍由后续领域接线负责。
+
+---
+
+## 2026-09-11 — `[M7.7-09～24] 跨层异常矩阵闭环`
+
+### 核心解决的问题
+
+把Tool、RAG、模型、Agent、Approval和SSE的零散保护测试收口为固定编号矩阵，并补齐关键词与向量检索故障被通用错误
+吞并的问题，使失败层级、错误码、重试语义和零误写可以从统一入口稳定回归。
+
+### 实现的核心代码
+
+- `agent-service/app/knowledge/retrieval.py`：`KnowledgeRetrievalErrorCode`、`KnowledgeRetrievalError`及双通道安全错误转换。
+- `agent-service/app/services/production_agent_skills.py`：RAG Step对Embedding、检索通道和Rerank错误的稳定投影。
+- `agent-service/tests/`下Tool、RAG、模型、Agent、Approval与SSE相关测试：`m77_s09`～`m77_s24`固定场景。
+- `Makefile`：剩余矩阵及全部24场景的统一验收入口。
+
+### 实现的核心功能
+
+- Tool非法参数与运行内重复调用均在外部业务执行前拒绝；模型超时、非JSON和Schema错误保留稳定LLM Step与重试事实。
+- Embedding失败、向量超时、关键词失败和Rerank失败可定位到RAG Step；空召回、全低分与Rerank超时走安全结果而不生成无依据结论。
+- Agent重复决策和最大轮数受预算保护；Approval过期不写Java，并发重复确认最多一次写回；SSE断连只释放订阅资源。

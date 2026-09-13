@@ -1,26 +1,26 @@
 # 当前开发状态
 
 - 当前里程碑：M7运行观测、生产闭环集成与统一评测（进行中）
-- 当前子阶段：M7.9指标计算已完成（路由、Tool、RAG、Agent与观测指标口径齐备；M7.8 T783～T793与M7.7场景09～24仍保留待办）
-- 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T782，以及M7.7场景01～08、M7.9全部领域指标
+- 当前子阶段：M7.7异常注入测试已完成（24个固定场景齐备）；M7.8 T783～T793保留待办
+- 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T782，以及M7.7场景01～24、M7.9全部领域指标
 - 当前场景：订单页统一Agent抽屉通过`POST /api/agent/messages`承载状态、动态诊断、规范问答、受控澄清和Review Approval五类结果；同一订单复用Session，每轮消息及确认创建独立SSE，切换订单隔离迟到响应；Review写回与返工分别确认，固定诊断仍作为显式入口保留
-- 通过测试：M7.9全部指标执行`make test-eval-metrics`为47/47，评测目录mypy 13个文件及新增Agent、观测模块、公共导出和测试的Ruff定向检查通过。本批次未重复执行无直接变更的跨服务和前端检查
-- 失败测试：此前`make eval-rag`在收集集成用例时因既有`app.workflows -> app.tools -> app.services -> order_diagnosis -> app.workflows`循环导入失败，尚未执行测试；本批次全部评测目录回归、mypy和新增文件定向Ruff均通过。扩大Ruff到整个评测目录仍发现既有`router.py`、`runner.py`和`tools.py`中的中文全角标点、长行及导入顺序问题
-- 当前阻塞：无外部阻塞；既有循环导入阻塞`eval-rag`集成验收但不阻塞M7.9纯指标计算，M7.8 T783～T793和M7.7场景09～24仍未开发
+- 通过测试：M7.7场景09～24及失败Step契约执行`make test-agent-remaining-fault-matrix`为23/23；相关Tool、RAG、模型、Agent、Approval和SSE模块回归105/105；`mypy app tests`检查195个文件无问题，修改文件Ruff检查通过。本批次未重复执行无直接变更的前端检查
+- 失败测试：`PATH=/Applications/Docker.app/Contents/Resources/bin:$PATH make test-agent-fault-matrix`中的Java故障注入测试11/11通过，但Docker BuildKit拉取`maven:3.9.16-eclipse-temurin-21`和`eclipse-temurin:21-jre`元数据超时，场景01～08跨服务部分未启动；此前`make eval-rag`仍受既有`app.workflows -> app.tools -> app.services -> order_diagnosis -> app.workflows`循环导入阻塞。两项均非本批次断言失败
+- 当前阻塞：无外部阻塞；既有循环导入阻塞`eval-rag`集成验收但不阻塞M7.7，M7.8 T783～T793仍未开发
 - 开发环境：OpenJDK 21.0.12、Maven 3.9.16、Python 3.12.13（uv 管理）、uv 0.12.0、Node.js 22.22.2、npm 10.9.7、Docker Desktop 29.6.2
-- 最近更新：M7.9新增Agent六项指标和异常观测三项指标，区分已执行Tool与无效/重复尝试，并以显式适用分母统计诊断耗时、阶段判断和故障定位
+- 最近更新：M7.7补齐场景09～24，新增关键词/向量检索稳定错误分类，并统一覆盖Tool去重、RAG降级、模型协议、Agent预算、Approval幂等和SSE断连
 - M7.5当前边界：页面展示当次执行证据而非当前Java业务事实；历史诊断不符合当前Schema时不会补造正文，当前仍使用offset分页且只允许本人REVIEWER，尚无审计主管跨用户视图、游标分页或操作日志聚合展示
 - M7.6当前边界：T749～T781七个批次已全部完成；统一页面能够操作四个生产Skill及Approval闭环，但真实动态调用仍依赖外部模型配置，规范问答和Review还要求知识索引为`READY`，页面能力标签不代表已探测Provider网络
 - T754～T758当前边界：Router、Action、Rerank、规范回答和Review草稿适配器均已接入统一Agent API并绑定同一Run的逐LLM Step；2026-09-07已使用本地DeepSeek配置验证Router与订单状态统一入口，尚未用真实Provider逐一执行Action、Rerank、规范回答和Review草稿
 - T759～T761当前边界：`make knowledge-ingest`是唯一主动访问外部Embedding的全量运维入口，本次没有可用外部密钥，真实Provider成功响应未执行；确定性Provider配合真实PostgreSQL已验证16份文档、80个唯一Chunk、重复执行、旧文档清理及索引就绪/版本不匹配状态，能力查询不读取正文或向量
 - T762～T773当前边界：统一入口及四个Skill通过结构化模型Stub、Java Tool、确定性Embedding目录和真实PostgreSQL验证；缺参、冲突和意图确认继续由确定性门禁处理，Review只生成草稿，确认与返工由独立确定性API执行且都会刷新Java事实、校验版本并使用幂等写Tool
 - T750当前边界：能力查询只证明当前进程配置通过校验，不探测模型网络、不产生LLM Step，也不代表模型实际参与了Router、生成或Run
-- M7.7当前边界：场景01～08已完成；连接失败和超时各验证一次有限重试，其他确定性错误不重试；Java注入器默认关闭、只处理GET且不会影响写接口。Tool输入、重复动作、RAG、模型、Agent预算、Approval和SSE异常仍待场景09～24覆盖
+- M7.7当前边界：场景01～24已完成；Java连接和读取超时验证一次有限重试，模型超时遵循配置重试预算，向量超时标记可重试但不在RAG Workflow内自动重放。Java注入器默认关闭且只处理GET；其余场景使用受控替身验证稳定错误、安全提示、失败Step或安全短路，以及零误写。Rerank超时按既有策略安全降级，非超时失败关闭失败；SSE断连只清理订阅，不取消正在运行的Run
 - T782当前边界：Runner只负责编排返回Pydantic报告的异步Suite，不计算指标、不生成JSON/Markdown、不比较历史结果，也尚未把Router、Tool、RAG、诊断、Agent、Approval和异常矩阵注册为生产评测套件
 - M7.9路由指标当前边界：参数提取只统计明确表达、同义表达和意图混淆中的期望字段，参数补全只统计页面与会话指代中的期望字段；澄清指标只判断是否触发，原因错误仍进入失败样本；错误Tool路由只统计READY且映射到非预期Skill的用例。当前结果由可控Subject验收公式，不代表真实DeepSeek准确率
 - M7.9 Tool指标当前边界：每条观测代表一个评测用例，错误修正成功指首次参数校验失败但最终调用成功；最终成功、平均重试和重复调用均以全部用例为分母，`retry_count`表示首次外部尝试之后的重试次数。当前只完成观测Schema与公式，尚未由T785采集真实Tool执行结果
 - M7.9 RAG指标当前边界：Hit@5与MRR以全部用例为分母，无关片段占比以实际Top-5返回片段为分母；版本过滤和引用文档只统计完整链路Subject明确提交的观测，`None`不进入分母，`False`才计失败。当前可控Subject只验证公式，T786尚未从实际过滤结果和最终引用白名单采集，因此不代表真实RAG质量
 - M7.9 Agent指标当前边界：E2E成功率和平均已执行Tool数以全部用例为分母，无效与重复Tool率以所有尝试为分母且每次尝试必须归入已执行、无效或重复之一；诊断耗时仅统计有计时用例，阶段正确率仅统计声明预期阶段的用例。当前只完成非敏感Outcome与公式，T788尚未从真实Run、Step和调用账本采集
-- M7.9观测指标当前边界：步骤可定位要求实际Step与预期完全一致，错误类型按全部异常用例的稳定错误码比较，排查中位时长只统计有计时样本；无适用步骤或耗时样本时分母为零且数值稳定为零。当前只完成公式，尚未接入M7.7完整异常矩阵或真实人工排查计时
+- M7.9观测指标当前边界：步骤可定位要求实际Step与预期完全一致，错误类型按全部异常用例的稳定错误码比较，排查中位时长只统计有计时样本；无适用步骤或耗时样本时分母为零且数值稳定为零。M7.7异常矩阵已完整，但仍需M7.8 T790把场景执行结果转换为观测Outcome，真实人工排查计时尚未采集
 - 已知非阻塞问题：历史页可展示Run来源和关联Approval差异，但尚无独立操作日志聚合页；日志详情当前只允许原确认人读取，尚无审计主管角色或完整RBAC；只有写Tool实际开始后的成功、Java 409或其他写失败会生成操作日志，确认前过期或事实重校验`STALE`只保留Approval/Run/Step终态；确认服务不重新运行RAG，引用适用性仍以草稿生成时检索结果为准；写失败需要新建Approval再次授权；若进程在Java成功后、保存日志和终态前崩溃，Java幂等可防重复写但目前没有自动恢复任务；返工只覆盖`COORDINATE_SYSTEM_FIX`；DeepSeek JSON Object只能保证JSON语法，Schema与业务合法性仍依赖本地校验且真实Provider尚未覆盖Action、Rerank、规范回答和Review草稿，Embedding凭据链路也未执行；浏览器技能文件在当前环境缺失，已用组件测试和Docker烟测替代，但尚缺真实浏览器视觉截图；Session/SSE仍是单进程TTL与有界内存实现；演示Header不是完整认证；Java与Python数据库角色尚未隔离
-- 下一阶段：M7.9达到停止线，先验收汇报；下一最小任务按既定顺序回补M7.7场景09“Tool输入参数错误”，M7.8 T783～T793保持显式待办
+- 下一阶段：M7.7达到停止线，先验收汇报；下一最小任务为M7.8 T783统一评测结果Schema

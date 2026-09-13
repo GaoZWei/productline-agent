@@ -81,9 +81,9 @@
     - [x] M7.6-E 三个只读Skill生产接线（T767～T769）
     - [x] M7.6-F Review与Approval生产闭环（T770～T773）
     - [x] M7.6-G 统一页面与端到端验收（T774～T781）
-  - [ ] M7.7 异常注入测试（进行中）
+  - [x] M7.7 异常注入测试
     - [x] 场景01～08 Java与Tool故障矩阵
-    - [ ] 场景09～24 Tool、RAG、模型、Agent、Approval与SSE故障矩阵
+    - [x] 场景09～24 Tool、RAG、模型、Agent、Approval与SSE故障矩阵
   - [ ] M7.8 统一评测框架（T782～T793，进行中）
     - [x] T782 统一EvalRunner
     - [ ] T783～T793 结果Schema、领域接线、报告与对比

@@ -383,7 +383,7 @@ async def test_t663_user_modification_is_the_only_content_sent_to_java() -> None
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_t664_concurrent_duplicate_confirmation_writes_only_once() -> None:
+async def test_m77_s23_concurrent_duplicate_writeback_submits_only_once() -> None:
     harness = _SecurityHarness()
     try:
         results = await asyncio.gather(
@@ -416,7 +416,7 @@ async def test_t665_cancelled_approval_keeps_data_unchanged() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_t666_expired_approval_is_rejected_before_java_write() -> None:
+async def test_m77_s22_expired_approval_is_rejected_before_java_write() -> None:
     harness = _SecurityHarness(
         snapshot=_snapshot(created_at=_NOW - timedelta(minutes=16))
     )
