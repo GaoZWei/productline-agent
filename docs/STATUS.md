@@ -4,11 +4,11 @@
 - 当前子阶段：M7.8统一评测框架T782～T793已完成，七类Suite、统一报告、导出和对比已闭环
 - 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T793，以及M7.7场景01～24、M7.9全部领域指标
 - 当前场景：订单页统一Agent抽屉通过`POST /api/agent/messages`承载状态、动态诊断、规范问答、受控澄清和Review Approval五类结果；同一订单复用Session，每轮消息及确认创建独立SSE，切换订单隔离迟到响应；Review写回与返工分别确认，固定诊断仍作为显式入口保留
-- 通过测试：`make eval-all`依次为24/24和58/58，`make eval-rag`为11/11，Approval与写Tool回归23/23；`mypy app tests`检查203个Python源文件无问题，M7.8修改范围Ruff检查通过
-- 失败测试：本批次无测试断言失败；曾阻塞`eval-rag`的`app.tools`写Tool循环导入已通过惰性公共导出解除。`make quality`在全量Ruff阶段因仓库既有中文全角标点、长注释和导入间距共105项失败，未进入其mypy步骤；mypy已单独全量通过。M7完整`make test`和跨服务Docker验收尚未在本批次执行
-- 当前阻塞：无
+- 通过测试：2026-09-13完整回归中三端smoke、Python非数据库测试650/650、Java领域/数据/读写/异常/故障59/59、前端64/64及生产构建、隔离Java+PostgreSQL Agent E2E 16/16、24场景矩阵的Java链路8/8与Python异常检查23/23、统一页面Docker烟测、`make eval-all`的24/24与58/58均通过；`mypy app tests`检查203个源文件无问题
+- 失败测试：`make test`在隔离PostgreSQL回归中为51/52，唯一失败是`test_order_diagnosis_api_persists_successful_run_and_returns_golden_result`仍断言`router-v3`，实际版本常量及持久化结果均为`router-v4`；`make quality`在Ruff阶段发现108项，分类为89项`RUF003`、14项`E501`和5项`I001`，因此没有进入其mypy步骤，mypy已单独全量通过
+- 当前阻塞：M7不能关闭；需同步1条过期Router Prompt版本断言，并清理108项Python静态格式错误后重新执行完整门禁
 - 开发环境：OpenJDK 21.0.12、Maven 3.9.16、Python 3.12.13（uv 管理）、uv 0.12.0、Node.js 22.22.2、npm 10.9.7、Docker Desktop 29.6.2
-- 最近更新：M7.8补齐统一报告Schema、七类Suite接线、JSON/Markdown导出、CLI历史对比和`eval-all`离线验收入口
+- 最近更新：完成M7全栈回归验收；功能、跨服务、页面、异常矩阵、评测和mypy通过，定位1条过期测试断言及108项Ruff格式阻塞
 - M7.5当前边界：页面展示当次执行证据而非当前Java业务事实；历史诊断不符合当前Schema时不会补造正文，当前仍使用offset分页且只允许本人REVIEWER，尚无审计主管跨用户视图、游标分页或操作日志聚合展示
 - M7.6当前边界：T749～T781七个批次已全部完成；统一页面能够操作四个生产Skill及Approval闭环，但真实动态调用仍依赖外部模型配置，规范问答和Review还要求知识索引为`READY`，页面能力标签不代表已探测Provider网络
 - T754～T758当前边界：Router、Action、Rerank、规范回答和Review草稿适配器均已接入统一Agent API并绑定同一Run的逐LLM Step；2026-09-07已使用本地DeepSeek配置验证Router与订单状态统一入口，尚未用真实Provider逐一执行Action、Rerank、规范回答和Review草稿
@@ -23,4 +23,4 @@
 - M7.9 Agent指标当前边界：E2E成功率和平均已执行Tool数以全部用例为分母，无效与重复Tool率以所有尝试为分母且每次尝试必须归入已执行、无效或重复之一；诊断耗时仅统计有计时用例，阶段正确率仅统计声明预期阶段的用例。T787/T788已提供统一Provider接线，真实数字要求实际Run、Step和调用账本采集器
 - M7.9观测指标当前边界：步骤可定位要求实际Step与预期完全一致，错误类型按全部异常用例的稳定错误码比较，排查中位时长只统计有计时样本；无适用步骤或耗时样本时分母为零且数值稳定为零。T790已接到统一Suite，真实人工排查计时仍需在实际演练中采集
 - 已知非阻塞问题：历史页可展示Run来源和关联Approval差异，但尚无独立操作日志聚合页；日志详情当前只允许原确认人读取，尚无审计主管角色或完整RBAC；只有写Tool实际开始后的成功、Java 409或其他写失败会生成操作日志，确认前过期或事实重校验`STALE`只保留Approval/Run/Step终态；确认服务不重新运行RAG，引用适用性仍以草稿生成时检索结果为准；写失败需要新建Approval再次授权；若进程在Java成功后、保存日志和终态前崩溃，Java幂等可防重复写但目前没有自动恢复任务；返工只覆盖`COORDINATE_SYSTEM_FIX`；DeepSeek JSON Object只能保证JSON语法，Schema与业务合法性仍依赖本地校验且真实Provider尚未覆盖Action、Rerank、规范回答和Review草稿，Embedding凭据链路也未执行；浏览器技能文件在当前环境缺失，已用组件测试和Docker烟测替代，但尚缺真实浏览器视觉截图；Session/SSE仍是单进程TTL与有界内存实现；演示Header不是完整认证；Java与Python数据库角色尚未隔离
-- 下一阶段：执行M7完整验收`make test`、`make quality`、`make eval-all`，根据真实结果决定是否关闭M7
+- 下一阶段：修正过期版本断言并清理Ruff存量问题，随后重跑`make test`、`make quality`和`make eval-all`，全部通过后关闭M7
