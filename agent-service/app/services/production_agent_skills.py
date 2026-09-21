@@ -558,7 +558,7 @@ class _ProductionSpecificationWorkflow:
                 token_usage=self._collector.total,
             )
 
-
+# skill通过确定性 Dispatcher 分发
 class ProductionAgentSkillDispatcher:
     """把三个只读Skill和唯一写操作Review草稿接入统一Agent Run。"""
 
@@ -599,7 +599,7 @@ class ProductionAgentSkillDispatcher:
                 run_id=request.run_id,
             ),
         )
-        # 确定性分发器(静态确定的skill)
+        # 确定性分发器 (由代码映射到对应处理函数)
         if skill is BusinessSkill.ORDER_STATUS:
             return await self._dispatch_order_status(request, observed_registry)
         if skill is BusinessSkill.DIAGNOSIS:

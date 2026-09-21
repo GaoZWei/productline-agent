@@ -121,7 +121,7 @@ class SpecificationQaWorkflow:
             }
         )
         return cast(SpecificationQaResult, result["result"])
-
+    # 规范问答使用 LangGraph 是可维护性选择，不是因为普通函数无法实现
     def _build_graph(self) -> CompiledStateGraph[Any, Any, Any, Any]:
         builder = StateGraph(_SpecificationQaState)
         builder.add_node("rewrite_query", self.rewrite_query)  # 查询改写函数

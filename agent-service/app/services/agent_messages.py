@@ -60,7 +60,7 @@ _LOGGER = logging.getLogger("agent-service.agent-messages")
 _RESULT_ADAPTER: TypeAdapter[AgentMessageResult] = TypeAdapter(AgentMessageResult)
 OutputT = TypeVar("OutputT", bound=BaseModel)
 
-# 向skill传递的参数
+# 向skill传递的参数（所有 Skill 接收统一的 AgentSkillRequest）
 @dataclass(frozen=True, slots=True)
 class AgentSkillRequest:
     """分发给业务Skill的受控请求, 不把页面或Session提示冒充Java事实。"""
@@ -76,7 +76,7 @@ class AgentSkillRequest:
     first_step_sequence: int  #  Skill内部Step从哪个序号开始
     event_sink: RunEventSink | None  #  向前端发布SSE进度事件的Sink
 
-# skill执行完返回的结果
+# skill执行完返回的结果 （执行后统一返回 AgentSkillExecution）
 @dataclass(frozen=True, slots=True)
 class AgentSkillExecution:
     """Skill结果及其可汇总到Run的最小用量。"""
