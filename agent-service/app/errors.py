@@ -2,8 +2,8 @@
 
 from enum import StrEnum
 
-
-# 定义了9类稳定机器错误码并使用枚举防止错误码拼写错误。
+# 第五层：稳定错误与运行观测
+# 定义了9类稳定机器错误码
 class ToolErrorCode(StrEnum):
     """供 Tool 和 Workflow 分支判断的机器可读错误分类。"""
 

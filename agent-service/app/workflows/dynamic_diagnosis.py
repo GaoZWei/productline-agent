@@ -288,7 +288,7 @@ class DynamicDiagnosisWorkflow:
             "iteration_count": state["iteration_count"] + 1,
         }
 
-    # 二次校验动作决策是否符合注册Tool和状态要求
+    # 二次校验动作决策是否符合注册Tool和状态要求（第二层：执行前门禁）
     async def validate_action(self, state: DynamicDiagnosisState) -> StateUpdate:
         """再次校验动作参数、注册表风险和状态资源归属并生成调用指纹。"""
 

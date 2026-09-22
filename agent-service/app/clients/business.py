@@ -39,8 +39,8 @@ class BusinessResponseValidationError(ValueError):
         self.status_code = status_code
         self.reason = reason
 
-
-# Client 构造过程: BusinessHttpClient 持有一个共享 httpx.AsyncClient
+# 第三层：受控 HTTP 调用
+# Client 构造过程: BusinessHttpClient 持有一个共享 httpx.AsyncClient 
 class BusinessHttpClient:
     """共享一个带连接池的 httpx 客户端并严格校验每个响应。"""
 
@@ -173,7 +173,7 @@ class BusinessHttpClient:
             trace_id=trace_id,
         ) from exc
 
-    # 收到HTTP响应后的分流
+    # 收到HTTP响应后的分流（先看状态码，状态码失败错误信封处理，状态正确为成功响应，进入对应成功处理）
     @classmethod
     def _validate_response(
         cls,
