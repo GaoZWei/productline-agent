@@ -215,7 +215,7 @@ class SpecificationQaWorkflow:
             run_id=self._run_id,
             data=data,
         )
-    # 充足性检查函数
+    # 充足性检查函数（没有完成重排，不调用模型生成结论）
     async def check_relevance(self, state: _SpecificationQaState) -> dict[str, object]:
         """只有完成重排且仍有候选时才允许模型形成规范结论。"""
 

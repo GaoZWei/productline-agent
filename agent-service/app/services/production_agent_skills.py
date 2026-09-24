@@ -512,6 +512,7 @@ class _ProductionSpecificationWorkflow:
                 error_step="answer_specification",
                 token_usage=self._collector.total,
             ) from error
+        # 缺少候选会触发响应校验失败：RERANK_RESPONSE_VALIDATION_ERROR
         except (RerankExecutionError, RerankValidationError) as error:
             error_code = getattr(error, "code", "RERANK_RESPONSE_VALIDATION_ERROR")
             retryable = bool(getattr(error, "retryable", False))

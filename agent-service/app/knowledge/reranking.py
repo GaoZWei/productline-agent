@@ -126,6 +126,7 @@ async def rerank_retrieval_results(
     try:
         async with asyncio.timeout(timeout_seconds):
             raw_response = await reranker.rerank(request)
+    # rerank超时：超时不会继续向下抛异常，而是被转换成结构化降级结果
     except TimeoutError:
         _LOGGER.warning(
             "knowledge_rerank_timeout",
@@ -143,6 +144,7 @@ async def rerank_retrieval_results(
             degraded=True,
             degradation_reason=RerankDegradationReason.TIMEOUT,
         )
+    # 非超时调用失败：模型调用异常捕获处判断（网络错误、Provider 异常等非超时调用失败会进入这里）
     except Exception as error:
         _LOGGER.error(
             "knowledge_rerank_execution_failed",
@@ -211,7 +213,7 @@ def _parse_response(raw_response: object) -> RerankResponse:
         # 解析失败, 抛出异常, 让调用方处理
         raise RerankValidationError("reranker output schema validation failed") from error
 
-
+# 缺少候选会触发响应校验失败：RERANK_RESPONSE_VALIDATION_ERROR
 def _validate_and_index_scores(
     request: RerankRequest,
     response: RerankResponse,

@@ -30,6 +30,7 @@ class ToolRiskLevel(StrEnum):
     HIGH = "HIGH"
 
 
+
 # 所有 Tool 的公共模板（第一层：稳定的 Tool 契约）
 class BaseTool[InputT: BaseModel, OutputT: BaseModel](ABC):
     """在具体业务实现外统一输入、权限、超时、输出和错误处理。"""
