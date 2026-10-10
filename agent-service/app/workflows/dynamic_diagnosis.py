@@ -520,6 +520,7 @@ class DynamicDiagnosisWorkflow:
             )
         except Exception:
             return self._execution_failure(state, decision.action, fingerprint)
+        # 提供规范检索的模版
         return {
             "specification_result": result,
             "pending_observation": AgentObservation(
@@ -533,7 +534,7 @@ class DynamicDiagnosisWorkflow:
             ),
         }
 
-    # 核心事实合并算法 根据动作类型, 把Tool结果放入唯一对应的状态字段
+    # 核心事实合并算法 根据动作类型, 把Tool结果放入唯一对应的状态字段（提供不同行为的模版）
     @staticmethod
     def _merge_business_fact(
         state: DynamicDiagnosisState,
