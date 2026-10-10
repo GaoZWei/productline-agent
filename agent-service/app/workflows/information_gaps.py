@@ -9,7 +9,7 @@ _PRODUCTION_ORDER_STATUSES = frozenset({"PRODUCING"})
 _QUALITY_ORDER_STATUSES = frozenset({"QUALITY_CHECKING"})
 _REVIEW_ORDER_STATUSES = frozenset({"REVIEWING"})
 
-
+# 检查信息缺口：有效订单、关联任务、交付状态、规范问答结果（写明的判断逻辑，固定下来的规则）
 class InformationGapDetector:
     """根据订单阶段和已加载事实返回稳定、可执行的信息缺口。"""
 
