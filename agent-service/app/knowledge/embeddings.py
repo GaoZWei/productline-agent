@@ -308,7 +308,8 @@ class QueryEmbedding:
     vector: tuple[float, ...]
 
 
-# Embedding 批处理和有限重试机制 不会边生成边写库，而是先收集并校验所有批次的结果，只有所有批次都成功，结果才会交给 Repository
+# Embedding批处理和有限重试机制先收集、校验所有批次的结果。
+# 全部成功后才交给Repository，避免边生成边写库。
 class EmbeddingBatchGenerator:
     """按配置分批生成全部Chunk向量, 只有限重试明确瞬时错误。"""
 

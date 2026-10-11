@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Annotated
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, field_validator
+
 # 事件Schema stream_id：页面在执行前生成，用于先建立连接
 EventStreamIdentifier = Annotated[
     str,
@@ -68,7 +69,8 @@ class RunEvent(BaseModel):
     sequence_number: Annotated[int, Field(ge=1)]  # 流内严格递增顺序
     occurred_at: AwareDatetime
     trace_id: Annotated[str, Field(min_length=1, max_length=128)]  # 对应触发该事件的HTTP请求ID
-    step_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None  # Tool事件对应哪个数据库Step
+    # Tool事件对应的数据库Step。
+    step_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     data: dict[str, JsonValue] = Field(default_factory=dict)  # 受控的阶段摘要
     # 安全校校验data字段
     @field_validator("data")

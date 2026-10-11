@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 
+
 # 第五层：稳定错误与运行观测
 # 定义了9类稳定机器错误码
 class ToolErrorCode(StrEnum):

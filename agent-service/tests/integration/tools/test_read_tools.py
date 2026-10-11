@@ -119,7 +119,7 @@ READ_TOOL_CASES = (
                     "issueType": "COORDINATE_SYSTEM",
                     "status": "OPEN",
                     # 固定业务响应原文不能为了静态检查改变标点。
-                    "description": "成果坐标系与生产规范要求不一致，问题尚未处理。",  # noqa: RUF001
+                    "description": "成果坐标系与生产规范要求不一致，问题尚未处理。",
                 }
             ],
         },

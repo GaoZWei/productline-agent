@@ -133,7 +133,8 @@ def evaluate_agent_metrics(
         e2e_successes=e2e_successes,
         e2e_success_rate=e2e_successes / total_cases, # E2E成功率 = 成功用例数 ÷ 全部用例数
         total_executed_tool_calls=total_executed_tool_calls,
-        average_tool_call_count=total_executed_tool_calls / total_cases, # 平均Tool调用数 = 已执行Tool调用总数 ÷ 全部用例数
+        # 平均Tool调用数 = 已执行Tool调用总数 ÷ 全部用例数
+        average_tool_call_count=total_executed_tool_calls / total_cases,
         total_tool_call_attempts=total_tool_call_attempts,
         invalid_tool_call_attempts=invalid_tool_call_attempts,
         invalid_tool_call_rate=_rate(
@@ -156,5 +157,5 @@ def evaluate_agent_metrics(
         blocking_stage_accuracy=_rate(
             blocking_stage_correct_cases,
             len(stage_outcomes),
-        ), # 阻塞阶段正确率 = actual_blocking_stage与expected_blocking_stage相等的数量 ÷ 有预期阶段的用例数
+        ),  # 阻塞阶段正确率 = 正确阶段数 ÷ 有预期阶段的用例数
     )

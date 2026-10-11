@@ -15,7 +15,8 @@ class VersionCaptureStatus(StrEnum):
     """区分新 Run 的完整快照与迁移前无法还原的历史记录。"""
 
     CAPTURED = "CAPTURED"  # 这是新代码创建的 Run，所有版本信息都已完整保存
-    UNAVAILABLE_LEGACY = "UNAVAILABLE_LEGACY"  # 这是数据库迁移前已经存在的 Run，无法确定当时真正使用的版本
+    # 数据库迁移前的Run无法确定当时实际使用的版本。
+    UNAVAILABLE_LEGACY = "UNAVAILABLE_LEGACY"
 
 
 class VersionSnapshotSchema(BaseModel):
@@ -89,7 +90,8 @@ class RunVersionSnapshot(VersionSnapshotSchema):
             self.tool_schema,
             self.rag_strategy,
         )
-        if self.capture_status is VersionCaptureStatus.CAPTURED:  # 新快照必须字段齐全，不允许半完整保存
+        # 新快照必须字段齐全，不允许半完整保存。
+        if self.capture_status is VersionCaptureStatus.CAPTURED:
             if any(component is None for component in components):
                 raise ValueError("captured version snapshot requires every component")
         elif any(component is not None for component in components):

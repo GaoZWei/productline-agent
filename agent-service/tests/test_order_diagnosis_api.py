@@ -477,7 +477,7 @@ async def test_order_diagnosis_api_persists_successful_run_and_returns_golden_re
         assert run.status is AgentRunStatus.SUCCEEDED
         assert run.final_result == payload["diagnosis"]
         assert run.version_snapshot["capture_status"] == "CAPTURED"
-        assert run.version_snapshot["router_prompt_version"] == "router-v3"
+        assert run.version_snapshot["router_prompt_version"] == "router-v4"
         assert run.version_snapshot["agent_prompt_version"] == "action-decision-v1"
         assert run.version_snapshot["model"]["configured"] is False
         assert run.version_snapshot["tool_schema"]["tool_names"] == [

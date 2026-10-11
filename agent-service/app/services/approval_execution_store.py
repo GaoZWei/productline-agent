@@ -12,6 +12,7 @@ from app.repositories import ApprovalRecordRepository
 from app.schemas import ReviewDraft
 from app.services.approval_lifecycle import ApprovalLifecycleService
 
+
 # 只包含写Tool执行所需的最小数据
 @dataclass(frozen=True, slots=True)
 class ApprovalExecutionSnapshot:

@@ -3,6 +3,7 @@
 from app.schemas.model_capabilities import ModelCapabilitiesResponse
 from app.settings import Settings
 
+
 # 能力查询服务
 class ModelCapabilityService:
     """隔离Settings与HTTP响应, 避免路由误返回地址或密钥。"""

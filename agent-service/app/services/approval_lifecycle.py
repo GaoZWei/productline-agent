@@ -300,7 +300,7 @@ class ApprovalLifecycleService:
 
         value = (
             approval.user_modified_draft
-            if approval.user_modified_draft is not None # 有用户修改就使用用户修改副本，否则使用原始Agent草稿
+            if approval.user_modified_draft is not None  # 优先使用用户修改副本
             else approval.original_draft
         )
         return ApprovalLifecycleService._review_draft(value, "effective_draft")

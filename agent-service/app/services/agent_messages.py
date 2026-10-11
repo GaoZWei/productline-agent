@@ -82,7 +82,8 @@ class AgentSkillExecution:
     """Skill结果及其可汇总到Run的最小用量。"""
 
     result: AgentMessageResult
-    token_usage: RunTokenUsage = field(default_factory=RunTokenUsage)  #  Skill内部模型Token使用量, 由Skill内部的ObservedModelInvoker收集
+    # Skill内部的ObservedModelInvoker收集模型Token用量。
+    token_usage: RunTokenUsage = field(default_factory=RunTokenUsage)
     tool_call_count: int = 0  #  Java Tool调用次数
     termination_reason: str = "COMPLETED"  #  动态Agent真实终止原因
     # Review草稿已将当前Run推进到WAITING_APPROVAL。

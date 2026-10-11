@@ -81,7 +81,7 @@ def test_catalog_metadata_paths_and_demo_markers_are_stable() -> None:
         content = markdown_path.read_text(encoding="utf-8")
         assert markdown_path.suffix == ".md"
         assert content.startswith("# ")
-        assert "> 演示规范数据，非真实行业标准。" in content  # noqa: RUF001
+        assert "> 演示规范数据，非真实行业标准。" in content
         assert len(content.splitlines()) >= 12
 
     cataloged_markdown = {(_KNOWLEDGE_ROOT / path).resolve() for path in file_paths}

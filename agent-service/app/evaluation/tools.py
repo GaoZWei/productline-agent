@@ -39,16 +39,20 @@ class ToolEvaluationReport(_ToolEvaluationSchema):
 
     total_cases: Annotated[int, Field(gt=0)]
     initial_validation_passed: Annotated[int, Field(ge=0)]
-    initial_validation_pass_rate: Annotated[float, Field(ge=0.0, le=1.0)] # 首次校验通过率： 首次参数合法数 ÷ 总用例数
+    # 首次校验通过率：首次参数合法数 ÷ 总用例数
+    initial_validation_pass_rate: Annotated[float, Field(ge=0.0, le=1.0)]
     initial_validation_failed: Annotated[int, Field(ge=0)]
     corrected_successes: Annotated[int, Field(ge=0)]
-    correction_success_rate: Annotated[float, Field(ge=0.0, le=1.0)] # 纠错成功率： 首次失败但最终成功数 ÷ 首次失败数
+    # 纠错成功率：首次失败但最终成功数 ÷ 首次失败数
+    correction_success_rate: Annotated[float, Field(ge=0.0, le=1.0)]
     final_call_successes: Annotated[int, Field(ge=0)]
-    final_valid_call_success_rate: Annotated[float, Field(ge=0.0, le=1.0)] # 最终调用成功率： 最终成功数 ÷ 总用例数
+    # 最终调用成功率：最终成功数 ÷ 总用例数
+    final_valid_call_success_rate: Annotated[float, Field(ge=0.0, le=1.0)]
     total_retries: Annotated[int, Field(ge=0)]
     average_retry_count: Annotated[float, Field(ge=0.0)] # 平均重试次数： 总重试次数 ÷ 总用例数
     duplicate_call_cases: Annotated[int, Field(ge=0)]
-    duplicate_call_rate: Annotated[float, Field(ge=0.0, le=1.0)] # 重复调用率： 出现重复调用的用例数 ÷ 总用例数
+    # 重复调用率：出现重复调用的用例数 ÷ 总用例数
+    duplicate_call_rate: Annotated[float, Field(ge=0.0, le=1.0)]
 
 
 class ToolEvaluationDataError(ValueError):

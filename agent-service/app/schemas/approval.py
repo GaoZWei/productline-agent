@@ -26,7 +26,8 @@ class ReworkType(StrEnum):
     COORDINATE_SYSTEM_FIX = "COORDINATE_SYSTEM_FIX"
 
 # 字段类型和长度限制
-ConclusionValue = Annotated[Conclusion, Field(strict=False)]  # 复核结论, strict=False允许Pydantic把合法字符串转换为枚举值
+# strict=False允许Pydantic把合法字符串转换为复核结论枚举值。
+ConclusionValue = Annotated[Conclusion, Field(strict=False)]
 ReworkTypeValue = Annotated[ReworkType, Field(strict=False)]
 ProblemSummary = Annotated[str, Field(min_length=1, max_length=2048)]  # 用于描述本次复核发现的问题
 ReviewComment = Annotated[str, Field(min_length=1, max_length=1000)]  # 复核评论

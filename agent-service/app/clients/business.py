@@ -173,7 +173,8 @@ class BusinessHttpClient:
             trace_id=trace_id,
         ) from exc
 
-    # 收到HTTP响应后的分流（先看状态码，状态码失败错误信封处理，状态正确为成功响应，进入对应成功处理）
+    # 收到HTTP响应后按状态码分流。
+    # 失败时解析错误信封，成功时进入对应响应处理。
     @classmethod
     def _validate_response(
         cls,

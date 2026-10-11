@@ -249,7 +249,8 @@ class CreateReworkTaskTool(
         if (
             draft.conclusion.value != "REWORK_REQUIRED"  # 需要满足复核结论 = REWORK_REQUIRED
             or not draft.suggested_rework.required  # 需要满足建议返工 = true
-            or rework_type is not ReworkType.COORDINATE_SYSTEM_FIX  #  需要满足返工类型 = COORDINATE_SYSTEM_FIX
+            # 当前仅支持坐标系返工。
+            or rework_type is not ReworkType.COORDINATE_SYSTEM_FIX
         ):
             self._raise(
                 ToolErrorCode.BUSINESS_CONFLICT,

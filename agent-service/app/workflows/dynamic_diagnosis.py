@@ -547,7 +547,8 @@ class DynamicDiagnosisWorkflow:
         if action is AgentAction.QUERY_TASKS and isinstance(data, TaskList):
             tasks = [
                 TaskDetail.model_validate(item.model_dump(by_alias=True))
-                for item in sorted(data.tasks, key=lambda item: item.task_id) #任务顺序排序（java tool返回任务列表后，写入workflow之前统一处理）
+                # 写入Workflow前按任务ID排序，保证Java返回顺序不影响诊断。
+                for item in sorted(data.tasks, key=lambda item: item.task_id)
             ]
             return {"tasks": tasks}, f"已读取关联任务数量={len(tasks)}", tasks != state["tasks"]
         task_id = cast(str, decision.tool_arguments.get("task_id"))

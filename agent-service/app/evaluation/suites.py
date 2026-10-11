@@ -39,6 +39,7 @@ from app.evaluation.tools import (
     ToolEvaluationReport,
     evaluate_tool_metrics,
 )
+
 # 固定注册七类评测
 STANDARD_EVALUATION_SUITE_NAMES = (
     "router",
