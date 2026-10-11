@@ -126,7 +126,7 @@ class ActionDecider:
             # 第三步：解析模型输出
             try:
                 decision = parse_action_decision(raw_output)
-                # 第四步：校验Tool与资源校验
+                # 第四步：校验Tool与资源校验（检验tool是否已经注册、是否制度、参数是否符合要求）
                 return _validate_registered_tool(decision, self._registry, state)
             # 决策非法时如何重试：纠错一次
             except InvalidActionDecisionOutputError:
