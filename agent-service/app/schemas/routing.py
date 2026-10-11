@@ -53,7 +53,7 @@ class RoutingSchema(BaseModel):
         str_strip_whitespace=True,
     )
 
-
+# 定义路由结果允许有哪些字段
 # 模型允许提取的“业务指代”, 用于后续业务Skill调用。
 class RouterEntities(RoutingSchema):
     """路由阶段允许提取的最小业务实体, 不承载 Java 事实快照。"""
