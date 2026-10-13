@@ -270,6 +270,7 @@ def _quality_review_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
                         description=f"{record.delivery_id}交付状态为{record.status}",
                     )
                 )
+    # 确定性规则，生成对应的问题建议
     if any(issue.issue_type == "COORDINATE_SYSTEM" for _, _, issue in issues):
         suggestions.append(
             Suggestion(
