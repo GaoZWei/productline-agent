@@ -42,7 +42,7 @@ def parse_router_result(raw_output: object) -> RouterResult:
     except ValidationError as error:
         raise InvalidRouterOutputError("router output schema validation failed") from error
 
-# 实体原文证据校验
+# 实体原文证据校验（去用户原话里找对应编号在哪里实现的）
 def validate_user_message_entity_evidence(
     user_message: str,
     result: RouterResult,
