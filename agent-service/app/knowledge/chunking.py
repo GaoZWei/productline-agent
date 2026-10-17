@@ -71,12 +71,15 @@ class HeadingDocumentChunker:
         chunks: list[DocumentChunk] = []
         signature_occurrences: dict[tuple[tuple[str, ...], str], int] = {}
         for chunk_index, (section_path, content) in enumerate(fragments):
+            # 计算正文 content_hash
             content_hash = sha256(content.encode("utf-8")).hexdigest()
             signature = (section_path, content_hash)
+            # 重复出现次数
             occurrence = signature_occurrences.get(signature, 0)
             signature_occurrences[signature] = occurrence + 1
             chunks.append(
                 DocumentChunk(
+                    # 调用稳定ID算法生成分块ID
                     chunk_id=_stable_chunk_id(
                         document_id=document.metadata.document_id,
                         section_path=section_path,
@@ -208,7 +211,7 @@ def _count_lexical_tokens(content: str) -> int:
 
     return len(_TOKEN_PATTERN.findall(content))
 
-# 稳定Chunk ID算法
+# 稳定Chunk ID算法(不依赖位置,在前面插入别的东西，也不会影响当前片段的id，但是标题会修改id，内容会修改id)
 def _stable_chunk_id(
     *,
     document_id: str,

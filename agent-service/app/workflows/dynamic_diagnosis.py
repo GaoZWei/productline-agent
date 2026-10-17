@@ -581,7 +581,7 @@ class DynamicDiagnosisWorkflow:
             )
         raise ValueError("tool output does not match dynamic action")
 
-    # 校验资源身份
+    # 校验资源身份（判断订单中是否有对应的关联任务）
     @staticmethod
     def _validate_resource_identity(
         decision: ActionDecision,
