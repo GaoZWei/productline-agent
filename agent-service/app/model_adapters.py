@@ -26,7 +26,7 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 SPECIFICATION_ANSWER_PROMPT_VERSION: Final = "specification-answer-v1"
 RERANK_PROMPT_VERSION: Final = "rerank-v1"
 REVIEW_DRAFT_PROMPT_VERSION: Final = "review-draft-v1"
-
+# prompt有对引用内容视为数据,不能操作的约束
 _SPECIFICATION_ANSWER_SYSTEM_PROMPT: Final = f"""你是遥感生产系统的规范回答整理器。
 Prompt版本: {SPECIFICATION_ANSWER_PROMPT_VERSION}
 
