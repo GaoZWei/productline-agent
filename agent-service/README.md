@@ -98,6 +98,32 @@ make knowledge-ingest
 `INDEX_MISMATCH`或`READY`。只有数据库中的文档身份与当前16份catalog完全一致、每份文档至少有一个Chunk，且
 所有文档的Provider、模型、1536维度和索引版本均与当前配置一致时才返回`ready=true`；该查询不会探测外部网络。
 
+## 千问 Embedding 配置
+
+使用`qwen3.7-text-embedding`时，在根目录`.env`设置以下参数；地址和密钥从百炼控制台取得，
+示例地址中的`YOUR_WORKSPACE_ID`必须替换，其他地域使用对应的OpenAI兼容地址：
+
+```dotenv
+EMBEDDING_PROVIDER=openai_compatible
+EMBEDDING_MODEL=qwen3.7-text-embedding
+EMBEDDING_BASE_URL=https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+EMBEDDING_API_KEY=
+EMBEDDING_DIMENSION=1536
+EMBEDDING_BATCH_SIZE=20
+EMBEDDING_INDEX_VERSION=qwen3.7-text-embedding-1536-v1
+```
+
+Provider显式接纳兼容响应的请求`id`及缺失的`usage.prompt_tokens`，但不补造用量；总Token、
+向量数量、索引顺序、1536维度和有限数值仍须通过校验。模型切换须更新索引身份并重新生成文档向量，
+不能只修改数据库标签；文档和查询向量必须使用相同配置。
+
+配置不会自动更新已经运行的容器；完成地址和密钥后再重建或重新创建Agent服务。正式入库前先验证一次
+真实请求的1536维输出，因为当前官方模型表与接口参数说明对该维度的支持描述存在差异；
+本地模拟响应测试不代表远端接口或检索效果已验证。
+
+参考：[百炼模型规格](https://help.aliyun.com/zh/model-studio/embedding)、
+[兼容接口契约](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api)。
+
 ## Java HTTP Client
 
 `app.clients.business.BusinessHttpClient` 在 FastAPI lifespan 中创建和关闭，共享连接池，

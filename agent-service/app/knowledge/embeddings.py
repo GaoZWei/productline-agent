@@ -154,13 +154,16 @@ class _EmbeddingItem(BaseModel):
 class _EmbeddingUsage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    prompt_tokens: Annotated[int, Field(ge=0)]
+    # 百炼可能只返回总量, 缺少输入量时保留缺失, 不补造供应商用量。
+    prompt_tokens: Annotated[int, Field(ge=0)] | None = None
     total_tokens: Annotated[int, Field(ge=0)]
 
 
 class _EmbeddingResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # 只显式接纳兼容接口的请求标识, 其他未知字段仍由Schema拒绝。
+    id: Annotated[str, Field(min_length=1, max_length=256)] | None = None
     object: Literal["list"]
     data: tuple[_EmbeddingItem, ...]
     model: Annotated[str, Field(min_length=1)]

@@ -129,6 +129,78 @@ async def test_provider_sends_official_batch_contract_and_reorders_indices() -> 
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "usage",
+    [{"total_tokens": 8}, {"prompt_tokens": 8, "total_tokens": 8}],
+)
+async def test_provider_accepts_qwen_request_id_and_optional_prompt_tokens(
+    usage: dict[str, int],
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        captured["path"] = request.url.path
+        return httpx.Response(
+            200,
+            json={
+                "id": "qwen-request-001",
+                "object": "list",
+                "data": [{"object": "embedding", "index": 0, "embedding": _vector(1.0)}],
+                "model": "qwen3.7-text-embedding",
+                "usage": usage,
+            },
+        )
+
+    async with _provider(
+        httpx.MockTransport(handler),
+        config=_config(
+            model="qwen3.7-text-embedding",
+            batch_size=20,
+            base_url=AnyHttpUrl("https://embedding.example/compatible-mode/v1"),
+        ),
+    ) as provider:
+        vectors = await provider.embed(("坐标系问题处理要求",))
+
+    assert captured["model"] == "qwen3.7-text-embedding"
+    assert captured["path"] == "/compatible-mode/v1/embeddings"
+    assert captured["dimensions"] == EMBEDDING_DIMENSION
+    assert captured["encoding_format"] == "float"
+    assert len(vectors[0]) == EMBEDDING_DIMENSION
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_case", ["missing_total", "negative_total", "unknown_field"])
+async def test_qwen_compatibility_keeps_response_validation(invalid_case: str) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body: dict[str, object] = {
+            "id": "qwen-request-001",
+            "object": "list",
+            "data": [{"object": "embedding", "index": 0, "embedding": _vector(1.0)}],
+            "model": "qwen3.7-text-embedding",
+            "usage": {"total_tokens": 8},
+        }
+        if invalid_case == "missing_total":
+            body["usage"] = {}
+        elif invalid_case == "negative_total":
+            body["usage"] = {"total_tokens": -1}
+        else:
+            body["unexpected_payload"] = "not part of the embedding contract"
+        return httpx.Response(200, json=body)
+
+    async with _provider(
+        httpx.MockTransport(handler), config=_config(model="qwen3.7-text-embedding")
+    ) as provider:
+        with pytest.raises(EmbeddingProviderError) as caught:
+            await provider.embed(("正文",))
+
+    assert caught.value.code is EmbeddingErrorCode.INVALID_RESPONSE
+    assert caught.value.retryable is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("status_code", "expected_code", "retryable"),
     [
         (401, EmbeddingErrorCode.AUTHENTICATION, False),
