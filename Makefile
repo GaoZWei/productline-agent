@@ -3,6 +3,8 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
+.PHONY: provider-smoke test-provider-smoke
+
 .PHONY: help config validate test smoke test-agent-foundation test-agent-client test-agent-errors test-agent-tool-protocol test-tools test-agent-persistence test-run-lifecycle test-step-lifecycle test-sse-events test-run-timeline test-run-history test-model-runtime test-model-adapters knowledge-ingest test-knowledge-ingestion test-agent-messages test-agent-read-skills test-agent-review test-agent-page test-agent-java-fault-matrix test-agent-remaining-fault-matrix test-agent-fault-matrix test-eval-runner test-eval-framework test-eval-metrics eval-all eval-report test-workflow-schemas test-workflow-nodes test-diagnosis-rules test-diagnosis-generation test-diagnosis-api test-page-context test-session-context test-intent-routing test-router-prompt eval-router test-knowledge-docs test-knowledge-models test-knowledge-loading test-knowledge-embedding test-knowledge-keyword test-knowledge-vector test-knowledge-filters test-knowledge-hybrid test-knowledge-rerank test-knowledge-citations test-specification-qa eval-rag test-approval test-agent-e2e quality agent-migrate test-business-domain test-business-data test-java-contract test-java-write test-java-errors test-java-faults test-web build-web dev dev-business dev-agent dev-web down logs ps reset-demo
 
 help: ## 显示可用命令
@@ -73,6 +75,12 @@ knowledge-ingest: ## 显式全量重建16份演示规范的Embedding索引
 	$(COMPOSE) build agent-service
 	$(COMPOSE) run --rm --no-deps agent-service /service/.venv/bin/alembic upgrade head
 	$(COMPOSE) run --rm --no-deps agent-service /service/.venv/bin/python -m app.cli.knowledge_ingest --knowledge-root /knowledge-base
+
+provider-smoke: ## 只读真实Provider烟测, 默认各调用一次对话和Embedding接口并消耗Token
+	cd agent-service && uv run --frozen python -m app.cli.provider_smoke $(ARGS)
+
+test-provider-smoke: ## 离线验证Provider烟测预算、错误、脱敏和退出码
+	cd agent-service && uv run --frozen pytest -q tests/test_provider_smoke.py
 
 test-knowledge-ingestion: ## 验证 M7.6-C全量入库、幂等重建、CLI退出码和索引就绪能力
 	cd agent-service && uv run --frozen pytest -q tests/test_knowledge_ingestion.py tests/test_knowledge_index_capabilities.py

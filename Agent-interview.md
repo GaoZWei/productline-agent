@@ -14,7 +14,7 @@
 ## 2. 第一批：跑通真实完整链路（与核心表达同步推进）
 
 - [x] 核对 Java、数据库、模型与 Embedding 配置（千问本地单条真实请求已通过；运行容器待更新）。
-- [ ] 补充只读的真实 Provider 烟测入口。
+- [x] 补充只读的真实 Provider 烟测入口（`make provider-smoke`；本机两类真实接口均通过）。
 - [ ] 执行真实 Embedding 入库，确认索引为 `READY`。
 - [ ] 验证规范问答：检索 → Rerank → 回答 → 人工核对引用。
 - [ ] 验证 `ORDER-003` 真实模型动态诊断。
@@ -31,12 +31,18 @@
 
 - Java、Agent 健康接口均为 `200 / UP`；PostgreSQL 正常，Compose 与运行中 Agent 配置一致。
 - 数据库：PostgreSQL 16.14、pgvector 0.8.5；Java 迁移至 V3，Agent 至 `0014_review_source_run`，与代码一致。
-- 对话模型：`deepseek-v4-flash`、`json_object`、思考模式关闭，密钥已填；仅确认配置有效，未调用远端模型。
+- 对话模型：配置核对时仅确认 `deepseek-v4-flash`、`json_object`、思考模式关闭及密钥已填；后续真实调用结果见下方。
 - 修改前的运行容器：Embedding为 `text-embedding-3-small`、密钥为空，知识索引 `NOT_INDEXED`，文档与 Chunk 均为 0。
 - 启动注意：Docker 命令未加入当前 PATH；本机直启时根 `.env` 的数据库容器地址及密码不适用，且从 `agent-service` 目录启动不会自动读取根 `.env`；当前 Docker 启动配置正常。
 - 配置变更：本地已选 `qwen3.7-text-embedding`、1536维、批次20及独立索引版本；已补请求ID与可缺省输入Token的响应适配，41项相关测试、局部Ruff和mypy通过。
 - 本地百炼地址和密钥已配置；单条真实请求HTTP 200，返回模型匹配 `qwen3.7-text-embedding`，1536维向量有效且非零，通过现有Provider校验，接口报告26个输入Token，单次耗时约221毫秒，不代表性能或检索质量评测。
-- 运行中Agent仍使用旧模型、批次32、空密钥和旧响应Schema；下一步重建并重新创建Agent容器，再完成只读烟测入口和真实入库，本次未更新容器或写数据库。
+- 2026-10-18只读检查时，运行中Agent仍使用旧模型、批次32、空密钥和旧响应Schema；下一步重建并重新创建Agent容器，再验证容器配置和真实入库，本次未更新容器或写数据库。
+
+### 只读真实Provider烟测（2026-10-19）
+
+- 已提供 `make provider-smoke`，支持 `--target chat/embedding/all` 和 `--env-file`，默认显式加载根 `.env`，只输出脱敏JSON；两类各一次请求且不自动重试，不连接数据库、不创建Run/Step或Approval。
+- 本机真实检查全部通过：对话请求 `deepseek-v4-flash`，返回 `deepseek-flash`，输入128、输出5、总133 Token；Embedding模型匹配，1536维有效向量，输入及总量26 Token。仅证明本机最小协议可用，未验证五个适配器和运行容器。
+- 下一项：更新Agent容器并核对其配置，执行真实Embedding全量入库，确认索引 `READY`。
 
 ## 3. 第二批：补评测与异常验证
 

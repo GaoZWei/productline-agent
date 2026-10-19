@@ -170,6 +170,16 @@ class _EmbeddingResponse(BaseModel):
     usage: _EmbeddingUsage
 
 
+@dataclass(frozen=True, slots=True)
+class EmbeddingCallResult:
+    """一次校验通过的向量响应及供应商实际报告的用量。"""
+
+    vectors: tuple[tuple[float, ...], ...]
+    model_name: str
+    input_tokens: int | None
+    total_tokens: int
+
+
 class OpenAICompatibleEmbeddingProvider:
     """调用官方Embeddings JSON契约兼容端点并严格校验向量。"""
 
@@ -201,6 +211,11 @@ class OpenAICompatibleEmbeddingProvider:
     async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         """批量调用兼容端点, 按响应index恢复输入顺序。"""
 
+        return (await self.embed_with_usage(texts)).vectors
+    # 复用向量校验并返回实际用量
+    async def embed_with_usage(self, texts: Sequence[str]) -> EmbeddingCallResult:
+        """复用相同请求与向量门禁, 额外返回用量而不改变既有Provider协议。"""
+
         normalized_texts = tuple(texts)
         if not normalized_texts or any(not text.strip() for text in normalized_texts):
             raise ValueError("embedding input must contain non-empty text")
@@ -231,7 +246,13 @@ class OpenAICompatibleEmbeddingProvider:
         self._raise_http_error(response)
         try:
             payload = _EmbeddingResponse.model_validate_json(response.content)
-            return self._ordered_vectors(payload, expected_count=len(normalized_texts))
+            vectors = self._ordered_vectors(payload, expected_count=len(normalized_texts))
+            return EmbeddingCallResult(
+                vectors=vectors,  # 校验后的向量响应
+                model_name=payload.model,  # 接口返回的模型名
+                input_tokens=payload.usage.prompt_tokens,  # 接口报告的输入Token，允许缺失
+                total_tokens=payload.usage.total_tokens,  # 接口报告的总Token
+            )
         except (ValidationError, ValueError) as exc:
             raise EmbeddingProviderError(
                 code=EmbeddingErrorCode.INVALID_RESPONSE,

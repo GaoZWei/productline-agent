@@ -66,6 +66,40 @@ MODEL_THINKING_MODE=disabled
 MODEL_API_KEY=通过本地环境提供，不提交到仓库
 ```
 
+## 只读真实Provider烟测
+
+在仓库根目录执行, 默认对话模型和Embedding各发送一个固定小请求:
+
+```bash
+make provider-smoke
+make provider-smoke ARGS="--target embedding"
+make provider-smoke ARGS="--target chat --env-file /absolute/path/to/local.env"
+```
+
+该命令在本机运行, 默认显式读取仓库根`.env`, 进程环境变量优先; 指定的环境文件不存在时返回配置错误。
+已有Python环境也可直接从`agent-service`执行`.venv/bin/python -m app.cli.provider_smoke`。
+命令不启动服务、不加载数据库、不调用Java Tool、不创建Run/Step或Approval, 不写知识索引;
+它仍会访问外部模型并产生少量Token消耗。HTTP等待上限30秒, 对话输出上限64 Token, 两类检查均关闭自动重试。
+服务启动、健康检查及普通测试不会自动触发此命令, 无须运行数据库迁移。
+
+调用流为CLI读取Settings → 现有Chat Client/Embedding Provider → 严格响应校验 → 终端JSON报告。
+报告只包含目标、请求及返回模型、成功状态、耗时、接口提供的用量或稳定错误码, 不含地址、密钥、Prompt、
+模型回答正文或向量。Embedding缺少输入Token时输出`null`, 不把总Token冒充输入Token。
+对话接口可能返回不同的模型名称, 通过`model_matches`公开差异而不把名称相等作为结构化调用成功条件;
+Embedding模型不匹配则返回`EMBEDDING_MODEL_MISMATCH`, 避免把不同向量空间误判为通过。
+
+退出码: `0`全部通过, `2`配置文件或Settings非法, `3`任一Provider检查失败。
+缺少单项配置也会失败, 但不会跳过另一个选中检查。检查仅覆盖最小结构化输出和单条向量响应,
+不代表五个模型适配器、批量入库、检索质量或完整业务链路已验证。
+该命令检查的是当前命令进程, 本机通过不证明已运行的Docker容器加载了同一配置和代码。
+更新容器后, 可在容器内通过`/service/.venv/bin/python -m app.cli.provider_smoke`单独检查其环境。
+
+2026-10-19本地真实检查两项通过: 对话请求`deepseek-v4-flash`, 返回`deepseek-flash`,
+输入128、输出5、总133 Token; 千问`qwen3.7-text-embedding`返回一条1536维向量, 输入及总量26 Token。
+这是一次连通和协议检查, 不构成效果或性能指标。
+
+离线检查命令为`make test-provider-smoke`, 使用HTTP替身覆盖错误和预算边界, 不产生远端Token消耗。
+
 ## 现有模型Protocol适配器
 
 `app.model_adapters`在公共Client之上分别实现Router、动态Action、规范回答、Rerank和Review草稿五个既有Protocol。

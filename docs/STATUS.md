@@ -1,17 +1,18 @@
 # 当前开发状态
 
 - 当前里程碑：M7运行观测、生产闭环集成与统一评测（已完成并通过完整验收）
-- 当前子阶段：M7完整验收已通过，按里程碑停止线等待下一阶段范围确认
+- 当前子阶段：M7完整验收已通过；按用户授权补充只读真实Provider烟测入口，未进入新里程碑
 - 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T793，以及M7.7场景01～24、M7.9全部领域指标
 - 当前场景：订单页统一Agent抽屉通过`POST /api/agent/messages`承载状态、动态诊断、规范问答、受控澄清和Review Approval五类结果；同一订单复用Session，每轮消息及确认创建独立SSE，切换订单隔离迟到响应；Review写回与返工分别确认，固定诊断仍作为显式入口保留
 - 通过测试：2026-10-11 `make test`完整通过，含三端smoke、Agent隔离PostgreSQL持久化52/52、Java测试59/59、前端64/64及生产构建；`make quality`的Ruff通过，mypy检查203个源文件无问题；`make eval-all`两组24/24与58/58通过；补充验收中隔离Java+PostgreSQL Agent E2E 16/16、24场景矩阵的Java链路8/8与Python异常检查23/23、统一页面组件32/32、隔离PostgreSQL链路1/1及Docker烟测通过
 - 失败测试：无；本次修正过期Router Prompt版本断言，并清理当前检出版本的148项Ruff错误（126项`RUF003`、16项`E501`、6项`I001`）
-- 当前阻塞：M7完整验收无阻塞；本地百炼地址及密钥已配置，千问单条真实请求已通过；运行中Agent仍为旧模型、空密钥及旧响应Schema，需重建并重新创建容器后继续烟测与入库，知识库尚未生成真实索引
+- 当前阻塞：本次只读Provider烟测无阻塞，本机对话与Embedding真实请求均通过；2026-10-18最近一次容器检查仍为旧Embedding模型、空密钥及旧响应Schema，本次未部署，需重建并重新创建容器后验证其配置并入库，知识库尚未生成真实索引
 - 开发环境：OpenJDK 21.0.12、Maven 3.9.16、Python 3.12.13（uv 管理）、uv 0.12.0、Node.js 22.22.2、npm 10.9.7、Docker Desktop 29.6.2
-- 最近更新：2026-10-18使用本地配置经现有Embedding Provider发出一次真实请求，HTTP200、模型匹配、1536维有效非零向量及Schema校验通过，接口报告26个输入Token，单次约221毫秒；只读确认运行容器尚未加载新配置代码，本次未入库或重建容器
+- 最近更新：2026-10-19新增`make provider-smoke`，默认显式读取根`.env`，Chat/Embedding各一个固定请求、无自动重试、不连接数据库、不执行Tool/Approval、不保存Run/Step；本机真实调用两项通过，对话请求`deepseek-v4-flash`返回`deepseek-flash`，输入128、输出5、总133 Token，约1142毫秒；Embedding模型匹配、1536维有效向量，输入及总量26 Token，约289毫秒，均为单次观测而非效果或性能指标
+- 本次验证：`UV_CACHE_DIR=/tmp/productline-agent-uv-cache make test-provider-smoke`18/18；在`agent-service`运行`.venv/bin/pytest -q tests/test_provider_smoke.py tests/test_model_client.py tests/knowledge/test_embedding_provider.py tests/knowledge/test_embedding_batching.py tests/test_knowledge_ingestion.py tests/test_knowledge_index_capabilities.py tests/test_diagnosis_rules.py`72/72；`.venv/bin/ruff check app/cli/provider_smoke.py app/knowledge/embeddings.py tests/test_provider_smoke.py`通过，`.venv/bin/mypy app/cli/provider_smoke.py app/knowledge/embeddings.py tests/test_provider_smoke.py`检查3个文件通过；真实命令`.venv/bin/python -m app.cli.provider_smoke`退出0，本次未运行全仓测试、更新容器或写数据库
 - 面试准备进度：Q01～Q38主回答及各自追问均已同步到`Agent-Answer.md`及相关`Agent-Optimization.md`分类记录，本轮问题梳理完成38/40；Q20追问3明确规范文本不自动执行、动态诊断只读门禁和独立Approval确认及Java最终校验，恶意文档仍可能污染回答草稿且注入对抗效果需补充验证，不能声称全面防住提示注入；Q39和Q40按用户要求继续暂缓且仍未完成，不自动恢复，安排记录于`Agent-Question-Plan.md`；简历PDF待统一修改，后续可复习已同步答案并统一处理简历修改记录，本次仅同步文档，未运行代码测试
 - 近期面试准备：`Agent-interview.md`首项配置核对已完成；2026-10-18配置修改前只读验证Java与Agent健康接口200/UP、PostgreSQL16.14及pgvector0.8.5、Java迁移V3和Agent迁移`0014_review_source_run`与代码一致，当时Compose与运行中Agent配置一致；模型`deepseek-v4-flash`已启用但未验证远端调用，知识索引`NOT_INDEXED`且文档及Chunk均为0；本机直启根`.env`加载与数据库连接差异已记录，千问配置修改后的进度另见下项
-- 千问Embedding配置：本地`.env`使用`qwen3.7-text-embedding`、1536维、批次20及独立索引版本，实际百炼兼容地址与密钥已生效于本地验证；响应兼容修复的相关pytest41/41、局部Ruff及mypy已通过，后续单条真实请求确认远端可用及1536维支持；运行容器仍为`text-embedding-3-small`、批次32、空密钥且缺响应兼容字段，下一步更新Agent容器并补可重复烟测入口，批量及检索质量尚未验证
+- 千问Embedding配置：本地`.env`使用`qwen3.7-text-embedding`、1536维、批次20及独立索引版本，实际百炼兼容地址与密钥已生效于本地验证；2026-10-18兼容修复后单条真实请求通过，2026-10-19新增可重复烟测并再次通过；容器旧配置见最近检查记录，下一步更新Agent容器并核对其环境，批量入库及检索质量尚未验证
 - M7.5当前边界：页面展示当次执行证据而非当前Java业务事实；历史诊断不符合当前Schema时不会补造正文，当前仍使用offset分页且只允许本人REVIEWER，尚无审计主管跨用户视图、游标分页或操作日志聚合展示
 - M7.6当前边界：T749～T781七个批次已全部完成；统一页面能够操作四个生产Skill及Approval闭环，但真实动态调用仍依赖外部模型配置，规范问答和Review还要求知识索引为`READY`，页面能力标签不代表已探测Provider网络
 - T754～T758当前边界：Router、Action、Rerank、规范回答和Review草稿适配器均已接入统一Agent API并绑定同一Run的逐LLM Step；2026-09-07已使用本地DeepSeek配置验证Router与订单状态统一入口，尚未用真实Provider逐一执行Action、Rerank、规范回答和Review草稿
@@ -26,4 +27,4 @@
 - M7.9 Agent指标当前边界：E2E成功率和平均已执行Tool数以全部用例为分母，无效与重复Tool率以所有尝试为分母且每次尝试必须归入已执行、无效或重复之一；诊断耗时仅统计有计时用例，阶段正确率仅统计声明预期阶段的用例。T787/T788已提供统一Provider接线，真实数字要求实际Run、Step和调用账本采集器
 - M7.9观测指标当前边界：步骤可定位要求实际Step与预期完全一致，错误类型按全部异常用例的稳定错误码比较，排查中位时长只统计有计时样本；无适用步骤或耗时样本时分母为零且数值稳定为零。T790已接到统一Suite，真实人工排查计时仍需在实际演练中采集
 - 已知非阻塞问题：历史页可展示Run来源和关联Approval差异，但尚无独立操作日志聚合页；日志详情当前只允许原确认人读取，尚无审计主管角色或完整RBAC；只有写Tool实际开始后的成功、Java 409或其他写失败会生成操作日志，确认前过期或事实重校验`STALE`只保留Approval/Run/Step终态；确认服务不重新运行RAG，引用适用性仍以草稿生成时检索结果为准；写失败需要新建Approval再次授权；若进程在Java成功后、保存日志和终态前崩溃，Java幂等可防重复写但目前没有自动恢复任务；返工只覆盖`COORDINATE_SYSTEM_FIX`；DeepSeek JSON Object只能保证JSON语法，Schema与业务合法性仍依赖本地校验且真实Provider尚未覆盖Action、Rerank、规范回答和Review草稿，Embedding仅补充单条真实请求成功验证，批量入库及检索效果仍未验证；浏览器技能文件在当前环境缺失，已用组件测试和Docker烟测替代，但尚缺真实浏览器视觉截图；Session/SSE仍是单进程TTL与有界内存实现；演示Header不是完整认证；Java与Python数据库角色尚未隔离
-- 下一阶段：按M7停止线先汇报验收结果，待确认新里程碑范围；建议下一最小任务为使用真实Provider逐一验证尚未实测的Action、Rerank、规范回答、Review草稿和Embedding入库
+- 下一阶段：本次只读Provider烟测已完成，按停止线汇报；下一最小任务为重建并重新创建Agent容器，核对运行配置，再推进真实Embedding全量入库；Action、Rerank、规范回答和Review草稿仍待逐项真实验证
