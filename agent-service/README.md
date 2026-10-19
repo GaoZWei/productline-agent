@@ -79,7 +79,7 @@ make provider-smoke ARGS="--target chat --env-file /absolute/path/to/local.env"
 该命令在本机运行, 默认显式读取仓库根`.env`, 进程环境变量优先; 指定的环境文件不存在时返回配置错误。
 已有Python环境也可直接从`agent-service`执行`.venv/bin/python -m app.cli.provider_smoke`。
 命令不启动服务、不加载数据库、不调用Java Tool、不创建Run/Step或Approval, 不写知识索引;
-它仍会访问外部模型并产生少量Token消耗。HTTP等待上限30秒, 对话输出上限64 Token, 两类检查均关闭自动重试。
+它仍会访问外部模型并产生少量Token消耗。HTTP超时配置最多30秒, 对话输出上限64 Token, 两类检查均关闭自动重试。
 服务启动、健康检查及普通测试不会自动触发此命令, 无须运行数据库迁移。
 
 调用流为CLI读取Settings → 现有Chat Client/Embedding Provider → 严格响应校验 → 终端JSON报告。
@@ -94,9 +94,24 @@ Embedding模型不匹配则返回`EMBEDDING_MODEL_MISMATCH`, 避免把不同向�
 该命令检查的是当前命令进程, 本机通过不证明已运行的Docker容器加载了同一配置和代码。
 更新容器后, 可在容器内通过`/service/.venv/bin/python -m app.cli.provider_smoke`单独检查其环境。
 
+仅更新Agent并验证容器环境, 在仓库根目录依次执行:
+
+```bash
+docker compose build --quiet agent-service
+docker compose up -d --no-deps --force-recreate agent-service
+docker compose exec -T agent-service /service/.venv/bin/python -m app.cli.provider_smoke
+```
+
+以上命令不重建其他服务、不执行数据库迁移或知识入库。若macOS找不到`docker`或`docker-credential-desktop`,
+可在上述各命令前加`PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"`, 仅影响该命令进程,
+终端已包含该工具目录时无需此前缀。
+
 2026-10-19本地真实检查两项通过: 对话请求`deepseek-v4-flash`, 返回`deepseek-flash`,
 输入128、输出5、总133 Token; 千问`qwen3.7-text-embedding`返回一条1536维向量, 输入及总量26 Token。
 这是一次连通和协议检查, 不构成效果或性能指标。
+
+同日重建Agent容器后, 容器内两类真实检查也通过, Chat总133 Token、Embedding总26 Token;
+配置与关键源码均核对一致, 三端健康检查正常, 知识索引仍为`NOT_INDEXED`, 尚未全量入库。
 
 离线检查命令为`make test-provider-smoke`, 使用HTTP替身覆盖错误和预算边界, 不产生远端Token消耗。
 
