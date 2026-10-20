@@ -117,6 +117,19 @@ def test_model_response_format_accepts_json_object_and_rejects_unknown_mode(
 
 
 @pytest.mark.unit
+def test_rag_rerank_timeout_reads_environment_and_rejects_unbounded_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAG_RERANK_TIMEOUT_SECONDS", "15.5")
+    assert Settings(environment="test").rag_rerank_timeout_seconds == 15.5
+
+    for value in ("0", "-1", "121", "inf", "nan"):
+        monkeypatch.setenv("RAG_RERANK_TIMEOUT_SECONDS", value)
+        with pytest.raises(ValidationError):
+            Settings(environment="test")
+
+
+@pytest.mark.unit
 def test_optional_model_thinking_mode_normalizes_empty_and_validates_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

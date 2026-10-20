@@ -57,6 +57,25 @@ describe("unified agent client", () => {
     expect(error).toBeInstanceOf(AgentApiError);
     expect(error).toMatchObject({ code: "RESPONSE_VALIDATION_ERROR" });
   });
+
+  it("保留后端已明确失败的模型超时和可重试语义", async () => {
+    mock.onPost("/api/agent/messages").reply(504, {
+      run_id: "run-model-timeout",
+      trace_id: "trace-model-timeout",
+      code: "MODEL_TIMEOUT",
+      message: "model request timed out",
+      retryable: true,
+      error_step: "route_intent",
+    });
+
+    await expect(requestAgentMessage({ message: "交付条件是什么？" })).rejects.toMatchObject({
+      code: "MODEL_TIMEOUT",
+      runId: "run-model-timeout",
+      errorStep: "route_intent",
+      retryable: true,
+      status: 504,
+    });
+  });
 });
 
 function response(result: AgentMessageResult) {

@@ -9,7 +9,6 @@ from typing import Final
 from app.knowledge.hybrid import RRF_RANK_CONSTANT
 from app.knowledge.reranking import (
     DEFAULT_MIN_RELEVANCE_SCORE,
-    DEFAULT_RERANK_TIMEOUT_SECONDS,
 )
 from app.knowledge.retrieval import (
     DEFAULT_CHANNEL_TOP_K,
@@ -61,7 +60,7 @@ def build_run_version_snapshot(
                 "hybrid_top_k": DEFAULT_HYBRID_TOP_K,
                 "min_vector_similarity": DEFAULT_MIN_VECTOR_SIMILARITY,
                 "rrf_rank_constant": RRF_RANK_CONSTANT,
-                "rerank_timeout_seconds": DEFAULT_RERANK_TIMEOUT_SECONDS,
+                "rerank_timeout_seconds": settings.rag_rerank_timeout_seconds,
                 "min_relevance_score": DEFAULT_MIN_RELEVANCE_SCORE,
                 "rerank_prompt_version": RERANK_PROMPT_VERSION,
                 "specification_answer_prompt_version": (SPECIFICATION_ANSWER_PROMPT_VERSION),

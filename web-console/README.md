@@ -13,6 +13,21 @@ M7.6-G 订单业务与统一Agent页面，使用 Vue 3、TypeScript、Vite、Pin
 才会由Python请求Java重新校验并写入。顶部“运行历史”入口按当前用户分页展示Run，
 选择记录后会并行读取详情和Step时间线，并展示受控Tool摘要、规范引用、Approval修改差异和错误定位。
 
+## 统一消息的等待时间
+
+`requestAgentMessage`为`POST /api/agent/messages`单独设置300秒（5分钟）HTTP等待预算，
+能力查询、固定诊断、Approval及其他Agent请求仍沿用20秒。当前规范问答正常路径的Router和回答模型各可能
+消耗约60秒、Query Embedding约90秒、重排整体30秒，再留出数据库与网络余量；5分钟用于覆盖当前默认配置下
+各阶段的有限重试，不承诺覆盖所有动态路径或修改后的后端预算。常量位于`src/api/agentClient.ts`的
+`AGENT_MESSAGE_TIMEOUT_MS`；后端超时或重试配置改变时，需重新核对整轮等待预算并重新构建页面。
+
+浏览器等待超时只说明未取得最终响应，后台Run可能继续执行。因此统一消息的客户端`REQUEST_TIMEOUT`
+提示先查看顶部“运行历史”，并隐藏“重试本轮”，不会自动重发；这不代表后台任务已被取消、失败或写入成功。
+后端明确返回的`MODEL_TIMEOUT`仍保留Run、失败步骤及可重试标记。当前不提供超时后的自动结果恢复或整轮取消。
+
+`src/api/agentMessageTimeout.spec.ts`使用真实Axios Fetch适配器、模拟响应和虚拟时钟验证35秒响应、
+300秒超时和普通查询20秒超时，组件测试核对超时提示及重试按钮；这些测试不发送外部模型请求，也不代表真实模型性能。
+
 ## 本地开发
 
 先启动 Java、Python 服务，再启动 Vite：

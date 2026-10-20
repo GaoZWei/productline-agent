@@ -401,6 +401,7 @@ class _ProductionSpecificationWorkflow:
         collector: _TokenCollector,
         run_id: str,
         event_sink: RunEventSink | None,
+        rerank_timeout_seconds: float = 30.0,
     ) -> None:
         self._database = database
         self._capability_service = capability_service
@@ -411,6 +412,7 @@ class _ProductionSpecificationWorkflow:
         self._collector = collector
         self._run_id = run_id
         self._event_sink = event_sink
+        self._rerank_timeout_seconds = rerank_timeout_seconds
 
     async def ainvoke(
         self,
@@ -446,6 +448,7 @@ class _ProductionSpecificationWorkflow:
                 )
             await self._ensure_ready()
             workflow = SpecificationQaWorkflow(
+                rerank_timeout_seconds=self._rerank_timeout_seconds,
                 retriever=KnowledgeRetrievalPipeline(
                     repository=_DatabaseKnowledgeSearchChannels(self._database),
                     embedding_generator=self._embedding_generator,
@@ -573,6 +576,7 @@ class ProductionAgentSkillDispatcher:
         embedding_generator: QueryEmbeddingGenerator | None,
         limits: AgentExecutionLimits | None = None,
         today: _DateProvider | None = None,
+        rerank_timeout_seconds: float = 30.0,
     ) -> None:
         self._database = database
         self._tool_registry = tool_registry
@@ -581,6 +585,7 @@ class ProductionAgentSkillDispatcher:
         self._embedding_generator = embedding_generator
         self._limits = limits or AgentExecutionLimits()
         self._today = today or (lambda: datetime.now(UTC).date())
+        self._rerank_timeout_seconds = rerank_timeout_seconds
     # 生产环境Skill分发器
     async def dispatch(
         self,
@@ -863,6 +868,7 @@ class ProductionAgentSkillDispatcher:
         collector: _TokenCollector,
     ) -> _ProductionSpecificationWorkflow:
         return _ProductionSpecificationWorkflow(
+            rerank_timeout_seconds=self._rerank_timeout_seconds,
             database=self._database,
             capability_service=self._knowledge_capability_service,
             embedding_generator=self._embedding_generator,

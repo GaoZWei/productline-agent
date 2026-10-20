@@ -38,6 +38,11 @@ Base URL、1536维度、批大小、超时、重试和索引版本均可通过�
 `MODEL_TIMEOUT_SECONDS`、`MODEL_MAX_RETRIES`、`MODEL_INITIAL_BACKOFF_SECONDS`及
 `MODEL_MAX_BACKOFF_SECONDS`设置；默认只额外重试一次明确瞬时失败。
 
+生产规范问答使用`RAG_RERANK_TIMEOUT_SECONDS`控制整次重排预算，默认30秒，允许范围为大于0且不超过120秒。
+该预算包含重排模型的HTTP尝试、退避与重试，独立于`MODEL_TIMEOUT_SECONDS`；达到预算仍返回
+`RERANK_UNAVAILABLE`，不调用回答模型、不输出规范引用。启动时将该配置注入生产Workflow并冻结到Run的RAG策略快照，
+修改环境后需重新创建Agent容器。内部Workflow未显式传参时仍保留原2秒默认，生产装配使用上述配置。
+
 T750提供`GET /api/agent/capabilities/model`查询安全的模型配置能力。模型关闭时返回
 `{"configured":false,"provider":null,"model_name":null}`；启用时只增加Provider和模型名，不返回Base URL或
 API Key。该结果只证明配置通过校验，不探测模型网络，也不代表某次Run已经调用模型。
@@ -111,7 +116,7 @@ docker compose exec -T agent-service /service/.venv/bin/python -m app.cli.provid
 这是一次连通和协议检查, 不构成效果或性能指标。
 
 同日重建Agent容器后, 容器内两类真实检查也通过, Chat总133 Token、Embedding总26 Token;
-配置与关键源码均核对一致, 三端健康检查正常, 知识索引仍为`NOT_INDEXED`, 尚未全量入库。
+配置与关键源码均核对一致, 三端健康检查正常, 当时知识索引为`NOT_INDEXED`; 后续全量入库结果见下节。
 
 离线检查命令为`make test-provider-smoke`, 使用HTTP替身覆盖错误和预算边界, 不产生远端Token消耗。
 
@@ -139,13 +144,43 @@ M7.6-C把现有catalog校验、UTF-8 Loader、标题分块、批量Embedding和`
 make knowledge-ingest
 ```
 
-命令会确保PostgreSQL已启动、执行Alembic迁移、构建包含`/knowledge-base`的Agent镜像，再运行一次全量入库。
+命令会确保PostgreSQL已启动、构建包含`/knowledge-base`的Agent镜像、执行Alembic迁移，再运行一次全量入库。
 成功时只输出文档数、Chunk数、清理数量和非敏感索引身份；目录/配置错误、Embedding错误和持久化错误分别使用
 退出码2、3和4，输出不包含正文、向量、密钥或供应商响应。
 
 `GET /api/agent/capabilities/knowledge-index`只读取文档级统计，返回`NOT_INDEXED`、`INCOMPLETE`、
 `INDEX_MISMATCH`或`READY`。只有数据库中的文档身份与当前16份catalog完全一致、每份文档至少有一个Chunk，且
 所有文档的Provider、模型、1536维度和索引版本均与当前配置一致时才返回`ready=true`；该查询不会探测外部网络。
+
+2026-10-20使用真实千问`qwen3.7-text-embedding`完成一次全量入库: 16份文档、80个唯一Chunk及1536维向量，
+索引版本为`qwen3.7-text-embedding-1536-v1`，清理文档数0。只读核对源文档哈希、分块正文、章节及向量维度均一致，
+索引能力返回`READY / ready=true`。本次只执行一次真实全量生成，检索质量、重排及回答效果尚待验证。
+
+全量命令构建新镜像后不会自动替换已有服务容器; 本次另外执行
+`docker compose up -d --no-deps --force-recreate agent-service`加载同一份新镜像，并核对运行中的规范与源文件一致。
+三端健康正常，Java、PostgreSQL和Web容器未变更。本次无代码修改，未重跑单元或全仓测试。
+入库CLI不汇总供应商Token用量，实际用量请在供应商控制台查询，不用分块元数据中的近似词元数代替。
+
+## DBeaver 查看本机知识库
+
+本机另有PostgreSQL占用`127.0.0.1:5432`，因此2026-10-20将本地根目录`.env`的
+`POSTGRES_PORT`改为`15432`，仅重新创建Compose的`postgres`容器，保留原数据卷。
+DBeaver使用以下连接信息：
+
+| 配置项 | 值 |
+|---|---|
+| 主机 | `127.0.0.1` |
+| 端口 | `15432` |
+| 数据库 | `remote_sensing_agent` |
+| 用户名、密码 | 本地`.env`中的`POSTGRES_USER`、`POSTGRES_PASSWORD` |
+
+连接成功后展开“数据库 → remote_sensing_agent → 模式 → public → 表”，查看
+`knowledge_documents`（16份文档）和`knowledge_chunks`（80个片段及向量）。
+不要将密码复制到文档或聊天中。
+
+`15432`是这台机器的本地覆盖值，`.env.example`默认仍为`5432`；Java和Agent容器仍通过
+`postgres:5432`访问数据库。若再次出现`role does not exist`，先核对是否连错实例，
+不要直接新建角色或重置数据卷。本次已验证主机TCP连接及DBeaver连接成功，三端健康正常。
 
 ## 千问 Embedding 配置
 
@@ -522,7 +557,17 @@ M4.11的`KnowledgeRetrievalPipeline`对关键词和向量通道复用同一`Know
 `SpecificationQaWorkflow`固定串联Query Rewrite、Metadata Builder、Retrieval、Rerank、相关性检查和带引用生成。
 页面产品/卫星字段只用于收窄候选，权限范围和生效日期必须由调用方显式提供。回答模型只能返回既有主Chunk
 身份；无候选、Rerank超时或生成结构/引用异常时返回不带引用和规范结论的安全回答。`SpecificationSkill`
-只接受已通过确定性门禁的`SPEC_QA`决策。当前这些能力是内部组件，尚未接入统一HTTP和页面问答交互。
+只接受已通过确定性门禁的`SPEC_QA`决策。M7.6已将上述组件接入统一HTTP入口和页面问答交互。
+
+2026-10-20通过`POST /api/agent/messages`完成真实规范问答小样本验收：交付条件及坐标信息两题均为
+`ANSWERED`，共4条引用的文档、版本、章节、正文和Chunk ID与本地知识源一致，人工核对回答有原文支撑；
+知识库不覆盖的设备验收问题为`INSUFFICIENT_CONTEXT`，无引用且未调用回答模型。实际Router、Rerank和回答LLM Step
+可回查；未执行Java业务Tool或创建Approval。这是三种场景的链路验收，不是50题RAG准确率或性能评测。
+
+首次真实请求因原固定2秒重排预算取消而安全降级，修复为上述配置后正常路径通过。坐标样例耗时约34.7秒，
+对应Trace记录一次`EMBEDDING_TIMEOUT`及有限重试，随后成功；页面原20秒等待不足的问题已由统一消息独立300秒预算处理，
+并提示客户端超时后先查运行历史，说明见`web-console/README.md`。该适配不保证覆盖所有后端配置或动态路径。
+本次对照模型用量来自LLM Step，未包含查询Embedding用量或超时请求可能产生的费用。
 
 M4.12在`evaluation/rag_cases.jsonl`固定保存50条问题及其预期文档、完整章节路径和安全过滤条件。
 `KnowledgeRagEvaluationSubject`把当前关键词、向量、RRF和Reranker实现接入同一策略边界，`evaluate_rag`

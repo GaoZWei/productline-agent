@@ -100,7 +100,7 @@ test-agent-review: ## 验证 M7.6-F Review草稿、独立Approval、确认/取�
 	cd web-console && npm test -- --run src/api/agentClient.spec.ts src/api/runHistoryClient.spec.ts src/components/ReviewApprovalCard.spec.ts
 
 test-agent-page: ## 验证 M7.6-G统一抽屉、五类结果、四Skill集成和Docker页面链路
-	cd web-console && npm test -- --run src/api/agentUnifiedClient.spec.ts src/api/runEventClient.spec.ts src/components/AgentResultView.spec.ts src/components/AgentWorkspaceDrawer.spec.ts src/components/ReviewApprovalCard.spec.ts src/App.spec.ts src/server.spec.mjs
+	cd web-console && npm test -- --run src/api/agentUnifiedClient.spec.ts src/api/agentMessageTimeout.spec.ts src/api/runEventClient.spec.ts src/components/AgentResultView.spec.ts src/components/AgentWorkspaceDrawer.spec.ts src/components/ReviewApprovalCard.spec.ts src/App.spec.ts src/server.spec.mjs
 	cd web-console && npm run build
 	./scripts/test-agent-persistence.sh -k agent_read_skills_execute_through_unified_http
 	./scripts/test-agent-page-e2e.sh

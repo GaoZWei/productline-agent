@@ -1745,3 +1745,45 @@
 - 选定对话或Embedding检查, 默认显式读取仓库根环境文件, 固定输入且每类最多一次请求, 关闭自动重试。
 - Chat检查最小结构化输出并报告模型名称差异; Embedding检查模型匹配、单条1536维有效向量, 缺少输入用量时保留空值。
 - 单项失败不掩盖另一项, 终端只输出白名单JSON和稳定退出码; 不连接数据库、不执行业务Tool或Approval, 不持久化Run/Step或向量。
+
+---
+
+## 2026-10-20 — `[T769补充] 生产规范问答重排预算配置`
+
+### 核心解决的问题
+
+真实规范问答中，固定2秒重排预算会提前取消尚未完成的模型调用，导致有相关规范仍只能安全降级。
+提供独立且有上限的生产重排预算，并让运行快照记录实际值，便于部署调整和历史排查。
+
+### 实现的核心代码
+
+- `agent-service/app/settings.py`：`Settings.rag_rerank_timeout_seconds`。
+- `agent-service/app/main.py`、`app/services/production_agent_skills.py`：从启动配置经生产Skill分发器传入`SpecificationQaWorkflow`。
+- `agent-service/app/versioning.py`：`build_run_version_snapshot`冻结实际重排预算。
+- `docker-compose.yml`、`.env.example`：`RAG_RERANK_TIMEOUT_SECONDS`部署入口。
+
+### 实现的核心功能
+
+- 生产重排默认预算30秒，可配置为大于0且不超过120秒，覆盖本次重排的模型尝试、退避与有限重试。
+- 保留既有超时安全分支：返回`RERANK_UNAVAILABLE`，不继续调用回答模型、不输出规范结论或引用。
+- Run的RAG策略快照从实际启动配置取值，保留原有历史记录；该预算不代表整轮问答或页面等待时限。
+
+---
+
+## 2026-10-20 — `[T774-T775补充] 统一消息等待预算与结果未知提示`
+
+### 核心解决的问题
+
+真实规范问答可能因向量或模型有限重试超过页面原20秒等待时间，造成后台完成而页面已超时。
+统一消息使用独立的有限预算，并明确客户端等待超时属于结果未知，减少直接重发造成重复Run或草稿的风险。
+
+### 实现的核心代码
+
+- `web-console/src/api/agentClient.ts`：`AGENT_MESSAGE_TIMEOUT_MS`、`requestAgentMessage`。
+- `Makefile`：`test-agent-page`纳入真实Axios计时器的受控慢响应回归。
+
+### 实现的核心功能
+
+- 统一消息使用300秒独立HTTP等待预算，其他Agent接口保留20秒，继续校验五类结果及规范引用。
+- 客户端超时提示先查运行历史并关闭本轮直接重试入口，不自动重发请求；后端明确失败的Run、步骤和重试语义保持。
+- 等待上限适配当前默认后端预算，不取消后台Run，也不提供结果自动恢复；调整后端预算时需同步核对页面等待时间。

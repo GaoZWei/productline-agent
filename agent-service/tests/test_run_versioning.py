@@ -76,6 +76,7 @@ def test_version_snapshot_records_all_components_without_inventing_model() -> No
         environment="test",
         model_name="",
         embedding_api_key=SecretStr("do-not-persist"),
+        rag_rerank_timeout_seconds=15.5,
     )
     snapshot = build_run_version_snapshot(
         settings,
@@ -94,6 +95,9 @@ def test_version_snapshot_records_all_components_without_inventing_model() -> No
     assert snapshot.tool_schema.version == TOOL_SCHEMA_VERSION
     assert snapshot.rag_strategy is not None
     assert snapshot.rag_strategy.version == RAG_STRATEGY_VERSION
+    assert snapshot.rag_strategy.parameters["rerank_timeout_seconds"] == (
+        settings.rag_rerank_timeout_seconds
+    )
     assert snapshot.rag_strategy.embedding_index_version == settings.embedding_index_version
     assert snapshot.rag_strategy.parameters["rerank_prompt_version"] == RERANK_PROMPT_VERSION
     assert (

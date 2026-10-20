@@ -94,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 application.state.knowledge_index_capability_service
             ),
             embedding_generator=embedding_generator,
+            rerank_timeout_seconds=resolved_settings.rag_rerank_timeout_seconds,
         )
         application.state.write_tool_registry = create_write_tool_registry(
             business_client,

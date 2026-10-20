@@ -21,6 +21,8 @@ import type {
 export const AGENT_API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL ?? "/agent-api";
 export const AGENT_USER_ID = import.meta.env.VITE_AGENT_USER_ID ?? "reviewer-001";
 export const AGENT_USER_ROLE = import.meta.env.VITE_AGENT_USER_ROLE ?? "REVIEWER";
+// 默认规范问答的路由、向量生成、重排和回答可分别发生有限重试，整轮需要独立等待预算。
+export const AGENT_MESSAGE_TIMEOUT_MS = 300_000;
 
 const BLOCKING_STAGES = new Set<BlockingStage>([
   "PRODUCTION",
@@ -109,6 +111,7 @@ export async function requestAgentMessage(
 ): Promise<AgentMessageResponse> {
   try {
     const response = await agentHttpClient.post<unknown>("/api/agent/messages", request, {
+      timeout: AGENT_MESSAGE_TIMEOUT_MS,
       headers: eventStreamId ? { "X-Event-Stream-Id": eventStreamId } : undefined,
     });
     if (!isAgentMessageResponse(response.data)) {
@@ -116,7 +119,16 @@ export async function requestAgentMessage(
     }
     return response.data;
   } catch (reason) {
-    throw normalizeAgentError(reason);
+    const error = normalizeAgentError(reason);
+    if (error.code === "REQUEST_TIMEOUT" && error.status === undefined) {
+      // 浏览器停止等待不代表后端取消，直接重发可能创建另一轮Run或草稿。
+      throw new AgentApiError({
+        code: error.code,
+        message: "等待Agent结果超时，后台可能仍在执行，请先到运行历史查看，避免重复提交。",
+        retryable: false,
+      });
+    }
+    throw error;
   }
 }
 

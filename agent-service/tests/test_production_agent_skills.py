@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable, Sequence
 from datetime import date
 from typing import Any, cast
@@ -25,6 +26,7 @@ from app.knowledge import (
     KnowledgeRetrievalError,
     KnowledgeRetrievalErrorCode,
     RerankExecutionError,
+    RetrievalResult,
 )
 from app.models import AgentRunStatus, AgentStepType, ApprovalStatus
 from app.routing import BusinessSkill, Intent
@@ -499,6 +501,80 @@ async def test_specification_failures_record_stable_rag_step(
     assert caught.value.error_step == "answer_specification"
     assert recorder.started == [(5, AgentStepType.RAG, "answer_specification")]
     assert recorder.failed == [("step-skill-skill-test-5", expected_code)]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("budget", "expected_status", "expected_model_calls"),
+    [(0.01, "RERANK_UNAVAILABLE", 0), (1.0, "ANSWERED", 2)],
+)
+async def test_production_rerank_budget_preserves_safe_timeout_and_answer_path(
+    monkeypatch: pytest.MonkeyPatch,
+    budget: float,
+    expected_status: str,
+    expected_model_calls: int,
+) -> None:
+    candidate = RetrievalResult(
+        chunk_ids=("chunk-budget-test",),
+        document_id="SPEC-BUDGET-TEST",
+        document_name="演示交付规范",
+        document_version="2.0",
+        chunk_indexes=(0,),
+        section_path=("必要条件",),
+        content="交付前必须完成质量复核。",
+        content_hashes=("hash-budget-test",),
+        keyword_score=1.0,
+        vector_score=0.9,
+        keyword_rank=1,
+        vector_rank=1,
+        rrf_score=0.03,
+    )
+
+    class _Retriever:
+        async def retrieve(self, *args: object, **kwargs: object) -> object:
+            return (candidate,)
+
+    class _DelayedClient(_SequenceStructuredClient):
+        async def complete_structured[OutputT: BaseModel](
+            self,
+            messages: Sequence[ChatMessage],
+            output_schema: type[OutputT],
+        ) -> StructuredModelResult[OutputT]:
+            if output_schema.__name__ == "RerankResponse":
+                await asyncio.sleep(0.05)
+            return await super().complete_structured(messages, output_schema)
+
+    async def _ready(_: object) -> None:
+        return None
+
+    monkeypatch.setattr(production_skills, "KnowledgeRetrievalPipeline", lambda **_: _Retriever())
+    monkeypatch.setattr(production_skills._ProductionSpecificationWorkflow, "_ensure_ready", _ready)
+    model = _DelayedClient(
+        (
+            {"scores": [{"candidate_id": "chunk-budget-test", "score": 0.9}]},
+            {"answer": "交付前必须完成质量复核。", "citation_ids": ["chunk-budget-test"]},
+        )
+    )
+    dispatcher = ProductionAgentSkillDispatcher(
+        database=cast(Database, object()),
+        tool_registry=cast(Any, object()),
+        model_client=model,
+        knowledge_capability_service=cast(KnowledgeIndexCapabilityService, object()),
+        embedding_generator=cast(Any, object()),
+        rerank_timeout_seconds=budget,
+    )
+    recorder = _CaptureStepRecorder()
+    execution = await dispatcher.dispatch(
+        BusinessSkill.SPECIFICATION,
+        _request(_decision(Intent.SPEC_QA, RouterEntities()), recorder, message="交付有何要求？"),
+    )
+    result = execution.result.model_dump(mode="json")["specification_answer"]
+    assert result["status"] == expected_status
+    assert bool(result["citations"]) == (expected_status == "ANSWERED")
+    assert model.call_count == expected_model_calls
+    if expected_status == "RERANK_UNAVAILABLE":
+        assert recorder.failed == [("step-skill-skill-test-6", "MODEL_INVOCATION_INTERRUPTED")]
 
 
 @pytest.mark.unit

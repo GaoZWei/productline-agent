@@ -309,6 +309,25 @@ describe("Agent workspace drawer", () => {
     expect(host?.textContent).not.toContain("session-old");
     expect(host?.textContent).not.toContain("确定性状态");
   });
+
+  it("等待结果超时提示先查运行历史且不显示重试本轮", async () => {
+    mockedSend.mockRejectedValue(new AgentApiError({
+      code: "REQUEST_TIMEOUT",
+      message: "等待Agent结果超时，后台可能仍在执行，请先到运行历史查看，避免重复提交。",
+      retryable: false,
+    }));
+    mountDrawer();
+    click('[data-testid="open-agent-drawer"]');
+    await settleUi();
+    click('[data-testid="submit-agent-message"]');
+    await settleUi();
+
+    expect(host?.textContent).toContain("后台可能仍在执行");
+    expect(host?.textContent).toContain("运行历史");
+    expect(host?.textContent).not.toContain("重试本轮");
+    expect(host?.textContent).not.toContain("确定性状态");
+    expect(mockedSend).toHaveBeenCalledTimes(1);
+  });
 });
 
 function mountDrawer() {

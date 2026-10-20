@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     model_max_retries: int = Field(default=1, ge=0, le=3)  # 首次请求之外允许的重试次数
     model_initial_backoff_seconds: float = Field(default=0.2, gt=0, le=10)  # 指数退避边界时间
     model_max_backoff_seconds: float = Field(default=2.0, gt=0, le=30)
+    # 重排的整次调用预算独立于模型单次HTTP超时，包含可能的有限重试。
+    rag_rerank_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     embedding_provider: Literal["openai_compatible"] = "openai_compatible"
     embedding_model: str = "text-embedding-3-small"
     embedding_base_url: AnyHttpUrl = AnyHttpUrl("https://api.openai.com/v1")
