@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Awaitable
 from enum import StrEnum
@@ -15,6 +16,7 @@ from app.schemas.knowledge import KnowledgeSearchFilter
 DEFAULT_CHANNEL_TOP_K = 20
 DEFAULT_HYBRID_TOP_K = 10
 DEFAULT_MIN_VECTOR_SIMILARITY = -1.0
+_LOGGER = logging.getLogger("agent-service.knowledge-retrieval")
 
 # 检索通道错误模型
 class KnowledgeRetrievalErrorCode(StrEnum):
@@ -124,6 +126,12 @@ class KnowledgeRetrievalPipeline:
                 top_k=self._channel_top_k,
             )
         except Exception as error:
+            # 只记录异常类型与长度，不能把SQL参数、查询原文或数据库连接信息写进日志。
+            _LOGGER.warning(
+                "keyword_search_failed;cause_type=%s;query_characters=%d",
+                type(error).__name__,
+                len(query),
+            )
             raise KnowledgeRetrievalError(
                 code=KnowledgeRetrievalErrorCode.KEYWORD_SEARCH_FAILED,
                 message="keyword knowledge search failed",

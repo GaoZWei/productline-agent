@@ -19,6 +19,7 @@ from app.schemas import (
     InformationGap,
     OrderDiagnosisState,
 )
+from app.schemas.action import SpecificationRetrievalArguments
 from app.schemas.tools import OrderDetail, TaskDetail
 from app.tools import ToolRegistry, create_read_tool_registry
 from app.workflows.action_decision import (
@@ -46,6 +47,13 @@ class StubActionDecisionModel:
         if isinstance(output, Exception):
             raise output
         return output
+
+
+@pytest.mark.unit
+def test_specification_action_question_matches_rag_length_limit() -> None:
+    assert len(SpecificationRetrievalArguments(question="x" * 2000).question) == 2000
+    with pytest.raises(ValidationError):
+        SpecificationRetrievalArguments(question="x" * 2001)
 
 
 def _registry() -> ToolRegistry:

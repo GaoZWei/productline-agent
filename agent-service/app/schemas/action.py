@@ -24,7 +24,7 @@ ActionToolArguments = Annotated[dict[str, Any], Field(max_length=8)]
 class SpecificationRetrievalArguments(WorkflowSchema):
     """动态诊断发起规范检索时允许生成的最小查询参数。"""
 
-    question: WorkflowText
+    question: Annotated[WorkflowText, Field(max_length=2000)]
 
 # 动作和Tool的唯一映射：每个动作只能对应一个执行器Tool MappingProxyType 映射表只读，防止被修改
 ACTION_TOOL_NAMES: Final[Mapping[AgentAction, ActionToolName]] = MappingProxyType(

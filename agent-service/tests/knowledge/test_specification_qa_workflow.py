@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date
 
@@ -22,6 +23,7 @@ from app.knowledge import (
     RerankRequest,
     RetrievalResult,
     VectorSearchHit,
+    preprocess_keyword_query,
 )
 from app.routing import Intent
 from app.routing.decision import build_routing_decision
@@ -552,6 +554,50 @@ async def test_m77_s13_keyword_search_failure_stops_downstream_channels_safely()
     assert "credential" not in str(caught.value)
     assert embedding_generator.queries == []
     assert repository.vector_calls == 0
+
+
+@pytest.mark.unit
+async def test_long_keyword_query_preserves_full_embedding_input() -> None:
+    class _PreprocessingRepository(_PipelineRepository):
+        async def search_keywords(
+            self,
+            query: str,
+            *,
+            filters: KnowledgeSearchFilter,
+            top_k: int = 10,
+        ) -> tuple[KeywordSearchHit, ...]:
+            preprocess_keyword_query(query)
+            # 关键词无命中时仍允许向量召回，不能把无命中误当失败。
+            return ()
+
+    question = ("坐标系问题 " * 80).strip()
+    repository = _PreprocessingRepository()
+    generator = _QueryEmbeddingGenerator()
+    pipeline = KnowledgeRetrievalPipeline(repository=repository, embedding_generator=generator)
+
+    results = await pipeline.retrieve(question, filters=_knowledge_filters())
+
+    assert generator.queries == [question]
+    assert repository.vector_filters == _knowledge_filters()
+    assert len(results) == 1 and results[0].document_id == "DOC-QUALITY-001"
+
+
+@pytest.mark.unit
+async def test_keyword_failure_logs_safe_type_and_length(caplog: pytest.LogCaptureFixture) -> None:
+    repository = _FailingPipelineRepository(
+        keyword_error=RuntimeError("database credential detail")
+    )
+    pipeline = KnowledgeRetrievalPipeline(
+        repository=repository, embedding_generator=_QueryEmbeddingGenerator()
+    )
+
+    with caplog.at_level(logging.WARNING, logger="agent-service.knowledge-retrieval"):
+        with pytest.raises(KnowledgeRetrievalError):
+            await pipeline.retrieve("敏感查询原文", filters=_knowledge_filters())
+
+    assert "cause_type=RuntimeError" in caplog.text
+    assert "query_characters=6" in caplog.text
+    assert "credential" not in caplog.text and "敏感查询原文" not in caplog.text
 
 
 def _spec_decision(*, confidence: float = 0.95) -> RoutingDecision:

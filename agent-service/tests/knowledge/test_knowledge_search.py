@@ -58,6 +58,31 @@ def test_keyword_query_generates_chinese_bigrams_and_safe_latin_terms() -> None:
 
 
 @pytest.mark.unit
+def test_keyword_query_accepts_long_question_within_rag_input_limit() -> None:
+    question = ("坐标系问题 " * 80).strip()
+
+    query = preprocess_keyword_query(question)
+
+    assert query.terms == ("坐标", "标系", "系问", "问题")
+
+
+@pytest.mark.unit
+def test_keyword_query_bounds_chinese_terms_without_rejecting_valid_question() -> None:
+    question = (
+        "请根据生产任务已完成但质检问题未关闭且复核尚未通过的情况，检索坐标系异常处理要求、"
+        "成果交付前置条件、质量问题闭环规则以及返工安排和再次提交复核所需材料，"
+        "说明不同环节的责任以及完成标准。"
+    )
+
+    query = preprocess_keyword_query(question)
+
+    assert len(query.terms) == 64
+    assert len(set(query.terms)) == 64
+    assert query.terms[0] == "请根" and query.terms[-1] == "标准"
+    assert query == preprocess_keyword_query(question)
+
+
+@pytest.mark.unit
 def test_search_document_contains_section_content_and_chinese_bigrams() -> None:
     search_document = build_search_document(
         content="坐标系问题处理完成后重新提交复核。",
@@ -71,10 +96,15 @@ def test_search_document_contains_section_content_and_chinese_bigrams() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("query", ["", "   ", "坐", "!!!", "x" * 257])
+@pytest.mark.parametrize("query", ["", "   ", "坐", "!!!", "x" * 2001])
 def test_keyword_query_rejects_empty_ambiguous_or_oversized_input(query: str) -> None:
     with pytest.raises(KeywordQueryError):
         preprocess_keyword_query(query)
+
+
+@pytest.mark.unit
+def test_keyword_query_accepts_exact_rag_character_limit() -> None:
+    assert preprocess_keyword_query("x" * 2000).terms == ("x" * 2000,)
 
 
 @pytest.mark.unit

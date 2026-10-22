@@ -938,8 +938,10 @@ def _search_filters(**updates: object) -> KnowledgeSearchFilter:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["坐标系问题 + !!!", ("坐标系问题 " * 80).strip()])
 async def test_keyword_search_matches_chinese_bigrams_and_returns_rank(
     migrated_database_url: str,
+    query: str,
 ) -> None:
     relevant = _search_processed_document(
         suffix="KEYWORD-A",
@@ -962,7 +964,7 @@ async def test_keyword_search_matches_chinese_bigrams_and_returns_rank(
 
         async with database.session() as session:
             hits = await KnowledgeSearchRepository(session).search_keywords(
-                "坐标系问题 + !!!",
+                query,
                 filters=_search_filters(),
                 top_k=5,
             )
