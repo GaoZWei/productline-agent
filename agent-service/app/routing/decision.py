@@ -11,6 +11,7 @@ from app.routing.intent_catalog import (
     RoutingParameter,
     required_parameters_for,
 )
+from app.schemas.context import PageContext
 from app.schemas.routing import (
     ClarificationReason,
     ClarificationRequest,
@@ -26,6 +27,42 @@ from app.schemas.routing import (
     RoutingEntityName,
     SourcedEntity,
 )
+
+# 检查诊断目标与页面是否一致
+def require_matching_diagnosis_page(
+    decision: RoutingDecision,  # 路由结果
+    page_context: PageContext | None,  # 页面上下文
+) -> RoutingDecision:
+    """保留用户目标，在诊断分发前要求页面先切换，不能用改写页面提示冒充确认。"""
+
+    target = decision.entities.entities.get(RoutingEntityName.ORDER_ID)
+    if (
+        not decision.can_dispatch
+        or decision.intent is not Intent.ORDER_DIAGNOSIS
+        or page_context is None
+        or target is None
+        or target.value == page_context.order_id
+    ):
+        return decision
+    # 只有路由已允许执行、意图是订单诊断、目标与页面不同时，才生成切换提示
+    clarification = ClarificationRequest(
+        reason=ClarificationReason.PAGE_ORDER_MISMATCH,
+        question=f"你要诊断{target.value}，当前页面是{page_context.order_id}。请确认切换后继续。",
+        field=RoutingEntityName.ORDER_ID,
+        options=(
+            SourcedEntity(value=page_context.order_id, source=EntitySource.PAGE_CONTEXT),
+            target,
+        ),
+    )
+    # 将路由状态改成需要澄清，并返回新的路由决策
+    return RoutingDecision.model_validate(
+        {
+            **decision.model_dump(),
+            "status": RoutingDecisionStatus.NEEDS_CLARIFICATION,
+            "clarification": clarification,
+        }
+    )
+
 
 HIGH_CONFIDENCE_THRESHOLD: Final = 0.85
 MEDIUM_CONFIDENCE_THRESHOLD: Final = 0.60
@@ -62,6 +99,7 @@ _MISSING_QUESTIONS: Final[dict[RoutingParameter, str]] = {
 class InvalidClarificationSelectionError(ValueError):
     """用户选择与当前待澄清字段或候选集合不一致。"""
 
+
 # 置信度等级计算函数
 def confidence_level_for(confidence: float) -> ConfidenceLevel:
     """按照M3.6固定边界把0到1置信度分为高、中、低三级。"""
@@ -73,6 +111,7 @@ def confidence_level_for(confidence: float) -> ConfidenceLevel:
     if confidence >= MEDIUM_CONFIDENCE_THRESHOLD:  # 大于0.60 则中置信度等级
         return ConfidenceLevel.MEDIUM
     return ConfidenceLevel.LOW  # 其他情况低置信度等级
+
 
 # 模型没有返回实体, 需要根据合并后的实体重新计算缺失字段
 def _missing_fields(
@@ -99,6 +138,7 @@ def _conflict_for(
         if conflict.field is field:
             return conflict
     raise ValueError("unresolved entity field must have a conflict")
+
 
 # 决策原因的优先顺序 (一次路由同时存在多个问题时应先澄清哪一个?)
 # 判断顺序:
@@ -181,7 +221,8 @@ def _compose_decision(
         model_requested_clarification=model_requested_clarification,
     )
 
-# 它组合路由决策 
+
+# 它组合路由决策
 def build_routing_decision(
     *,
     raw_result: RouterResult,  # 模型负责的意图和置信度
@@ -218,6 +259,7 @@ def _validated_selection(selection: EntitySelection) -> SourcedEntity:
             f"invalid selection for {selection.field.value}"
         )
     return SourcedEntity(value=value, source=EntitySource.USER_MESSAGE)
+
 
 # 用户选择后恢复实体
 def _apply_selection(
@@ -277,6 +319,7 @@ def _apply_selection(
         unresolved_fields=unresolved,
     )
 
+
 # 恢复模型, 检查用户提交字段是否匹配当前意图
 def resume_routing_after_selection(
     pending: RoutingDecision,
@@ -311,6 +354,7 @@ def resume_routing_after_selection(
         model_requested_clarification=pending.model_requested_clarification,
         intent_confirmed=pending.intent_confirmed,
     )
+
 
 # 用户确认中置信度候选意图
 def confirm_routing_intent(pending: RoutingDecision) -> RoutingDecision:

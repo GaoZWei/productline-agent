@@ -442,6 +442,53 @@ async def test_m77_s21_dynamic_graph_stops_at_maximum_decision_rounds() -> None:
 
 
 @pytest.mark.asyncio
+async def test_budget_exit_keeps_golden_diagnosis_when_information_is_complete() -> None:
+    """最后一轮补齐事实后触及预算，保留真实退出原因且不丢弃有依据的结论。"""
+
+    calls: list[str] = []
+    client = BusinessHttpClient(_settings(), transport=_golden_transport(calls))
+    registry = create_read_tool_registry(client)
+    model = SequenceActionModel(
+        [
+            _decision(AgentAction.QUERY_ORDER, {"order_id": "ORDER-003"}),
+            _decision(AgentAction.QUERY_TASKS, {"order_id": "ORDER-003"}),
+            _decision(AgentAction.QUERY_QUALITY, {"task_id": "TASK-003"}),
+            _decision(AgentAction.QUERY_REVIEW, {"task_id": "TASK-003"}),
+            _decision(AgentAction.QUERY_DELIVERY, {"order_id": "ORDER-003"}),
+            _decision(AgentAction.RETRIEVE_SPEC, {"question": "坐标系质量问题应如何处理"}),
+        ]
+    )
+    workflow = DynamicDiagnosisWorkflow(
+        action_decider=ActionDecider(model=model, registry=registry),
+        tool_registry=registry,
+        tool_context=_context(),
+        specification_workflow=StubSpecificationWorkflow(),
+        effective_at=date(2026, 10, 22),
+        permission_scope=PermissionScope.INTERNAL_REVIEWER,
+    )
+    try:
+        state = await workflow.ainvoke("ORDER-003")
+    finally:
+        await client.aclose()
+
+    assert model.call_count == state["iteration_count"] == 6
+    assert len(calls) == 5
+    assert state["termination_reason"] is AgentTerminationReason.MAX_ITERATIONS
+    assert state["information_gaps"] == []
+    assert state["errors"] == []
+    assert state["diagnosis"] is not None
+    assert state["diagnosis"].blocking_stage is BlockingStage.QUALITY_REVIEW
+    assert {cause.code for cause in state["diagnosis"].root_causes} == {
+        "OPEN_COORDINATE_SYSTEM_ISSUE",
+        "REVIEW_PENDING",
+    }
+    assert {suggestion.action_type for suggestion in state["diagnosis"].suggestions} == {
+        "CREATE_COORDINATE_SYSTEM_REWORK",
+        "RESUBMIT_REVIEW",
+    }
+
+
+@pytest.mark.asyncio
 async def test_dynamic_graph_stops_before_exceeding_tool_call_limit() -> None:
     calls: list[str] = []
     client = BusinessHttpClient(_settings(), transport=_golden_transport(calls))

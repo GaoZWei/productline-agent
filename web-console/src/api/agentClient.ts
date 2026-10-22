@@ -413,6 +413,7 @@ function isClarificationResult(value: Record<string, unknown>) {
       "LOW_CONFIDENCE",
       "CONFIRM_INTENT",
       "MODEL_REQUEST",
+      "PAGE_ORDER_MISMATCH",
     ].includes(String(clarification.reason)) ||
     !isNonEmptyString(clarification.question) ||
     !Array.isArray(clarification.options) ||
@@ -421,6 +422,13 @@ function isClarificationResult(value: Record<string, unknown>) {
     return false;
   }
   const hasField = isRoutingEntityField(clarification.field);
+  if (clarification.reason === "PAGE_ORDER_MISMATCH") {
+    return value.intent === "ORDER_DIAGNOSIS" && clarification.field === "order_id" &&
+      clarification.options.length === 2 &&
+      clarification.options[0].source === "PAGE_CONTEXT" &&
+      clarification.options[0].value !== clarification.options[1].value &&
+      clarification.options.every((item) => /^ORDER-[A-Z0-9][A-Z0-9-]*$/.test(item.value));
+  }
   if (clarification.reason === "ENTITY_CONFLICT") {
     return hasField && clarification.options.length >= 2;
   }

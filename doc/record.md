@@ -1787,3 +1787,26 @@
 - 统一消息使用300秒独立HTTP等待预算，其他Agent接口保留20秒，继续校验五类结果及规范引用。
 - 客户端超时提示先查运行历史并关闭本轮直接重试入口，不自动重发请求；后端明确失败的Run、步骤和重试语义保持。
 - 等待上限适配当前默认后端预算，不取消后台Run，也不提供结果自动恢复；调整后端预算时需同步核对页面等待时间。
+
+---
+
+## 2026-10-22 — `[T774-T777补充] 跨订单诊断确认切换`
+
+### 核心解决的问题
+
+用户在一个订单页面明确诊断另一订单时，路由采用用户目标，但动态图仍校验原页面订单，导致底层参数错误。
+分发前转为可操作的切换提示，确认并加载目标后建立独立会话继续，避免混用原订单上下文。
+
+### 实现的核心代码
+
+- `agent-service/app/routing/decision.py`：`require_matching_diagnosis_page`；`app/schemas/routing.py`：切换原因及候选校验。
+- `agent-service/app/services/agent_messages.py`：分发前门禁及待切换时保留原Session。
+- `web-console/src/stores/orderStore.ts`：`switchOrderForAgent`，目标加载成功后才提交页面切换。
+- `web-console/src/components/AgentWorkspaceDrawer.vue`：确认、取消、原问题续接及会话/SSE隔离；`src/App.vue`绑定目标加载。
+- `web-console/src/api/agentClient.ts`、`src/types/agent.ts`：切换契约校验；`AgentResultView.vue`：结果订单标识。
+
+### 实现的核心功能
+
+- READY动态诊断目标与页面不同即返回CLARIFICATION/PAGE_ORDER_MISMATCH，提示阶段不执行Skill、Action模型或业务Tool。
+- 确认后加载Java快照，再使用原问题、新Session与SSE创建诊断；取消保留原页面会话，加载失败不提交切换或继续诊断。
+- 防止重复点击续接，页面变更或卸载使旧续接失效，结果明确标注订单；保留Java事实、权限及动态图初始化防御校验。

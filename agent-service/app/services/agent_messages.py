@@ -22,6 +22,7 @@ from app.routing.decision import (
     InvalidClarificationSelectionError,
     build_routing_decision,
     confirm_routing_intent,
+    require_matching_diagnosis_page,
     resume_routing_after_selection,
 )
 from app.routing.entity_merge import merge_routing_entities
@@ -60,6 +61,7 @@ _LOGGER = logging.getLogger("agent-service.agent-messages")
 _RESULT_ADAPTER: TypeAdapter[AgentMessageResult] = TypeAdapter(AgentMessageResult)
 OutputT = TypeVar("OutputT", bound=BaseModel)
 
+
 # 向skill传递的参数（所有 Skill 接收统一的 AgentSkillRequest）
 @dataclass(frozen=True, slots=True)
 class AgentSkillRequest:
@@ -75,6 +77,7 @@ class AgentSkillRequest:
     step_recorder: ObservedWorkflowStepRecorder  # 让Skill内部继续记录Step信息
     first_step_sequence: int  #  Skill内部Step从哪个序号开始
     event_sink: RunEventSink | None  #  向前端发布SSE进度事件的Sink
+
 
 # skill执行完返回的结果 （执行后统一返回 AgentSkillExecution）
 @dataclass(frozen=True, slots=True)
@@ -257,6 +260,7 @@ class _ObservedIntentRoutingModel:
         )
         return await StructuredIntentRoutingModel(client).generate(prompt)
 
+
 # Agent Turn 编排服务
 class AgentMessageService:
     """用唯一生产入口执行一轮上下文、严格路由、澄清或Skill分发。"""
@@ -277,6 +281,7 @@ class AgentMessageService:
         self._session_ttl = timedelta(seconds=session_ttl_seconds)
         self._version_snapshot = version_snapshot
         self._event_sink = event_sink
+
     # 建立Run + 加载上下文+ 模型给候选+ 服务端做裁决+ 澄清或分者调用Skill + 统一保存终态
     async def execute(
         self,
@@ -368,7 +373,7 @@ class AgentMessageService:
             )
             # Step 序号如何安排
             routing_model: _ObservedIntentRoutingModel | None = None
-            # 5.判断是不是澄清续接 
+            # 5.判断是不是澄清续接
             # 如果当前请求不是澄清续接，系统创建路由模型
             if request.clarification is None:
                 routing_model = _ObservedIntentRoutingModel(
@@ -423,6 +428,7 @@ class AgentMessageService:
                     ) from error
                 policy_sequence = 2
                 router_usage = RunTokenUsage()
+            decision = require_matching_diagnosis_page(decision, request.page_context)
             # 6.4.记录确定性 ROUTER Step
             await self._record_routing_decision(
                 recorder,
@@ -674,6 +680,7 @@ class AgentMessageService:
                 token_usage=token_usage,
                 tool_call_count=tool_call_count,
             )
+
     # 原子创建运行上下文服务：在事务中创建或锁定session
     async def _create_running_run(
         self,
@@ -785,6 +792,7 @@ class AgentMessageService:
                 "clarification source run is internally inconsistent"
             )
         return decision
+
     # 记录路由决策
     async def _record_routing_decision(
         self,
@@ -823,6 +831,7 @@ class AgentMessageService:
                 run_id,
                 router_result=decision,
             )
+
     # SessionContext 更新
     async def _update_session_context(
         self,
@@ -832,6 +841,13 @@ class AgentMessageService:
         decision: RoutingDecision,
     ) -> None:
         """只保存用户明确实体、路由意图和待选候选, 不复制业务事实。"""
+
+        # 切换尚未确认，保留当前订单Session，取消后不能把下一轮指代带到目标订单。
+        if (
+            decision.clarification is not None
+            and decision.clarification.reason.value == "PAGE_ORDER_MISMATCH"
+        ):
+            return
 
         now = datetime.now(UTC)
         async with self._database.session() as session, session.begin():
@@ -879,6 +895,7 @@ class AgentMessageService:
             stored.context = validated.model_dump(mode="json")
             stored.expires_at = now + self._session_ttl
             await session.flush()
+
     # 标记成功
     async def _mark_succeeded(
         self,
@@ -941,6 +958,7 @@ class AgentMessageService:
             retryable=retryable,
             error_step=error_step,
         ) from cause
+
     # 校验skill结果类型, 防止Skill返回的结果越过kind边界或由Skill伪造澄清。
     @staticmethod
     def _validate_skill_result(

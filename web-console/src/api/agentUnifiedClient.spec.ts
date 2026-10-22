@@ -14,6 +14,17 @@ const mock = new MockAdapter(agentHttpClient);
 afterEach(() => mock.reset());
 
 describe("unified agent client", () => {
+  it("校验切换提示当前与目标订单不同且候选结构有效", async () => {
+    const result = clarification();
+    result.intent = "ORDER_DIAGNOSIS";
+    result.clarification.reason = "PAGE_ORDER_MISMATCH";
+    result.clarification.options = [{ value: "ORDER-001", source: "PAGE_CONTEXT" }, { value: "ORDER-003", source: "USER_MESSAGE" }];
+    mock.onPost("/api/agent/messages").reply(200, response(result));
+    await expect(requestAgentMessage({ message: "诊断 ORDER-003" })).resolves.toMatchObject({ result: { kind: "CLARIFICATION" } });
+    result.clarification.options[1]!.value = "ORDER-001";
+    mock.onPost("/api/agent/messages").reply(200, response(result));
+    await expect(requestAgentMessage({ message: "诊断 ORDER-003" })).rejects.toMatchObject({ code: "RESPONSE_VALIDATION_ERROR" });
+  });
   it("校验模型、知识索引和五类结果能力", async () => {
     mock.onGet("/api/agent/capabilities").reply(200, capabilities());
 
@@ -162,7 +173,7 @@ function specification(): Extract<AgentMessageResult, { kind: "SPECIFICATION_ANS
   };
 }
 
-function clarification(): AgentMessageResult {
+function clarification(): Extract<AgentMessageResult, { kind: "CLARIFICATION" }> {
   return {
     kind: "CLARIFICATION",
     intent: "ORDER_QUERY",

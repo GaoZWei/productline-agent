@@ -76,6 +76,7 @@ from app.schemas import (
     RoutingEntityName,
     RunTokenUsage,
 )
+from app.schemas.agent_messages import DiagnosisAgentResult
 from app.schemas.business import BusinessIdentity
 from app.schemas.knowledge import (
     DocumentLifecycle,
@@ -91,6 +92,7 @@ from app.schemas.versioning import (
     ToolSchemaSnapshot,
     VersionCaptureStatus,
 )
+from app.schemas.workflow import BlockingStage, DiagnosisResult, RootCause, Suggestion
 from app.schemas.write_tools import WriteReviewResultOutput
 from app.services import (
     AgentMessageExecutionError,
@@ -2837,6 +2839,110 @@ async def test_workflow_step_recorder_uses_committed_short_transactions(
             assert stored_steps[0].output_summary == "order_id=ORDER-003"
             assert stored_steps[1].error_code == "RESOURCE_NOT_FOUND"
     finally:
+        await database.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_agent_messages_cross_order_requires_switch_before_dispatch(
+    migrated_database_url: str,
+) -> None:
+    """跨页诊断持久化澄清且不分发，同页重新提交使用独立Session。"""
+
+    database = Database(migrated_database_url)
+    class DiagnosticDispatcher(_AgentMessageStatusDispatcher):
+        async def dispatch(
+            self, skill: BusinessSkill, request: AgentSkillRequest,
+        ) -> AgentSkillExecution:
+            self.calls.append((skill, request))
+            return AgentSkillExecution(result=DiagnosisAgentResult(diagnosis=DiagnosisResult(
+                order_id="ORDER-003", blocking_stage=BlockingStage.INSUFFICIENT_INFORMATION,
+                summary="测试替身未读取业务事实。",
+                root_causes=[
+                    RootCause(code="INSUFFICIENT_INFORMATION", description="尚未读取事实")
+                ],
+                evidence=[],
+                suggestions=[
+                    Suggestion(action_type="SUPPLEMENT_INFORMATION", description="补充业务事实")
+                ],
+                confidence=0.0,
+            )))
+
+    dispatcher = DiagnosticDispatcher()
+    model = OpenAICompatibleChatClient(
+        Settings(
+            environment="test",
+            model_name="router-test-model",
+            model_base_url=AnyHttpUrl("http://model.test/v1"),
+            model_max_retries=0,
+        ),
+        transport=_router_transport(
+            [
+                {
+                    "intent": "ORDER_DIAGNOSIS",
+                    "confidence": 0.95,
+                    "entities": {"order_id": "ORDER-003"},
+                    "missing_fields": [],
+                    "need_clarification": False,
+                }
+            ]
+            * 2
+        ),
+    )
+    identity = BusinessIdentity(user_id="reviewer-001", role="REVIEWER")
+    service = AgentMessageService(
+        database,
+        model,
+        dispatcher,
+        session_ttl_seconds=1800,
+        version_snapshot=TEST_RUN_VERSION_SNAPSHOT,
+    )
+
+    def message(order_id: str) -> AgentMessageRequest:
+        return AgentMessageRequest.model_validate(
+            {
+                "message": "请诊断 ORDER-003 为什么未交付",
+                "page_context": {
+                    "current_system": "production-system",
+                    "current_page": "order-detail",
+                    "order_id": order_id,
+                    "user_role": "REVIEWER",
+                },
+            }
+        )
+
+    try:
+        pending = await service.execute(
+            message("ORDER-001"), identity=identity, trace_id="trace-switch"
+        )
+        assert pending.result.kind is AgentResultKind.CLARIFICATION
+        assert pending.result.clarification.reason.value == "PAGE_ORDER_MISMATCH"
+        assert dispatcher.calls == []
+        async with database.session() as session:
+            run = await AgentRunRepository(session).get(pending.run_id)
+            steps = await AgentStepRepository(session).list_by_run(pending.run_id)
+            saved_session = await session.get(AgentSession, pending.session_id)
+            assert saved_session is not None
+            assert saved_session.context["current_order_id"] == "ORDER-001"
+        assert run is not None and run.status is AgentRunStatus.SUCCEEDED
+        assert run.tool_call_count == 0 and run.termination_reason == "CLARIFICATION_REQUIRED"
+        assert (
+            run.router_result is not None and run.router_result["status"] == "NEEDS_CLARIFICATION"
+        )
+        assert [step.step_type for step in steps] == [
+            AgentStepType.CONTEXT,
+            AgentStepType.LLM,
+            AgentStepType.ROUTER,
+        ]
+        matched = await service.execute(
+            message("ORDER-003"), identity=identity, trace_id="trace-switched"
+        )
+        assert len(dispatcher.calls) == 1
+        assert matched.session_id != pending.session_id
+        assert dispatcher.calls[0][1].page_context is not None
+        assert dispatcher.calls[0][1].page_context.order_id == "ORDER-003"
+    finally:
+        await model.aclose()
         await database.dispose()
 
 

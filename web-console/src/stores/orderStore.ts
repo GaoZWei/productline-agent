@@ -25,7 +25,7 @@ export const ORDER_SCENES: Record<DemoOrderId, string> = {
 
 export const useOrderStore = defineStore("orders", () => {
   const orders = ref<Order[]>([]);
-  const selectedOrderId = ref<DemoOrderId>("ORDER-003");
+  const selectedOrderId = ref<string>("ORDER-003");
   const overview = ref<OrderOverview>();
   const listLoading = ref(false);
   const detailLoading = ref(false);
@@ -54,7 +54,7 @@ export const useOrderStore = defineStore("orders", () => {
     }
   }
 
-  async function selectOrder(orderId: DemoOrderId) {
+  async function selectOrder(orderId: string) {
     selectedOrderId.value = orderId;
     const requestSequence = ++detailRequestSequence;
     detailLoading.value = true;
@@ -83,6 +83,29 @@ export const useOrderStore = defineStore("orders", () => {
     await selectOrder(selectedOrderId.value);
   }
 
+  async function switchOrderForAgent(orderId: string): Promise<Order> {
+    // 成功读取并校验目标后才提交切换，加载失败时保留原页面。
+    const sequence = ++detailRequestSequence;
+    detailLoading.value = true;
+    try {
+      const result = await fetchOrderOverview(orderId);
+      if (sequence !== detailRequestSequence) {
+        throw new BusinessApiError({ code: "REQUEST_SUPERSEDED", message: "订单切换已被替代" });
+      }
+      if (result.data.order.orderId !== orderId) {
+        throw new BusinessApiError({ code: "RESPONSE_VALIDATION_ERROR", message: "返回的订单与目标不一致" });
+      }
+      // 演示侧栏固定五单，非目录目标也由Java响应决定能否读取。
+      selectedOrderId.value = orderId;
+      overview.value = result.data;
+      traceId.value = result.traceId;
+      error.value = undefined;
+      return result.data.order;
+    } finally {
+      if (sequence === detailRequestSequence) detailLoading.value = false;
+    }
+  }
+
   return {
     orders,
     selectedOrderId,
@@ -94,6 +117,7 @@ export const useOrderStore = defineStore("orders", () => {
     traceId,
     initialize,
     selectOrder,
+    switchOrderForAgent,
     retry,
   };
 });

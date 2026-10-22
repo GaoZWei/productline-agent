@@ -77,7 +77,7 @@ onMounted(() => store.initialize());
             <div v-if="traceId" class="trace-chip" title="用于关联 Java 服务日志">
               TRACE · {{ traceId }}
             </div>
-            <AgentWorkspaceDrawer :order="overview?.order" />
+            <AgentWorkspaceDrawer :order="overview?.order" :switch-order="store.switchOrderForAgent" />
           </div>
         </div>
 

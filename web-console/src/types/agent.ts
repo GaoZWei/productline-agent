@@ -108,7 +108,8 @@ export interface ClarificationRequest {
     | "MISSING_PARAMETER"
     | "LOW_CONFIDENCE"
     | "CONFIRM_INTENT"
-    | "MODEL_REQUEST";
+    | "MODEL_REQUEST"
+    | "PAGE_ORDER_MISMATCH";
   question: string;
   field: RoutingEntityField | null;
   options: ClarificationOption[];

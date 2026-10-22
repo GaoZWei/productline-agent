@@ -80,6 +80,7 @@ function formatEvidenceValue(value: string | number | boolean | null) {
 
     <template v-if="diagnosis">
       <section class="diagnosis-stage-card">
+        <h3>{{ diagnosis.order_id }} · 诊断结果</h3>
         <div class="diagnosis-stage-heading">
           <span>阻塞环节</span><strong>{{ diagnosis.blocking_stage }}</strong>
         </div>
@@ -147,7 +148,7 @@ function formatEvidenceValue(value: string | number | boolean | null) {
     <section v-if="clarification" class="agent-result-card clarification-result">
       <header><span>需要确认</span><strong>{{ clarification.clarification.reason }}</strong></header>
       <h3>{{ clarification.clarification.question }}</h3>
-      <div v-if="clarification.clarification.options.length" class="clarification-options">
+      <div v-if="clarification.clarification.options.length && clarification.clarification.reason !== 'PAGE_ORDER_MISMATCH'" class="clarification-options">
         <button
           v-for="option in clarification.clarification.options"
           :key="`${option.source}:${option.value}`"

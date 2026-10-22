@@ -1,15 +1,20 @@
 # 当前开发状态
 
 - 当前里程碑：M7运行观测、生产闭环集成与统一评测（已完成并通过完整验收）
-- 当前子阶段：M7完整验收已通过；真实规范问答接口及统一页面超时适配完成，其他真实Skill与页面全链路仍待验证，未进入新里程碑
+- 当前子阶段：M7完整验收已通过；跨订单诊断确认切换已实现，真实浏览器001→提示→003诊断链路通过，Review草稿及其余页面链路仍待验证，未进入新里程碑
 - 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T793，以及M7.7场景01～24、M7.9全部领域指标
 - 当前场景：订单页统一Agent抽屉通过`POST /api/agent/messages`承载状态、动态诊断、规范问答、受控澄清和Review Approval五类结果；同一订单复用Session，每轮消息及确认创建独立SSE，切换订单隔离迟到响应；Review写回与返工分别确认，固定诊断仍作为显式入口保留
 - 通过测试：2026-10-11 `make test`完整通过，含三端smoke、Agent隔离PostgreSQL持久化52/52、Java测试59/59、前端64/64及生产构建；`make quality`的Ruff通过，mypy检查203个源文件无问题；`make eval-all`两组24/24与58/58通过；补充验收中隔离Java+PostgreSQL Agent E2E 16/16、24场景矩阵的Java链路8/8与Python异常检查23/23、统一页面组件32/32、隔离PostgreSQL链路1/1及Docker烟测通过
-- 失败测试：本次页面超时定向测试、类型检查、构建和运行烟测均通过；未运行完整三端测试或外部模型慢响应页面验收
-- 当前阻塞：本次无阻塞；统一消息已使用300秒独立等待预算，其他Agent接口仍为20秒，客户端超时提示先查运行历史；尚无自动结果恢复或后台整轮取消，完整真实模型页面链路仍待验证
+- 失败测试：开发中切换原因Schema校验、测试替身结果契约及前端测试类型问题已修正，保留原校验与断言，最终局部测试、独立数据库集成、质量检查及真实浏览器验收均通过；未重跑全仓测试
+- 当前阻塞：本次无阻塞；跨订单初始化错误已通过提前提示和确认切换解决，仅作用于动态订单诊断。真实诊断仍可能在默认6轮以MAX_ITERATIONS出口形成有依据结论，不能声称主动FINISH；Review草稿及其余页面链路仍待验证
 - 开发环境：OpenJDK 21.0.12、Maven 3.9.16、Python 3.12.13（uv 管理）、uv 0.12.0、Node.js 22.22.2、npm 10.9.7、Docker Desktop 29.6.2
-- 最近更新：2026-10-20将`requestAgentMessage`等待预算独立为300秒，普通Agent接口仍为20秒。客户端等待超时保留REQUEST_TIMEOUT并提示后台可能仍执行、先查运行历史，隐藏直接重试入口且不自动重发；后端明确返回的模型失败语义保持。仅构建并重新创建Web容器，未变更Java业务或调用外部模型
-- 本次验证：在web-console执行`npm test -- src/api/agentMessageTimeout.spec.ts src/api/agentUnifiedClient.spec.ts src/api/agentClient.spec.ts src/components/AgentWorkspaceDrawer.spec.ts`29/29通过；`npm run build`通过Vue TypeScript检查及Vite构建，`git diff --check`通过。真实Axios Fetch适配器配合模拟响应及虚拟时钟验证35秒返回、300秒超时、普通查询20秒超时、单次发送及后端504错误保留；组件验证结果未知提示和无直接重试按钮。`docker compose build --quiet web-console`及`docker compose up -d --no-deps --force-recreate web-console`成功，服务静态资源哈希与本机测试构建一致；浏览器验证订单页和Agent抽屉加载，三端健康200/UP、索引READY且16/80，Java固定黄金任务、问题、复核及交付事实保持。未运行完整test-agent-page、全仓测试或真实模型慢响应页面验收
+- 最近更新：2026-10-22实现CLARIFICATION/PAGE_ORDER_MISMATCH：诊断目标与页面不同则在Skill分发前提示切换，保留原Session，确认后先加载Java目标快照，再切换页面、清理旧Session/SSE，以原问题和新Session重新诊断；取消、加载失败或被其他页面切换替代时不续接。前后端Schema同步，结果明确标注订单，初始化防御和Java权限/事实边界保持
+- 本次验证：agent-service执行`.venv/bin/pytest -q tests/test_agent_messages.py tests/test_intent_routing.py tests/test_dynamic_diagnosis_workflow.py`31/31；`PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" UV_CACHE_DIR=/tmp/productline-agent-uv-cache ./scripts/test-agent-persistence.sh -k 'cross_order_requires_switch or agent_messages_persist_route' --tb=short`在独立临时数据库2/2；web-console执行`npm test -- src/api/agentUnifiedClient.spec.ts src/components/AgentWorkspaceDrawer.spec.ts src/stores/orderStore.spec.ts src/components/AgentResultView.spec.ts src/App.spec.ts`34/34，`npm run build`通过；5个相关Python文件Ruff/mypy通过，git diff --check通过。仅构建并重建Agent与Web，三端健康200/UP、知识索引READY且16/80，完整ORDER-003业务快照与诊断前相同，任务版本0；未执行Review或人工确认写入，未跑全仓和全量真实质量评测
+- 跨订单真实页面验收：浏览器在ORDER-001输入诊断003，提示Run `run-c4df6f84711c4b409e461c4d539e9ab2`以CLARIFICATION_REQUIRED成功结束，仅3个Step、业务Tool为0、无Approval；点击“切换到ORDER-003并继续”后页面及Session均更新，新Run `run-77f49370fdc0497bb24536855023ec3d`约11.9秒返回QUALITY_REVIEW、预期两项根因和建议，24个Step成功、5次业务读取、无Approval，终止原因仍为MAX_ITERATIONS。取消、重复点击、403/404及迟到隔离由受控测试覆盖，不代表线上权限体系或主动收敛率评测
+- 首次真实动态诊断批次：此前同日Run `run-7f60474c0a974227bf3374bb1883cd9e`约11.8秒、24个Step成功、9个LLM Step记录17229个对话Token，RAG为ANSWERED及3条引用，最终诊断与Java事实一致且零业务写入；首次临时脚本额外要求SUFFICIENT_INFORMATION而失败，核对后保留MAX_ITERATIONS真实原因，补充信息已齐的预算出口回归，相关pytest34/34及局部Ruff/mypy通过
+- 用户页面错误核对：2026-10-22只读回查`run-3ea07b53e024434ba5bce25d9daa1488`及Step，保存的页面订单为ORDER-001，路由冲突记录按USER_MESSAGE选择ORDER-003并READY；initialize报PARAM_VALIDATION_ERROR，Run为FAILED/EXECUTION_ERROR，业务Tool调用0、Approval为0，仅Router产生1425个对话Token，尚未进入Action模型。问题已定位，未修改运行时代码或重发模型请求；用户可先切到003页面验证同页链路，此缺陷后续已通过分发前切换提示修复，见跨订单真实页面验收
+- 交互优化待办记录：2026-10-22按用户要求将“识别目标不同→确认切换→加载目标订单→继续原问题→结果标注订单”记录到`Agent-interview.md`的“跨订单页面交互优化”小节，包含后端提前提示、会话/SSE隔离、Java权限校验及取消/重复点击/失败验收条件；记录时全部标记待实现；该记录批次仅改文档，后续已完成实现及验收，见最近更新
+- 页面超时适配批次：2026-10-20统一消息等待预算独立为300秒，普通Agent接口20秒，客户端超时提示先查运行历史且不自动重发。4个前端测试文件29/29及npm run build通过；Web容器已更新，静态资源与测试构建哈希一致，浏览器页面与抽屉加载正常。模拟35秒返回及300秒超时通过，未用真实模型制造页面慢响应
 - 规范问答接口批次：此前同日通过统一入口验证交付条件、坐标说明与无证据问题；两题ANSWERED且4条引用与知识源一致，无证据题不调用回答模型。固定2秒重排预算已修复为生产可配置默认30秒、上限120秒；相关pytest34/34、7文件Ruff/mypy通过，最终Agent镜像复验成功且新Run快照记录实际30秒。首次批量携带页面上下文被自动审批拒绝，按建议省略后通过；验收脚本曾将派生blocking_stage误当Java overview字段，改按真实契约逐字段检查后通过，未改业务事实
 - 真实问答观测：三种场景Run为`run-c735c4d5eb7e472eb8757bb03786e2e7`、`run-e471fbd83d8245a0b54907f31c808bce`、`run-1a2c1163f4684e97a45a350c0ee909f6`，最终镜像复验Run为`run-f7dbdb9338784c8e8837fe367da51d46`；坐标样例约34.7秒，Trace日志确认Query Embedding首次超时后有限重试一次成功，重排约2.2秒。前三条Run产生于快照修正前，仍保留当时错误的2秒快照值；最终新Run记录实际30秒，不重写历史。LLM Step用量不含查询Embedding及超时请求可能产生的费用
 - 数据库连接修复批次：同日定位DBeaver误连本机PostgreSQL；本地`.env`将POSTGRES_PORT改为15432，`docker compose up -d --no-deps --force-recreate postgres`成功并保留原卷，主机TCP及DBeaver连接成功，文档16/Chunk80，Java与Agent容器仍访问postgres:5432，未创建角色或修改业务数据
@@ -24,7 +29,7 @@
 - 千问Embedding配置：本地与当前Agent容器均使用`qwen3.7-text-embedding`、1536维、批次20及独立索引版本，密钥和响应兼容代码已生效；2026-10-20完成一次真实批量入库及READY检查，并验证三种真实问答场景，尚未运行全量真实检索质量评测
 - M7.5当前边界：页面展示当次执行证据而非当前Java业务事实；历史诊断不符合当前Schema时不会补造正文，当前仍使用offset分页且只允许本人REVIEWER，尚无审计主管跨用户视图、游标分页或操作日志聚合展示
 - M7.6当前边界：T749～T781七个批次已全部完成；统一页面能够操作四个生产Skill及Approval闭环，但真实动态调用仍依赖外部模型配置，规范问答和Review还要求知识索引为`READY`，页面能力标签不代表已探测Provider网络
-- T754～T758当前边界：五类适配器均已接入统一Agent API并绑定逐LLM Step；真实Provider已验证Router、订单状态、Rerank及规范回答的小样本链路，Action动态诊断与Review草稿仍待真实验证，不能将三个规范问答场景当作准确率评测
+- T754～T758当前边界：五类适配器均已接入统一Agent API并绑定逐LLM Step；真实Provider已验证Router、订单状态、Rerank、规范回答及一次ORDER-003 Action动态诊断，后者为预算退出且事实充分，Review草稿仍待真实验证；这些小样本不能作为准确率或主动收敛率评测
 - T759～T761当前边界：`make knowledge-ingest`是唯一主动访问外部Embedding的全量运维入口；原受控Provider验收覆盖重复执行、旧文档清理及就绪/身份不匹配，2026-10-20首次真实千问全量入库16份文档、80个唯一Chunk并通过READY验收，尚未重复付费调用验证全量幂等；能力查询不读取正文或向量，本次正文与向量维度由独立只读验收核对
 - T762～T773当前边界：统一入口及四个Skill通过结构化模型Stub、Java Tool、确定性Embedding目录和真实PostgreSQL验证；缺参、冲突和意图确认继续由确定性门禁处理，Review只生成草稿，确认与返工由独立确定性API执行且都会刷新Java事实、校验版本并使用幂等写Tool
 - T750当前边界：能力查询只证明当前进程配置通过校验，不探测模型网络、不产生LLM Step，也不代表模型实际参与了Router、生成或Run
@@ -35,5 +40,5 @@
 - M7.9 RAG指标当前边界：Hit@5与MRR以全部用例为分母，无关片段占比以实际Top-5返回片段为分母；版本过滤和引用文档只统计完整链路Subject明确提交的观测，`None`不进入分母，`False`才计失败。T786已接到统一Suite，但可控Subject结果仍不代表真实RAG质量
 - M7.9 Agent指标当前边界：E2E成功率和平均已执行Tool数以全部用例为分母，无效与重复Tool率以所有尝试为分母且每次尝试必须归入已执行、无效或重复之一；诊断耗时仅统计有计时用例，阶段正确率仅统计声明预期阶段的用例。T787/T788已提供统一Provider接线，真实数字要求实际Run、Step和调用账本采集器
 - M7.9观测指标当前边界：步骤可定位要求实际Step与预期完全一致，错误类型按全部异常用例的稳定错误码比较，排查中位时长只统计有计时样本；无适用步骤或耗时样本时分母为零且数值稳定为零。T790已接到统一Suite，真实人工排查计时仍需在实际演练中采集
-- 已知非阻塞问题：历史页可展示Run来源和关联Approval差异，但尚无独立操作日志聚合页；日志详情当前只允许原确认人读取，尚无审计主管角色或完整RBAC；只有写Tool实际开始后的成功、Java 409或其他写失败会生成操作日志，确认前过期或事实重校验`STALE`只保留Approval/Run/Step终态；确认服务不重新运行RAG，引用适用性仍以草稿生成时检索结果为准；写失败需要新建Approval再次授权；若进程在Java成功后、保存日志和终态前崩溃，Java幂等可防重复写但目前没有自动恢复任务；返工只覆盖`COORDINATE_SYSTEM_FIX`；DeepSeek JSON Object只能保证JSON语法，Schema与业务合法性仍依赖本地校验，真实Provider尚未覆盖Action与Review草稿；Embedding已完成16份文档、80个向量入库，真实Rerank及规范回答已通过三种场景验收，尚未完成50题真实质量评测；统一消息300秒等待只适配当前默认预算，尚无客户端超时后自动恢复或后台整轮取消；浏览器已验证页面与抽屉加载，尚缺真实慢响应完整交互及视觉验收；Session/SSE仍是单进程TTL与有界内存实现；演示Header不是完整认证；Java与Python数据库角色尚未隔离
-- 下一阶段：页面等待超时适配完成；下一最小任务按原清单验证ORDER-003真实Action动态诊断，再验证Review草稿及统一页面全链路。真实慢响应页面验收、完整RAG质量评测与超时自动恢复仍未完成，不自动进入新里程碑
+- 已知非阻塞问题：历史页可展示Run来源和关联Approval差异，但尚无独立操作日志聚合页；日志详情当前只允许原确认人读取，尚无审计主管角色或完整RBAC；只有写Tool实际开始后的成功、Java 409或其他写失败会生成操作日志，确认前过期或事实重校验STALE只保留Approval/Run/Step终态；确认服务不重新运行RAG，引用适用性仍以草稿生成时检索结果为准；写失败需要新建Approval再次授权；若进程在Java成功后、保存日志和终态前崩溃，Java幂等可防重复写但目前没有自动恢复任务；返工只覆盖COORDINATE_SYSTEM_FIX；DeepSeek JSON Object只保证JSON语法，Schema与业务合法性仍需本地校验；真实Provider已覆盖一次Action动态诊断，仍未覆盖Review草稿，且该诊断为MAX_ITERATIONS出口而非主动FINISH；真实RAG仅小样本验收，尚无50题真实质量评测；统一消息300秒等待只适配当前默认预算，尚无超时自动恢复或后台整轮取消；浏览器已验证跨订单确认切换和真实动态诊断，Review与写入页面交互仍待真实验收；Session/SSE仍为单进程TTL及有界内存；演示Header不是完整认证，Java与Python数据库角色尚未隔离
+- 下一阶段：跨订单诊断确认切换已验收；下一最小任务为真实模型生成Review复核草稿，仅验收待确认内容，再按清单验证人工确认、返工及其余页面链路，不自动执行写入或进入新里程碑

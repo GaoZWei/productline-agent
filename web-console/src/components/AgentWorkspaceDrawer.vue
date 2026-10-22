@@ -11,6 +11,7 @@ import {
   sendAgentMessage,
 } from "../api/agentApi";
 import { AGENT_USER_ROLE, AgentApiError } from "../api/agentClient";
+import { BusinessApiError } from "../api/businessClient";
 import {
   createRunEventStreamId,
   openRunEventStream,
@@ -32,7 +33,7 @@ import AgentRunTimeline from "./AgentRunTimeline.vue";
 
 const DEFAULT_MESSAGE = "这个订单为什么还没有交付？";
 
-const props = defineProps<{ order?: Order }>();
+const props = defineProps<{ order?: Order; switchOrder?: (orderId: string) => Promise<Order> }>();
 const visible = ref(false);
 const userMessage = ref(DEFAULT_MESSAGE);
 const loading = ref(false);
@@ -48,17 +49,27 @@ const runEvents = ref<RunEvent[]>([]);
 const connectionStatus = ref<RunEventConnectionStatus | "idle">("idle");
 const connectionWarning = ref<RunEventClientError>();
 const lastRequest = ref<{ message: string; clarification?: ClarificationChoice }>();
+const switchingOrder = ref(false);
 let eventConnection: RunEventConnection | undefined;
 let requestSequence = 0;
 
 const currentOrderId = computed(() => props.order?.orderId);
-const busy = computed(() => loading.value || actionLoading.value);
+const busy = computed(() => loading.value || actionLoading.value || switchingOrder.value);
+// 检查返回结果是否是订单切换提示，如果是则显示切换确认按钮
+const orderSwitchRequest = computed(() => {
+  const value = result.value?.result;
+  return value?.kind === "CLARIFICATION" && value.clarification.reason === "PAGE_ORDER_MISMATCH"
+    ? value.clarification : undefined;
+});
 const canSubmit = computed(
   () => Boolean(currentOrderId.value && userMessage.value.trim()) && !busy.value,
 );
 
 watch(currentOrderId, resetConversation);
-onBeforeUnmount(() => eventConnection?.close());
+onBeforeUnmount(() => {
+  requestSequence += 1;
+  eventConnection?.close();
+});
 
 async function openDrawer() {
   visible.value = true;
@@ -191,6 +202,42 @@ async function retryLastRequest() {
   else await submitAgent();
 }
 
+async function confirmOrderSwitch() {
+  const prompt = orderSwitchRequest.value;
+  const originalMessage = lastRequest.value?.message;
+  if (!prompt || !originalMessage || busy.value) return;
+  const target = prompt.options[1]?.value;
+  const sequence = requestSequence;
+  if (!target || prompt.options[0]?.value !== currentOrderId.value) return;
+  switchingOrder.value = true;
+  error.value = undefined;
+  try {
+    if (!props.switchOrder) throw new AgentApiError({
+      code: "ORDER_SWITCH_UNAVAILABLE", message: "请通过左侧订单列表切换到目标订单后继续。",
+    });
+    const loaded = await props.switchOrder(target);
+    await nextTick();
+    // 仅接受此次目标加载造成的一次页面切换；其他切换必须使续接失效。
+    if (loaded.orderId !== target || currentOrderId.value !== target || requestSequence !== sequence + 1) return;
+    userMessage.value = originalMessage;
+    switchingOrder.value = false;
+    await submitAgent(undefined, originalMessage);
+  } catch (reason) {
+    if (sequence !== requestSequence) return;
+    error.value = toAgentError(reason, "加载目标订单失败");
+  } finally {
+    switchingOrder.value = false;
+  }
+}
+
+function cancelOrderSwitch() {
+  if (busy.value) return;
+  result.value = undefined;
+  lastRequest.value = undefined;
+  eventConnection?.close();
+  actionMessage.value = "已取消切换，未启动目标订单诊断";
+}
+
 async function submitClarification(choice: ClarificationChoice, message: string) {
   await submitAgent(choice, message);
 }
@@ -311,6 +358,9 @@ async function connectEventStream(orderId: string): Promise<string> {
 
 function toAgentError(reason: unknown, fallback: string) {
   if (reason instanceof AgentApiError) return reason;
+  if (reason instanceof BusinessApiError) return new AgentApiError({
+    code: reason.code, message: reason.message, traceId: reason.traceId, status: reason.status,
+  });
   if (reason instanceof RunEventClientError) {
     return new AgentApiError({
       code: reason.code,
@@ -453,8 +503,18 @@ function toAgentError(reason: unknown, fallback: string) {
           </template>
         </el-alert>
 
+        <section v-if="orderSwitchRequest" class="agent-result-card" data-testid="order-switch-prompt">
+          <h3>你要诊断 {{ orderSwitchRequest.options[1]?.value }}</h3>
+          <p>当前页面是 {{ orderSwitchRequest.options[0]?.value }}。切换后将读取目标订单的数据并继续原问题。</p>
+          <el-button type="primary" :loading="switchingOrder" :disabled="busy" data-testid="confirm-order-switch" @click="confirmOrderSwitch">
+            切换到 {{ orderSwitchRequest.options[1]?.value }} 并继续
+          </el-button>
+          <el-button :disabled="busy" data-testid="cancel-order-switch" @click="cancelOrderSwitch">取消</el-button>
+        </section>
+        <p v-if="actionMessage && !result" role="status">{{ actionMessage }}</p>
+
         <AgentResultView
-          v-if="result"
+          v-if="result && !orderSwitchRequest"
           :response="result"
           :submitting="actionLoading || loading"
           :action-message="actionMessage"

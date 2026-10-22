@@ -1,5 +1,6 @@
 """意图路由、实体来源和参数合并的严格结构化契约。"""
 
+import re
 from enum import StrEnum
 from typing import Annotated, Self
 
@@ -17,6 +18,7 @@ IntentValue = Annotated[Intent, Field(strict=False)]
 RoutingParameterValue = Annotated[RoutingParameter, Field(strict=False)]
 RoutingEntityText = Annotated[str, Field(min_length=1, max_length=128)]
 
+
 # 实体字段白名单 明确规定哪些字段允许进入参数合并
 class RoutingEntityName(StrEnum):
     """允许参与路由合并的稳定实体字段名。"""
@@ -27,6 +29,7 @@ class RoutingEntityName(StrEnum):
     BATCH_ID = "batch_id"
     PRODUCT_TYPE = "product_type"
     SATELLITE_TYPE = "satellite_type"
+
 
 # 四种参数来源
 class EntitySource(StrEnum):
@@ -53,6 +56,7 @@ class RoutingSchema(BaseModel):
         str_strip_whitespace=True,
     )
 
+
 # 定义路由结果允许有哪些字段
 # 模型允许提取的“业务指代”, 用于后续业务Skill调用。
 class RouterEntities(RoutingSchema):
@@ -73,11 +77,13 @@ class RouterEntities(RoutingSchema):
             return self.order_id is not None
         return self.task_id is not None
 
+
 # 实体提取结果表示模型从本轮用户消息中明确提取到了什么。
 class EntityExtractionResult(RoutingSchema):
     """模型从本轮用户消息提取的实体, 不包含页面或会话候选值。"""
 
     entities: RouterEntities
+
 
 # 来源化实体 一个已经过字段校验且带可信来源的实体值
 class SourcedEntity(RoutingSchema):
@@ -85,6 +91,7 @@ class SourcedEntity(RoutingSchema):
 
     value: RoutingEntityText
     source: EntitySourceValue
+
 
 # 合并参数时, 冲突模型保留同一字段出现的不同候选值。
 class EntityConflict(RoutingSchema):
@@ -94,6 +101,7 @@ class EntityConflict(RoutingSchema):
     selected: SourcedEntity | None
     candidates: tuple[SourcedEntity, ...]
     resolved_by_priority: bool
+
 
 # 合并结果 参数合并后的来源化实体、冲突和未解析字段
 class EntityMergeResult(RoutingSchema):
@@ -120,6 +128,7 @@ class EntityMergeResult(RoutingSchema):
             }
         )
 
+
 # 置信度等级
 class ConfidenceLevel(StrEnum):
     """M3.6 固定置信度分级。"""
@@ -128,12 +137,14 @@ class ConfidenceLevel(StrEnum):
     MEDIUM = "MEDIUM"
     LOW = "LOW"
 
+
 # 路由决策状态 (是否可以进入业务分发)
 class RoutingDecisionStatus(StrEnum):
     """路由决策是否已经具备进入业务分发的条件。"""
 
     READY = "READY"
     NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
+
 
 # 澄清原因
 class ClarificationReason(StrEnum):
@@ -145,11 +156,13 @@ class ClarificationReason(StrEnum):
     LOW_CONFIDENCE = "LOW_CONFIDENCE"  # 置信度低于 0.60
     CONFIRM_INTENT = "CONFIRM_INTENT"  # 中置信度, 需要确认意图
     MODEL_REQUEST = "MODEL_REQUEST"  # 模型在参数完整时仍认为请求有歧义
+    PAGE_ORDER_MISMATCH = "PAGE_ORDER_MISMATCH"  # 诊断目标与页面不同，需先确认切换
 
 
 ConfidenceLevelValue = Annotated[ConfidenceLevel, Field(strict=False)]
 RoutingDecisionStatusValue = Annotated[RoutingDecisionStatus, Field(strict=False)]
 ClarificationReasonValue = Annotated[ClarificationReason, Field(strict=False)]
+
 
 # 澄清请求模型
 class ClarificationRequest(RoutingSchema):
@@ -164,7 +177,19 @@ class ClarificationRequest(RoutingSchema):
     def validate_reason_payload(self) -> Self:
         """保证字段类澄清带目标字段且候选冲突至少有两个选项。"""
 
-        if self.reason is ClarificationReason.ENTITY_CONFLICT:  # 同一最高优先级存在多个候选值
+        if self.reason is ClarificationReason.PAGE_ORDER_MISMATCH:
+            if (
+                self.field is not RoutingEntityName.ORDER_ID
+                or len(self.options) != 2
+                or self.options[0].source is not EntitySource.PAGE_CONTEXT
+                or self.options[0].value == self.options[1].value
+                or any(
+                    not re.fullmatch(r"ORDER-[A-Z0-9][A-Z0-9-]*", item.value)
+                    for item in self.options
+                )
+            ):
+                raise ValueError("page order mismatch requires current and distinct target orders")
+        elif self.reason is ClarificationReason.ENTITY_CONFLICT:  # 同一最高优先级存在多个候选值
             if self.field is None or len(self.options) < 2:
                 raise ValueError("entity conflict clarification requires field and options")
         elif self.reason is ClarificationReason.MISSING_PARAMETER:  # 缺少订单号或任务号
@@ -174,12 +199,14 @@ class ClarificationRequest(RoutingSchema):
             raise ValueError("non-entity clarification must not contain field or options")
         return self
 
+
 # 用户输入模型
 class EntitySelection(RoutingSchema):
     """用户针对缺参或候选冲突提交的明确字段选择。"""
 
     field: RoutingEntityNameValue
     value: RoutingEntityText
+
 
 # 最终 RoutingDecision (模型路由和可信实体合并后的最终路由决策)
 class RoutingDecision(RoutingSchema):

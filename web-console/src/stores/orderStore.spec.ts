@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchOrder, fetchOrderOverview } from "../api/businessApi";
+import { BusinessApiError } from "../api/businessClient";
 import { orderFixtures, overviewFixture } from "../test/fixtures";
 import { DEMO_ORDER_IDS, useOrderStore } from "./orderStore";
 
@@ -19,6 +20,28 @@ beforeEach(() => {
 });
 
 describe("order store", () => {
+  it("Agent目标加载失败保留原订单与业务快照", async () => {
+    const store = useOrderStore();
+    mockedFetchOverview.mockResolvedValueOnce(resultFor("ORDER-001"));
+    await store.selectOrder("ORDER-001");
+    mockedFetchOverview.mockRejectedValueOnce(new BusinessApiError({ code: "PERMISSION_DENIED", message: "无权限" }));
+    await expect(store.switchOrderForAgent("ORDER-003")).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(store.selectedOrderId).toBe("ORDER-001");
+    expect(store.overview?.order.orderId).toBe("ORDER-001");
+  });
+
+  it("Agent切换丢弃被手动切页替代的迟到结果", async () => {
+    let finish: ((value: ReturnType<typeof resultFor>) => void) | undefined;
+    const store = useOrderStore();
+    mockedFetchOverview.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const pending = store.switchOrderForAgent("ORDER-003");
+    const rejected = expect(pending).rejects.toMatchObject({ code: "REQUEST_SUPERSEDED" });
+    mockedFetchOverview.mockResolvedValueOnce(resultFor("ORDER-005"));
+    await store.selectOrder("ORDER-005");
+    finish?.(resultFor("ORDER-003"));
+    await rejected;
+    expect(store.overview?.order.orderId).toBe("ORDER-005");
+  });
   it("初始化时加载固定五单并默认展示黄金场景 ORDER-003", async () => {
     mockedFetchOrder.mockImplementation(async (orderId) => ({
       data: orderFixtures.find((item) => item.orderId === orderId)!,

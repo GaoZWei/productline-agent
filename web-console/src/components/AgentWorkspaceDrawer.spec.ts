@@ -10,6 +10,7 @@ import {
   sendAgentMessage,
 } from "../api/agentApi";
 import { AgentApiError } from "../api/agentClient";
+import { BusinessApiError } from "../api/businessClient";
 import { createRunEventStreamId, openRunEventStream } from "../api/runEventClient";
 import type { AgentMessageResponse, ApprovalAgentResult } from "../types/agent";
 import type { Order } from "../types/business";
@@ -81,6 +82,91 @@ afterEach(() => {
 });
 
 describe("Agent workspace drawer", () => {
+  it("跨页确认先加载目标，阻止重复点击，再用原问题和新会话发送", async () => {
+    mockedSend.mockResolvedValueOnce(switchResponse()).mockResolvedValueOnce(statusResponse("session-new", "run-new"));
+    let finishLoad: (() => void) | undefined;
+    const switchOrder = vi.fn(() => new Promise<Order>((resolve) => {
+      finishLoad = () => {
+        const order = { orderId: "ORDER-003", productType: "DOM", status: "QUALITY_CHECKING" };
+        selectedOrder!.value = order;
+        resolve(order);
+      };
+    }));
+    mountDrawer(switchOrder, "ORDER-001");
+    click('[data-testid="open-agent-drawer"]');
+    await settleUi();
+    input('[data-testid="agent-message-input"]', "诊断 ORDER-003 为什么没有交付");
+    click('[data-testid="submit-agent-message"]');
+    await settleUi();
+    expect(host?.textContent).toContain("当前页面是 ORDER-001");
+    click('[data-testid="confirm-order-switch"]');
+    click('[data-testid="confirm-order-switch"]');
+    expect(switchOrder).toHaveBeenCalledTimes(1);
+    expect(mockedSend).toHaveBeenCalledTimes(1);
+    finishLoad?.();
+    await settleUi();
+    expect(mockedSend).toHaveBeenCalledTimes(2);
+    expect(mockedSend).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: "诊断 ORDER-003 为什么没有交付", session_id: undefined,
+      page_context: expect.objectContaining({ order_id: "ORDER-003" }),
+    }), "stream-2");
+    expect(host?.textContent).toContain("确定性状态");
+    expect(host?.querySelector('[data-testid="order-switch-prompt"]')).toBeNull();
+    const oldStream = mockedOpenStream.mock.calls[0]?.[0];
+    oldStream?.onError?.({ code: "OLD_STREAM", message: "旧订单迟到错误" } as never);
+    await settleUi();
+    expect(host?.textContent).not.toContain("旧订单迟到错误");
+  });
+
+  it("取消切换时保持当前页面且不发送目标诊断", async () => {
+    mockedSend.mockResolvedValueOnce(switchResponse());
+    const switchOrder = vi.fn();
+    mountDrawer(switchOrder, "ORDER-001");
+    click('[data-testid="open-agent-drawer"]');
+    await settleUi();
+    click('[data-testid="submit-agent-message"]');
+    await settleUi();
+    click('[data-testid="cancel-order-switch"]');
+    await settleUi();
+    expect(selectedOrder?.value.orderId).toBe("ORDER-001");
+    expect(switchOrder).not.toHaveBeenCalled();
+    expect(mockedSend).toHaveBeenCalledTimes(1);
+    expect(host?.textContent).toContain("已取消切换");
+  });
+
+  it.each([[403, "PERMISSION_DENIED"], [404, "RESOURCE_NOT_FOUND"]])(
+    "目标加载失败%s保留原页并停止诊断", async (status, code) => {
+      mockedSend.mockResolvedValueOnce(switchResponse());
+      const switchOrder = vi.fn().mockRejectedValue(new BusinessApiError({ code, message: "目标订单不可读取", status }));
+      mountDrawer(switchOrder, "ORDER-001");
+      click('[data-testid="open-agent-drawer"]');
+      await settleUi();
+      click('[data-testid="submit-agent-message"]');
+      await settleUi();
+      click('[data-testid="confirm-order-switch"]');
+      await settleUi();
+      expect(host?.textContent).toContain(code);
+      expect(selectedOrder?.value.orderId).toBe("ORDER-001");
+      expect(mockedSend).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("加载目标期间手动切页后不继续原请求", async () => {
+    mockedSend.mockResolvedValueOnce(switchResponse());
+    let finishLoad: ((order: Order) => void) | undefined;
+    mountDrawer(() => new Promise((resolve) => { finishLoad = resolve; }), "ORDER-001");
+    click('[data-testid="open-agent-drawer"]');
+    await settleUi();
+    click('[data-testid="submit-agent-message"]');
+    await settleUi();
+    click('[data-testid="confirm-order-switch"]');
+    selectedOrder!.value = { orderId: "ORDER-005", productType: "DOM", status: "READY_FOR_DELIVERY" };
+    await settleUi();
+    finishLoad?.({ orderId: "ORDER-003", productType: "DOM", status: "QUALITY_CHECKING" });
+    await settleUi();
+    expect(mockedSend).toHaveBeenCalledTimes(1);
+    expect(host?.textContent).not.toContain("确定性状态");
+  });
   it("使用新事件流发送统一消息并在同一订单复用Session", async () => {
     mockedSend
       .mockResolvedValueOnce(statusResponse("session-003", "run-status"))
@@ -330,18 +416,29 @@ describe("Agent workspace drawer", () => {
   });
 });
 
-function mountDrawer() {
+function mountDrawer(switchOrder?: (orderId: string) => Promise<Order>, orderId = "ORDER-003") {
   host = document.createElement("div");
   document.body.append(host);
   selectedOrder = ref({
-    orderId: "ORDER-003",
+    orderId,
     productType: "DOM",
     status: "QUALITY_CHECKING",
   });
   application = createApp({
-    setup: () => () => h(AgentWorkspaceDrawer, { order: selectedOrder?.value }),
+    setup: () => () => h(AgentWorkspaceDrawer, { order: selectedOrder?.value, switchOrder }),
   });
   application.mount(host);
+}
+
+function switchResponse(): AgentMessageResponse {
+  return {
+    run_id: "run-switch", session_id: "session-old", trace_id: "trace-switch",
+    result: { kind: "CLARIFICATION", intent: "ORDER_DIAGNOSIS", confidence: 0.95,
+      clarification: { reason: "PAGE_ORDER_MISMATCH", question: "确认切换后继续？", field: "order_id",
+        options: [{ value: "ORDER-001", source: "PAGE_CONTEXT" }, { value: "ORDER-003", source: "USER_MESSAGE" }],
+      },
+    },
+  };
 }
 
 function click(selector: string) {

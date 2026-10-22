@@ -11,6 +11,8 @@ from pydantic import ValidationError
 from app.api import agent_messages as agent_messages_api
 from app.main import create_app
 from app.routing import Intent
+from app.routing.decision import build_routing_decision, require_matching_diagnosis_page
+from app.routing.entity_merge import merge_routing_entities
 from app.schemas.agent_messages import (
     AgentMessageRequest,
     AgentResultKind,
@@ -19,10 +21,14 @@ from app.schemas.agent_messages import (
     OrderStatusResult,
     OrderStatusSubject,
 )
+from app.schemas.context import PageContext
 from app.schemas.routing import (
     ClarificationReason,
     ClarificationRequest,
+    EntityExtractionResult,
     EntitySelection,
+    RouterEntities,
+    RouterResult,
     RoutingEntityName,
 )
 from app.services.agent_messages import (
@@ -39,6 +45,68 @@ def _headers(trace_id: str = "trace-agent-message") -> dict[str, str]:
         "X-User-Id": "reviewer-001",
         "X-User-Role": "REVIEWER",
     }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "page_order,intent,expected",
+    [
+        ("ORDER-001", "ORDER_DIAGNOSIS", "PAGE_ORDER_MISMATCH"),
+        ("ORDER-003", "ORDER_DIAGNOSIS", None),
+        ("ORDER-001", "ORDER_QUERY", None),
+    ],
+)
+def test_diagnosis_page_gate_preserves_target_and_other_routes(
+    page_order: str,
+    intent: str,
+    expected: str | None,
+) -> None:
+    entities = RouterEntities(order_id="ORDER-003")
+    decision = build_routing_decision(
+        raw_result=RouterResult.model_validate(
+            {
+                "intent": intent,
+                "confidence": 0.95,
+                "entities": {"order_id": "ORDER-003"},
+                "missing_fields": [],
+                "need_clarification": False,
+            }
+        ),
+        merge_result=merge_routing_entities(extraction=EntityExtractionResult(entities=entities)),
+    )
+    page = PageContext.model_validate(
+        {
+            "current_system": "production-system",
+            "current_page": "order-detail",
+            "order_id": page_order,
+            "user_role": "REVIEWER",
+        }
+    )
+    result = require_matching_diagnosis_page(decision, page)
+    assert result.entities.to_router_entities().order_id == "ORDER-003"
+    if expected:
+        assert not result.can_dispatch and result.clarification is not None
+        assert result.clarification.reason.value == expected
+        assert [item.value for item in result.clarification.options] == [page_order, "ORDER-003"]
+    else:
+        assert result.can_dispatch
+
+
+@pytest.mark.unit
+def test_page_switch_clarification_rejects_same_order_or_invalid_identifier() -> None:
+    for target in ("ORDER-001", "TASK-003"):
+        with pytest.raises(ValidationError):
+            ClarificationRequest.model_validate(
+                {
+                    "reason": "PAGE_ORDER_MISMATCH",
+                    "question": "切换后继续？",
+                    "field": "order_id",
+                    "options": [
+                        {"value": "ORDER-001", "source": "PAGE_CONTEXT"},
+                        {"value": target, "source": "USER_MESSAGE"},
+                    ],
+                }
+            )
 
 
 @pytest.mark.unit

@@ -429,6 +429,28 @@ M5.6用五个固定订单验收动态图的最小场景路径，并把每个动�
 交付；M5.5要求的交付基础事实始终保留。只读Tool首次超时由BaseTool在同一逻辑调用内最多重试一次，成功后
 动态图只保存一条Observation；重复、最大轮数、连续无新增信息及写Tool拦截继续复用M5.4回归门禁。
 
+2026-10-22通过统一`POST /api/agent/messages`完成一次真实`ORDER-003`动态诊断，模型依次选择订单、任务、
+质检、复核、交付和规范检索，实际执行5次Java只读Tool及1次RAG。返回`QUALITY_REVIEW`，根因为
+`OPEN_COORDINATE_SYSTEM_ISSUE`与`REVIEW_PENDING`，建议创建坐标系返工任务并在处理后重新提交复核；
+字段证据及规则生成结果与Java演示快照一致，执行前后业务快照未变、任务版本仍为0，无Approval或业务写入。
+
+本次Run为`run-7f60474c0a974227bf3374bb1883cd9e`，约11.8秒，9个真实LLM Step均成功并记录17229个对话Token；
+用量不含查询Embedding。RAG Step记录`ANSWERED;citation_count=3`，最终诊断不附内部规范引用正文，
+本轮未逐条回查这3条引用。实际终止原因为`MAX_ITERATIONS`：6次决策补齐信息后触及默认预算，随后规则生成结论；
+未观察到模型主动`FINISH`，不应描述为主动收敛。受控回归同时保护信息未齐时的安全结果和已齐时保留有依据结论，
+未修改生产预算或规则；此单例不代表诊断成功率、性能评测或完整页面验收。
+
+## 跨订单诊断的页面衔接
+
+`AgentMessageService`在保存最终路由并分发Skill前调用`require_matching_diagnosis_page`。
+READY的ORDER_DIAGNOSIS若目标与页面订单不同，转为NEEDS_CLARIFICATION，返回既有CLARIFICATION结果及
+`PAGE_ORDER_MISMATCH`原因，options依次为页面订单、选定目标订单；Schema校验两者格式、数量和差异。
+该Run以CLARIFICATION_REQUIRED结束，零Skill及业务Tool调用，不修改当前订单Session，不删除动态图initialize防御校验。
+
+页面确认并成功加载目标后，以新Session、目标页面上下文及原问题重新提交，重新完成路由及权限校验。
+取消不调用确认API或写Tool；切换提示不允许伪装成普通实体选择来恢复原Run。此边界只作用于动态订单诊断，
+页面提示仍不作为权限凭据或Java事实。
+
 ## 会话上下文
 
 `SessionContext`只持久化当前订单/任务、上一轮意图、已确认参数、候选对象、最近诊断Run和待确认动作

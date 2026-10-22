@@ -5,7 +5,7 @@ import { ORDER_SCENES, type DemoOrderId } from "../stores/orderStore";
 
 defineProps<{
   orders: Order[];
-  selectedOrderId: DemoOrderId;
+  selectedOrderId: string;
   loading: boolean;
 }>();
 
