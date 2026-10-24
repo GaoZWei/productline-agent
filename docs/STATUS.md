@@ -1,14 +1,17 @@
 # 当前开发状态
 
 - 当前里程碑：M7运行观测、生产闭环集成与统一评测（已完成并通过完整验收）
-- 当前子阶段：M7完整验收已通过；已修复可复现的规范检索查询边界冲突并更新Agent容器，真实新会话首问诊断通过；历史关键词失败具体底层原因仍缺证据，未进入新里程碑
+- 当前子阶段：M7完整验收已通过；演示重置手册及独立重复验证已完成，当前环境未重置，任务仍版本2、知识READY且16/80；未进入新里程碑
 - 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T793，以及M7.7场景01～24、M7.9全部领域指标
 - 当前场景：订单页统一Agent抽屉通过`POST /api/agent/messages`承载状态、动态诊断、规范问答、受控澄清和Review Approval五类结果；同一订单复用Session，每轮消息及确认创建独立SSE，切换订单隔离迟到响应；Review写回与返工分别确认，固定诊断仍作为显式入口保留
 - 通过测试：2026-10-11 `make test`完整通过，含三端smoke、Agent隔离PostgreSQL持久化52/52、Java测试59/59、前端64/64及生产构建；`make quality`的Ruff通过，mypy检查203个源文件无问题；`make eval-all`两组24/24与58/58通过；补充验收中隔离Java+PostgreSQL Agent E2E 16/16、24场景矩阵的Java链路8/8与Python异常检查23/23、统一页面组件32/32、隔离PostgreSQL链路1/1及Docker烟测通过
-- 失败测试：本轮先补两项查询边界回归，在旧代码均失败，修复后54项局部测试及2项独立数据库测试通过；初次构建因Docker凭据助手PATH缺失失败，修正命令PATH后构建成功；容器只读脚本初用系统Python缺SQLAlchemy，改用应用虚拟环境后通过。整文件Ruff格式检查发现5个文件已有差异，与HEAD基线相同，未为本任务全文件重排；Ruff规则检查、mypy及git diff --check通过，未重跑全仓
-- 当前阻塞：查询边界修复及真实首问验证无阻塞；原KEYWORD_SEARCH_FAILED缺少底层异常或查询原文，不能证明唯一根因，现已补安全日志；MODEL_OUTPUT_VALIDATION_ERROR具体字段仍待排查。确认阶段统计及结果展示、会话过期引导与复核时间线名称待优化；演示任务仍版本2，未经授权不重置
+- 失败测试：本轮首次隔离测试在镜像构建阶段失败，首次错误输出不足以确认底层原因；补充失败日志保留后重试构建正常。第二次因校验误用Alembic默认表名失败，按实际agent_alembic_version修正后最终完整验证通过，保留失败日志且未弱化断言；未重跑全仓。此前查询修复的54项pytest、2项独立数据库及Ruff/mypy结果保留在对应批次
+- 当前阻塞：本次重置步骤整理和隔离验证无阻塞；未执行当前环境全量重置或真实Embedding重新入库。既有关键词失败具体底层原因、草稿模型输出校验失败、确认阶段统计及页面交互问题仍待处理；任务仍版本2，未经另行明确要求不重置当前数据
 - 开发环境：OpenJDK 21.0.12、Maven 3.9.16、Python 3.12.13（uv 管理）、uv 0.12.0、Node.js 22.22.2、npm 10.9.7、Docker Desktop 29.6.2
-- 最近更新：2026-10-22排查用户首次失败Run `run-e587adbc3202488794d190fd40c37803`，定位到内部RAG的KEYWORD_SEARCH_FAILED，Java5次读取成功；原日志没有底层异常。离线复现并修复规范问答2000字符与关键词256字符/64词元的限制冲突，动态动作同步2000字符上限，关键词仅有界选取最多64个，完整问题保留给Embedding/回答；新增仅计数与类型的安全日志，未放宽权限、版本或证据门禁
+- 最近更新：2026-10-23完成`docs/DEMO_RESET.md`：明确全量数据卷删除范围、证据保留、Java复位、Agent迁移、真实Embedding入库、页面恢复及新会话检查；清单已完成。`scripts/reset-demo`改为等待Flyway V1～V3，并校验固定规模、所有任务版本0、复核/返工/幂等/审计初始状态，快照纳入版本；新增`make test-demo-reset`，仅在独立临时项目验证重复恢复，未改变任何固定种子数据或状态映射
+- 重置验证：`PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" make test-demo-reset`最终退出0，两次重置快照均为3e2237d50d74228299174a69938851a4，中间真实临时Java复核/返工写入推进版本至2，第二次恢复版本0、复核3条、返工/幂等/审计0，额外探针表消失；Agent迁移到0014_review_source_run且Run/Approval/Chunk均0，Web/Agent/Java三个健康入口通过，临时容器/数据卷已清理。该验证关闭模型及Embedding密钥，不验证真实入库质量
+- 重置静态与环境核对：`sh -n scripts/reset-demo scripts/test-demo-reset.sh`、`make -n reset-demo knowledge-ingest test-demo-reset`、文档链接检查及`git diff --check`通过；未运行无关pytest、Java单元测试或模型评测。只读比较当前ORDER-003完整Java快照与测试前相同，任务版本2；当前知识READY、16文档/80 Chunk。未操作当前项目数据卷、未重建当前服务、未调用真实Provider；本轮属演示运维与文档，不新增record或面试关注条目
+- 查询修复批次：2026-10-22排查用户首次失败Run `run-e587adbc3202488794d190fd40c37803`，定位到内部RAG的KEYWORD_SEARCH_FAILED，Java5次读取成功；原日志没有底层异常。离线复现并修复规范问答2000字符与关键词256字符/64词元的限制冲突，动态动作同步2000字符上限，关键词仅有界选取最多64个，完整问题保留给Embedding/回答；新增仅计数与类型的安全日志，未放宽权限、版本或证据门禁
 - 查询修复验证：agent-service执行`.venv/bin/pytest -q tests/knowledge/test_knowledge_search.py tests/knowledge/test_specification_qa_workflow.py tests/test_action_decision.py tests/test_dynamic_diagnosis_workflow.py tests/test_production_agent_skills.py`54/54；根目录`PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" UV_CACHE_DIR=/tmp/productline-agent-uv-cache ./scripts/test-agent-persistence.sh -k 'keyword_search_matches_chinese_bigrams' --tb=short`2/2、52 deselected，使用独立临时数据库；相关7文件Ruff/mypy通过。5个文件全文件format差异已核对HEAD同样存在，未整文件格式化；git diff --check通过，未跑全仓或全量质量评测
 - 查询修复部署与真实验证：只构建/重建agent-service，Java、Web、PostgreSQL及数据不变；容器内使用应用虚拟环境进行479字符的首次关键词查询，返回5条并确认最终代码加载。重发原问题的临时探针曾被自动审批拒绝，用户随后明确允许一次固定问题的真实诊断；浏览器刷新、新Session仅发送一次，Run `run-4ccd1f6f37dd45249e888e7625897cff`成功，10997毫秒、24个Step成功、5次只读Tool、RAG ANSWERED/5引用、19241个对话Token、终止原因为MAX_ITERATIONS，业务完整快照相同且无Approval。未观察本轮缩减日志命中，不能由此证明历史具体失败原因或总体首问成功率
 - 链路证据保存批次：2026-10-22按用户要求保存统一页面链路：同Session诊断`run-cf1e9e22d2af47269cb2e8b2bd20bc13`→复核`run-09ba330c04314f1bbcb4c585c20fbbc1`→返工`run-rework-13f63423a4eb49259156b4bfd96951e1`，3条成功Run/38个Step、两个独立Approval/操作日志；另保留3条失败Run/36个Step及独立批次规范和状态入口12个Step，过期请求只保存已有Trace。文档为`docs/AGENT_DEMO_FLOW.md`，单次演示快照为`docs/demo/order-003-20261022.json`，清单已标记完成；该批次仅只读回查和本地保存，未重发模型或写请求、未重置、未修改运行时代码
@@ -53,4 +56,4 @@
 - M7.9 Agent指标当前边界：E2E成功率和平均已执行Tool数以全部用例为分母，无效与重复Tool率以所有尝试为分母且每次尝试必须归入已执行、无效或重复之一；诊断耗时仅统计有计时用例，阶段正确率仅统计声明预期阶段的用例。T787/T788已提供统一Provider接线，真实数字要求实际Run、Step和调用账本采集器
 - M7.9观测指标当前边界：步骤可定位要求实际Step与预期完全一致，错误类型按全部异常用例的稳定错误码比较，排查中位时长只统计有计时样本；无适用步骤或耗时样本时分母为零且数值稳定为零。T790已接到统一Suite，真实人工排查计时仍需在实际演练中采集
 - 已知非阻塞问题：历史页可展示Run来源和关联Approval差异，但尚无独立操作日志聚合页；日志详情当前只允许原确认人读取，尚无审计主管角色或完整RBAC；只有写Tool实际开始后的成功、Java 409或其他写失败会生成操作日志，确认前过期或事实重校验STALE只保留Approval/Run/Step终态；确认服务不重新运行RAG，引用适用性仍以草稿生成时检索结果为准；写失败需要新建Approval再次授权；若进程在Java成功后、保存日志和终态前崩溃，Java幂等可防重复写但目前没有自动恢复任务；返工只覆盖COORDINATE_SYSTEM_FIX；DeepSeek JSON Object只保证JSON语法，Schema与业务合法性仍需本地校验；真实Provider已覆盖Action动态诊断及Review草稿，但诊断仍为MAX_ITERATIONS出口而非主动FINISH；真实RAG仅小样本验收，尚无50题真实质量评测；统一消息300秒等待只适配当前默认预算，尚无超时自动恢复或后台整轮取消；浏览器已验证跨订单确认切换、真实动态诊断及Review草稿，用户人工确认和返工写入的成功结果已核对，异常交互仍待真实验收；确认阶段Tool计数遗漏、人工等待与执行耗时未清晰区分，历史结果未直接展示返工编号；会话过期尚无恢复引导，复核时间线仍沿用诊断名称；Session/SSE仍为单进程TTL及有界内存；演示Header不是完整认证，Java与Python数据库角色尚未隔离
-- 下一阶段：查询边界修复已部署并完成用户允许的一次新会话首问验证；若再发生关键词失败，按新安全日志定位具体类型，不自动重发模型请求。下一最小任务可整理演示重置步骤或单独排查草稿模型输出校验失败；任务仍版本2，未经授权不重置或再次业务写入，不进入新里程碑
+- 下一阶段：演示重置步骤与隔离重复验证已完成；下一最小任务可修正确认阶段Tool统计及结果展示，或按用户新要求处理故障。当前全量重置会删除历史和知识向量，需另行明确执行，不能将本次“整理步骤”视为已经重置；任务仍版本2，不进入新里程碑

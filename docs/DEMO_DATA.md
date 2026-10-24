@@ -81,15 +81,19 @@ make test-business-data
 ```
 
 `make reset-demo` 会停止本项目 Compose 服务、删除本项目 PostgreSQL 数据卷、重新
-构建并启动 PostgreSQL 和 Java 服务，再等待 Flyway V2 完成。该命令具有破坏性，只
-应用于本地演示数据。
+构建并启动PostgreSQL和Java服务，再等待Flyway V1～V3完成，检查固定数据规模、任务版本0、无新增复核/
+返工/幂等/审计记录。该命令会同时清除Agent运行历史、Approval和知识向量，只应用于本地演示数据。
+完整恢复还需要Agent迁移、真实Embedding入库与页面启动，按[演示重置步骤](DEMO_RESET.md)执行。
+`make test-business-data`在独立测试环境验证固定数据定义，不能代替当前演示环境的恢复和READY检查。
 
 成功输出包含固定订单数和数据快照，例如：
 
 ```text
 M0.3 demo data reset complete.
 orders=5
-snapshot=d57e54c32e4ef26eb01c76a8ed97a0ce
+task_versions=0;reviews=3;reworks=0;idempotency_records=0;operation_logs=0
+snapshot=<当前脚本输出的32位十六进制快照>
 ```
 
-在代码和环境不变时，多次重置的快照必须相同。
+快照包含任务版本。在代码和环境不变时，多次重置的快照必须相同；可用`make test-demo-reset`在独立临时
+项目验证两次重置以及中间真实Java写入的清理，不触碰当前演示数据或调用真实模型。

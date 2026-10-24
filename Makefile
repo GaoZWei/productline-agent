@@ -1,6 +1,8 @@
 SHELL := /bin/sh
 COMPOSE ?= docker compose
 
+.PHONY: test-demo-reset
+
 .DEFAULT_GOAL := help
 
 .PHONY: provider-smoke test-provider-smoke
@@ -275,5 +277,8 @@ logs: ## 跟踪全部服务日志
 ps: ## 查看服务状态
 	$(COMPOSE) ps
 
-reset-demo: ## 删除本地演示数据卷并重建 M0.3 固定业务数据
+reset-demo: ## 清空当前演示数据卷并恢复Java固定数据（Agent历史及知识向量也会删除）
 	./scripts/reset-demo
+
+test-demo-reset: ## 独立临时项目验证两次重置、Java写入清理、Agent迁移及页面恢复（无模型请求）
+	./scripts/test-demo-reset.sh
