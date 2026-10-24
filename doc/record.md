@@ -1832,3 +1832,28 @@
 - 仅缩减关键词通道输入，完整规范化问题继续用于向量和回答；空查询、无效词元和超长输入仍拒绝。
 - 缩减日志记录字符数和词元数，失败日志记录异常类型和查询长度，不输出原文、SQL参数、连接或业务事实。
 - 保留权限与现行版本过滤、证据充足性门禁及真实数据库失败的关闭失败策略，不增加自动重发或业务写入。
+
+---
+
+## 2026-10-24 — `[M0.3/M7.6-G补充] 30单业务场景与页面目录`
+
+### 核心解决的问题
+
+原五单不能展示多任务、多问题、不同质检类型、多条交付及已有返工，页面目录也依赖固定ID逐个读取。
+增量扩充业务样本，并让页面从Java加载订单目录与返工事实，保留已完成演示的业务及Agent历史。
+
+### 实现的核心代码
+
+- `business-service/src/main/resources/db/migration/V4__expand_demo_scenarios.sql`：新增25个订单及固定关联数据。
+- `BusinessQueryService.getOrders/toOverview`、`OrderQueryController.getOrders`：排序列表与任务返工DTO聚合。
+- `web-console/src/stores/orderStore.ts`：`initialize`单次读取Java目录，保留详情请求序号隔离。
+- `web-console/src/components/OrderSwitcher.vue`、`TaskList.vue`：搜索分类、列表滚动、能力提示及已有返工展示。
+- `scripts/reset-demo`：V4和30单基线校验，恢复预置返工。
+
+### 实现的核心功能
+
+- V4只插入ORDER-006～030，保留原五单、已有写入、审计、Agent历史和知识索引；不修改V2/V3或既有写接口。
+- 列表接口返回统一信封的data.orders；overview任务包含排序后的reworkTasks，无返工为[]。
+- 页面默认ORDER-003，名称和分类独立于Java事实；多任务与非坐标系场景显示既有预算及只读能力边界。
+- 全量重置恢复30订单、34任务、38步骤、24问题、23复核、3返工和31交付，清除人工新增写入及历史。
+- 动态诊断继续使用6轮决策、8次Tool上限；事实未齐保留信息不足和真实终止原因，不新增返工类型或自动模型调用。

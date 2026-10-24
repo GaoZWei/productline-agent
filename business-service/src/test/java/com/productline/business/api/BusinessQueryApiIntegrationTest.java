@@ -21,6 +21,29 @@ class BusinessQueryApiIntegrationTest extends PostgresIntegrationTestSupport {
     @Autowired private TestRestTemplate restTemplate;
 
     @Test
+    void listsThirtyOrdersInOrderAndShowsPresetReworks() {
+        ResponseEntity<JsonNode> response = get("/api/orders");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode orders = data(response).path("orders");
+        assertThat(orders).hasSize(30);
+        for (int i = 0; i < 30; i++) {
+            assertThat(orders.get(i).path("orderId").asText()).isEqualTo("ORDER-%03d".formatted(i + 1));
+            assertThat(orders.get(i).path("productType").asText()).isEqualTo("DOM");
+        }
+        assertThat(data(get("/api/orders/ORDER-006/overview")).path("tasks")).isEmpty();
+        JsonNode golden = data(get("/api/orders/ORDER-003/overview"));
+        assertThat(golden.path("tasks").get(0).path("reworkTasks").isArray()).isTrue();
+        assertThat(golden.path("tasks").get(0).path("reworkTasks")).isEmpty();
+        JsonNode tasks = data(get("/api/orders/ORDER-030/overview")).path("tasks");
+        assertThat(tasks).hasSize(2);
+        assertThat(tasks.get(0).path("reworkTasks").get(0).path("status").asText()).isEqualTo("RUNNING");
+        assertThat(tasks.get(1).path("reworkTasks").get(0).path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(tasks.get(0).path("reworkTasks").get(0).path("sourceIssueId").asText()).isEqualTo("ISSUE-030-A-01");
+        assertThat(data(get("/api/orders/ORDER-016/overview")).path("tasks").get(0).path("qualityIssues")).hasSize(2);
+        assertThat(data(get("/api/orders/ORDER-028/overview")).path("deliveryRecords")).hasSize(2);
+    }
+
+    @Test
     void returnsOrderDetailAndNotFoundForUnknownOrder() {
         ResponseEntity<JsonNode> found = get("/api/orders/ORDER-003");
         ResponseEntity<JsonNode> missing = get("/api/orders/ORDER-404");

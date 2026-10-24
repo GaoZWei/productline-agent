@@ -1,6 +1,10 @@
 import { requestBusinessData } from "./businessClient";
 import type { ApiResult, Order, OrderOverview } from "../types/business";
 
+export function fetchOrders(): Promise<ApiResult<{ orders: Order[] }>> {
+  return requestBusinessData("/api/orders");
+}
+
 export function fetchOrder(orderId: string): Promise<ApiResult<Order>> {
   return requestBusinessData(`/api/orders/${encodeURIComponent(orderId)}`);
 }

@@ -3,7 +3,7 @@
 ## 1. 当前范围
 
 本文固定 Java API 向后续 Python Tool 和 Web Console 暴露的查询/写入路径、响应结构与
-状态字符串。M0.4 已实现 8 个只读端点，M0.5 已实现提交复核和创建返工两个写端点，
+状态字符串。当前已实现9个只读端点（含V4扩充后的订单列表），M0.5已实现提交复核和创建返工两个写端点，
 M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
@@ -12,6 +12,7 @@ JSON 中状态字段必须使用下列大写字符串，不接受数字序号、
 
 | 任务 | 方法与路径 | 正常响应 | 关键边界 |
 | --- | --- | --- | --- |
+| V4补充 | `GET /api/orders` | `OrderListResponse` | `data.orders`按订单号升序，每项为OrderDto；空库为[] |
 | T025 | `GET /api/orders/{orderId}` | `OrderDto` | 未知订单 `404` |
 | T026 | `GET /api/orders/{orderId}/tasks` | `OrderTasksResponse` | 无任务为 `tasks: []`；未知订单 `404` |
 | T027 | `GET /api/tasks/{taskId}` | `ProductionTaskDto` | 未知任务 `404` |
@@ -76,6 +77,7 @@ JSON 中状态字段必须使用下列大写字符串，不接受数字序号、
             "status": "COMPLETED"
           }
         ],
+        "reworkTasks": [],
         "qualityIssues": [
           {
             "issue": {
@@ -110,7 +112,10 @@ JSON 中状态字段必须使用下列大写字符串，不接受数字序号、
 }
 ```
 
-集合顺序是确定的：任务、问题、复核和交付按业务 ID 升序，生产步骤按
+每个任务的`reworkTasks`为必有数组，复用ReworkTaskDto：`reworkTaskId/taskId/sourceIssueId/status/reason`；
+来源问题可为空，无返工时为[]。该字段只展示Java已保存的返工，不改变确认和写入规则。
+
+集合顺序是确定的：任务、问题、复核、返工和交付按业务 ID 升序，生产步骤按
 `sequenceNumber` 升序。
 
 聚合端点保留给页面展示、排障和契约核对。M1 的 Agent Tool 仍应优先映射多个细粒度
@@ -324,7 +329,7 @@ delivery_status = BLOCKED
 ```
 
 这些事实共同支持诊断结论 `blocking_stage = QUALITY_REVIEW`。M0.4 响应 DTO 已直接
-复用本文件中的枚举值，不为前端或 Python 创建另一套状态字符串。五组固定数据的
+复用本文件中的枚举值，不为前端或 Python 创建另一套状态字符串。30组固定数据的
 完整 ID 映射见 [`DEMO_DATA.md`](DEMO_DATA.md)。
 
 ## 8. Agent 订单诊断 API

@@ -3,7 +3,7 @@
 ## 1. 使用范围
 
 本文件描述 Java 业务服务数据库中的确定性演示数据。Flyway 在首次创建数据库时按
-`V1 → V2 → V3` 顺序建表、写入数据并增加写安全结构；M0.4/M0.5 Java 接口和 M1
+`V1 → V2 → V3 → V4` 顺序建表、写入数据并增加写安全结构；M0.4/M0.5 Java 接口和 M1
 Python Tool 必须把这里的 ID、状态和值作为契约测试输入，不能由模型补造或随机化。
 
 M0.4 已提供业务 HTTP 查询接口，M0.5 已提供复核和返工写接口。写接口测试会在每个
@@ -19,13 +19,60 @@ M0.4 已提供业务 HTTP 查询接口，M0.5 已提供复核和返工写接口�
 | `ORDER-004` | `REVIEWING` | `TASK-004` / `COMPLETED` | `ISSUE-002` / `RESOLVED` | `PENDING` | `BLOCKED` |
 | `ORDER-005` | `READY_FOR_DELIVERY` | `TASK-005` / `COMPLETED` | `ISSUE-003` / `CLOSED` | `APPROVED` | `READY` |
 
-每个订单固定有一个同序号交付记录 `DELIVERY-001`～`DELIVERY-005`。每个任务固定有
+原五单每个订单固定有一个同序号交付记录 `DELIVERY-001`～`DELIVERY-005`。每个任务固定有
 一个同序号生产步骤；`TASK-002` 的 `STEP-002-01` 名称为“影像预处理”，状态为
 `FAILED`，供生产失败诊断使用。
 
-所有五个订单的 `product_type` 暂统一为 `DOM`，因为当前里程碑不测试产品类型分支。
+全部30个订单的 `product_type` 暂统一为 `DOM`，因为当前里程碑不测试产品类型分支。
 如后续确认不同产品类型场景，应新增 Flyway 数据迁移和契约测试，不能改写已应用的
 V2。
+
+### V4 新增场景（006～030）
+
+V4仅插入新增订单及其关联数据；升级不会清除原五单的人工复核、返工、幂等、审计或Agent历史，
+也不会重建知识索引。下表中的规则预期基于完整Java事实，不代表真实模型准确率。
+
+| 后缀 | 场景事实 | 完整事实下的阻塞阶段 |
+| --- | --- | --- |
+| 006 | CREATED，无任务，交付NOT_READY | INSUFFICIENT_INFORMATION |
+| 007 | PRODUCING，任务/步骤PENDING | PRODUCTION |
+| 008 | PRODUCING，任务RUNNING，步骤COMPLETED/RUNNING/PENDING | PRODUCTION |
+| 009 | BLOCKED，任务FAILED，步骤COMPLETED/FAILED/PENDING | PRODUCTION_BLOCKED |
+| 010 | PRODUCING，两任务COMPLETED/RUNNING | PRODUCTION |
+| 011 | BLOCKED，两任务FAILED/RUNNING | PRODUCTION_BLOCKED |
+| 012 | QUALITY_CHECKING，坐标系问题PROCESSING | QUALITY_REVIEW |
+| 013 | QUALITY_CHECKING，云量问题OPEN | QUALITY_REVIEW |
+| 014 | QUALITY_CHECKING，几何精度问题OPEN | QUALITY_REVIEW |
+| 015 | QUALITY_CHECKING，辐射质量问题OPEN | QUALITY_REVIEW |
+| 016 | QUALITY_CHECKING，同任务坐标系及云量问题均OPEN | QUALITY_REVIEW |
+| 017 | QUALITY_CHECKING，坐标系CLOSED/APPROVED，几何精度OPEN/PENDING | QUALITY_REVIEW |
+| 018 | QUALITY_CHECKING，两任务各有OPEN坐标系问题 | QUALITY_REVIEW |
+| 019 | REVIEWING，云量问题RESOLVED/PENDING | REVIEW |
+| 020 | REVIEWING，坐标系问题RESOLVED/REJECTED | REVIEW |
+| 021 | REVIEWING，坐标系问题RESOLVED/REWORK_REQUIRED | REVIEW |
+| 022 | QUALITY_CHECKING，坐标系问题RESOLVED，无复核记录 | REVIEW |
+| 023 | REVIEWING，两任务各有RESOLVED云量问题，复核PENDING | REVIEW |
+| 024 | READY_FOR_DELIVERY，无问题，交付NOT_READY | DELIVERY |
+| 025 | BLOCKED，无问题，交付FAILED | DELIVERY |
+| 026 | DELIVERING，坐标系问题CLOSED/APPROVED，交付DELIVERING | NONE（仍在交付） |
+| 027 | DELIVERED，坐标系问题CLOSED/APPROVED，交付DELIVERED | NONE（已交付） |
+| 028 | BLOCKED，无问题，两条交付READY/FAILED | DELIVERY |
+| 029 | QUALITY_CHECKING，坐标系OPEN/REWORK_REQUIRED，已有PENDING返工 | QUALITY_REVIEW |
+| 030 | QUALITY_CHECKING，A坐标系PROCESSING/REWORK_REQUIRED、返工RUNNING；B坐标系RESOLVED/PENDING、返工COMPLETED | QUALITY_REVIEW |
+
+统一约定：
+
+- 除注明外，每单一个COMPLETED任务、一个同状态步骤；007～011交付NOT_READY，012～023与029～030交付BLOCKED。
+- 无问题则无复核记录；问题OPEN/PROCESSING/RESOLVED默认PENDING复核，CLOSED默认APPROVED，表中例外优先。
+- 多任务为TASK-编号-A/B，其余TASK-编号。步骤/问题/复核为STEP/ISSUE/REVIEW-编号[-A/B]-顺序（两位数字）。
+- 新交付为DELIVERY-编号-01，028还有-02；新增任务版本均0。预置返工为REWORK-029-01、REWORK-030-A-01、REWORK-030-B-01，与真实写入的REWORK-WRITE-*区分。
+- 场景名称、分类和能力提示保存在Web目录元数据；业务描述仅保存问题事实，不放Agent指令。
+
+能力边界：
+
+- 动态诊断仍为6轮决策、8次Tool预算；018/023/030等复杂组合未收齐事实时安全返回信息不足，保留真实终止原因。
+- 云量、几何精度、辐射质量本轮仅作只读验证，不新增返工类型；只有既有坐标系返工链路已实现。
+- 预置返工展示不等于自动处理成果、关闭问题或推进交付；本轮不扩知识库、不重新Embedding、不主动调用真实模型。
 
 ## 3. ORDER-003 黄金链路
 
@@ -53,13 +100,13 @@ blocking_stage = QUALITY_REVIEW
 重置后的固定规模为：
 
 ```text
-orders = 5
-tasks = 5
-steps = 5
-quality_issues = 3
-review_records = 3
-rework_tasks = 0
-delivery_records = 5
+orders = 30
+tasks = 34
+steps = 38
+quality_issues = 24
+review_records = 23
+rework_tasks = 3
+delivery_records = 31
 ```
 
 业务状态校验器会判定以下组合非法：
@@ -81,8 +128,7 @@ make test-business-data
 ```
 
 `make reset-demo` 会停止本项目 Compose 服务、删除本项目 PostgreSQL 数据卷、重新
-构建并启动PostgreSQL和Java服务，再等待Flyway V1～V3完成，检查固定数据规模、任务版本0、无新增复核/
-返工/幂等/审计记录。该命令会同时清除Agent运行历史、Approval和知识向量，只应用于本地演示数据。
+构建并启动PostgreSQL和Java服务，再等待Flyway V1～V4完成，检查固定数据规模、任务版本0、清除新增写入并恢复23条预置复核及3条预置返工、无幂等/审计记录。该命令会同时清除Agent运行历史、Approval和知识向量，只应用于本地演示数据。
 完整恢复还需要Agent迁移、真实Embedding入库与页面启动，按[演示重置步骤](DEMO_RESET.md)执行。
 `make test-business-data`在独立测试环境验证固定数据定义，不能代替当前演示环境的恢复和READY检查。
 
@@ -90,8 +136,8 @@ make test-business-data
 
 ```text
 M0.3 demo data reset complete.
-orders=5
-task_versions=0;reviews=3;reworks=0;idempotency_records=0;operation_logs=0
+orders=30
+task_versions=0;reviews=23;reworks=3;idempotency_records=0;operation_logs=0
 snapshot=<当前脚本输出的32位十六进制快照>
 ```
 

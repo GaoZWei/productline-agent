@@ -2,13 +2,13 @@ import { createPinia } from "pinia";
 import { createApp, nextTick } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchOrder, fetchOrderOverview } from "./api/businessApi";
+import { fetchOrders, fetchOrderOverview } from "./api/businessApi";
 import { requestRunHistory } from "./api/runHistoryClient";
 import App from "./App.vue";
 import { orderFixtures, overviewFixture } from "./test/fixtures";
 
 vi.mock("./api/businessApi", () => ({
-  fetchOrder: vi.fn(),
+  fetchOrders: vi.fn(),
   fetchOrderOverview: vi.fn(),
 }));
 vi.mock("./api/runHistoryClient", () => ({
@@ -17,7 +17,7 @@ vi.mock("./api/runHistoryClient", () => ({
   requestRunSteps: vi.fn(),
 }));
 
-const mockedFetchOrder = vi.mocked(fetchOrder);
+const mockedFetchOrder = vi.mocked(fetchOrders);
 const mockedFetchOverview = vi.mocked(fetchOrderOverview);
 const mockedRunHistory = vi.mocked(requestRunHistory);
 let host: HTMLDivElement | undefined;
@@ -29,11 +29,8 @@ afterEach(() => {
 });
 
 describe("minimal business page", () => {
-  it("展示五个固定订单与 ORDER-003 的完整业务视图，并支持切换", async () => {
-    mockedFetchOrder.mockImplementation(async (orderId) => ({
-      data: orderFixtures.find((item) => item.orderId === orderId)!,
-      traceId: `trace-${orderId}`,
-    }));
+  it("展示30 个固定订单与 ORDER-003 的完整业务视图，并支持切换", async () => {
+    mockedFetchOrder.mockResolvedValue({ data: { orders: orderFixtures }, traceId: "trace-list" });
     mockedFetchOverview.mockImplementation(async (orderId) => ({
       data: overviewFixture(orderId),
       traceId: `trace-overview-${orderId}`,
@@ -68,7 +65,7 @@ describe("minimal business page", () => {
   });
 
   it("可以从主导航进入Run历史页面并返回业务全景", async () => {
-    mockedFetchOrder.mockResolvedValue({ data: orderFixtures[0]!, traceId: "trace-order" });
+    mockedFetchOrder.mockResolvedValue({ data: { orders: orderFixtures }, traceId: "trace-order" });
     mockedFetchOverview.mockResolvedValue({
       data: overviewFixture("ORDER-001"),
       traceId: "trace-overview",

@@ -79,7 +79,7 @@ written_counts=$(run_sql "SELECT concat_ws('|',
     (SELECT version FROM production_tasks WHERE task_id = 'TASK-003'),
     (SELECT COUNT(*) FROM review_records), (SELECT COUNT(*) FROM rework_tasks),
     (SELECT COUNT(*) FROM idempotency_records), (SELECT COUNT(*) FROM operation_logs));")
-test "$written_counts" = '2|4|1|2|2'
+test "$written_counts" = '2|24|4|2|2'
 run_sql 'CREATE TABLE demo_reset_probe (id integer PRIMARY KEY); INSERT INTO demo_reset_probe VALUES (1);' >/dev/null
 
 reset_once second

@@ -1,10 +1,13 @@
 # Web Console
 
 M7.6-G 订单业务与统一Agent页面，使用 Vue 3、TypeScript、Vite、Pinia、Axios 和 Element Plus。
-页面固定展示 `ORDER-001`～`ORDER-005`，默认打开黄金场景 `ORDER-003`，并从 Java
+页面通过Java的`GET /api/orders`加载`ORDER-001`～`ORDER-030`，支持订单号/场景名称搜索、分类筛选与滚动，默认打开黄金场景`ORDER-003`，并从Java
 `/api/orders/{orderId}` 与 `/api/orders/{orderId}/overview` 读取业务事实。统一Agent抽屉先查询
 `GET /api/agent/capabilities`，再把当前订单提示和自然语言消息提交到`POST /api/agent/messages`；返回结果按
 `ORDER_STATUS`、`DIAGNOSIS`、`SPECIFICATION_ANSWER`、`CLARIFICATION`和`APPROVAL`五类展示。
+
+任务下展示Java overview返回的已有返工编号、来源问题、状态和原因。场景名称、分类和能力提示保存在
+`src/demoScenarios.ts`，不提供业务状态；复杂多任务仍受6轮决策/8次Tool预算约束，非坐标系问题本轮仅作只读验证。
 显式“固定诊断”仍调用`POST /api/agent/order-diagnosis`，模型未配置或不可用时不会被包装成动态Agent成功。
 
 同一订单抽屉会复用首次响应的`session_id`，切换订单时清除本地Session、结果与事件流，迟到响应也不能覆盖新订单。

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import AsyncIterator
+from datetime import date
 from hashlib import sha256
 from pathlib import Path
 
@@ -19,9 +20,21 @@ from app.clients.business import BusinessHttpClient
 from app.main import create_app
 from app.models import AgentRun, AgentRunStatus, AgentStep, AgentStepStatus, AgentStepType
 from app.repositories import AgentRunRepository, AgentStepRepository
-from app.schemas import OrderDiagnosisErrorResponse, OrderDiagnosisResponse
+from app.schemas import (
+    AgentAction,
+    AgentTerminationReason,
+    BlockingStage,
+    OrderDiagnosisErrorResponse,
+    OrderDiagnosisResponse,
+    PageContext,
+    PermissionScope,
+    SpecificationQaResult,
+)
+from app.schemas.business import BusinessIdentity
 from app.settings import Settings
-from app.tools import create_read_tool_registry
+from app.tools import ToolContext, create_read_tool_registry
+from app.workflows import ActionDecider, AgentExecutionLimits, DynamicDiagnosisWorkflow
+from app.workflows.action_prompt import ActionDecisionPrompt
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATABASE_URL_ENV = "AGENT_E2E_DATABASE_URL"
@@ -140,6 +153,149 @@ async def test_missing_order_returns_resource_not_found_at_load_order(
     assert payload.error_step == "load_order"
     assert payload.run_id is not None
     await _assert_failed_run(e2e_application, payload.run_id, payload.code, "load_order")
+
+
+@pytest.mark.parametrize(
+    ("number", "expected_stage"),
+    [
+        (6, "INSUFFICIENT_INFORMATION"),
+        (7, "PRODUCTION"),
+        (8, "PRODUCTION"),
+        (9, "PRODUCTION_BLOCKED"),
+        (10, "PRODUCTION"),
+        (11, "PRODUCTION_BLOCKED"),
+        (12, "QUALITY_REVIEW"),
+        (13, "QUALITY_REVIEW"),
+        (14, "QUALITY_REVIEW"),
+        (15, "QUALITY_REVIEW"),
+        (16, "QUALITY_REVIEW"),
+        (17, "QUALITY_REVIEW"),
+        (18, "QUALITY_REVIEW"),
+        (19, "REVIEW"),
+        (20, "REVIEW"),
+        (21, "REVIEW"),
+        (22, "REVIEW"),
+        (23, "REVIEW"),
+        (24, "DELIVERY"),
+        (25, "DELIVERY"),
+        (26, "NONE"),
+        (27, "NONE"),
+        (28, "DELIVERY"),
+        (29, "QUALITY_REVIEW"),
+        (30, "QUALITY_REVIEW"),
+    ],
+)
+async def test_expanded_orders_use_complete_java_tool_facts(
+    e2e_application: FastAPI,
+    number: int,
+    expected_stage: str,
+) -> None:
+    """新增场景通过真实 Java Tool 收齐事实后验证规则，不调用模型。"""
+    order_id = f"ORDER-{number:03d}"
+    response = await _diagnose(e2e_application, order_id, f"诊断{order_id}")
+    assert response.status_code == 200
+    payload = OrderDiagnosisResponse.model_validate_json(response.content)
+    assert payload.diagnosis.order_id == order_id
+    assert payload.diagnosis.blocking_stage.value == expected_stage
+    assert all(item.source_type == "TOOL" for item in payload.diagnosis.evidence)
+    run, steps = await _load_run(e2e_application, payload.run_id)
+    assert run.status is AgentRunStatus.SUCCEEDED
+    assert all(step.status is AgentStepStatus.SUCCEEDED for step in steps)
+
+
+class ScenarioActionModel:
+    """按固定只读动作采集多任务事实，用于预算测试，不访问真实模型。"""
+
+    def __init__(self, order_id: str) -> None:
+        stem = order_id.removeprefix("ORDER-")
+        self._outputs = iter(
+            [
+                (AgentAction.QUERY_ORDER, "get_order_detail", {"order_id": order_id}),
+                (AgentAction.QUERY_TASKS, "get_related_tasks", {"order_id": order_id}),
+                (AgentAction.QUERY_DELIVERY, "get_delivery_status", {"order_id": order_id}),
+                (AgentAction.QUERY_QUALITY, "get_quality_issues", {"task_id": f"TASK-{stem}-A"}),
+                (AgentAction.QUERY_REVIEW, "get_review_result", {"task_id": f"TASK-{stem}-A"}),
+                (AgentAction.QUERY_QUALITY, "get_quality_issues", {"task_id": f"TASK-{stem}-B"}),
+            ]
+        )
+        self.call_count = 0
+
+    async def generate(self, prompt: ActionDecisionPrompt) -> object:
+        """只输出测试预先声明的动作。"""
+        del prompt
+        self.call_count += 1
+        action, tool, arguments = next(self._outputs)
+        return {
+            "action": action.value,
+            "tool_name": tool,
+            "tool_arguments": arguments,
+            "reason": "收集订单及任务的只读事实",
+        }
+
+
+class NoSpecificationCalls:
+    """本轮动作只读取 Java，任何规范或 Provider 调用都视为测试失败。"""
+
+    async def ainvoke(
+        self,
+        question: str,
+        *,
+        effective_at: date,
+        permission_scope: PermissionScope,
+        page_context: PageContext | None = None,
+    ) -> SpecificationQaResult:
+        """禁止预算测试访问外部知识生成。"""
+        raise AssertionError("预算场景不应调用规范生成")
+
+
+@pytest.mark.parametrize("number", [18, 23, 30])
+async def test_complex_orders_keep_default_budget_and_report_real_termination(
+    e2e_settings: Settings,
+    number: int,
+) -> None:
+    """六轮内未收齐复核及规范信息时，保留缺口和预算原因。"""
+    order_id = f"ORDER-{number:03d}"
+    client = BusinessHttpClient(e2e_settings)
+    registry = create_read_tool_registry(client)
+    model = ScenarioActionModel(order_id)
+    context = ToolContext(
+        identity=BusinessIdentity(user_id="reviewer-e2e", role="REVIEWER"),
+        permissions=frozenset(
+            {
+                "ORDER_READ",
+                "TASK_READ",
+                "QUALITY_ISSUE_READ",
+                "REVIEW_READ",
+                "DELIVERY_READ",
+            }
+        ),
+        trace_id=f"trace-budget-{number}",
+        run_id=f"run-budget-{number}",
+    )
+    limits = AgentExecutionLimits()
+    assert (limits.max_decision_rounds, limits.max_tool_calls) == (6, 8)
+    workflow = DynamicDiagnosisWorkflow(
+        action_decider=ActionDecider(model=model, registry=registry),
+        tool_registry=registry,
+        tool_context=context,
+        specification_workflow=NoSpecificationCalls(),
+        effective_at=date(2026, 10, 24),
+        permission_scope=PermissionScope.INTERNAL_REVIEWER,
+        limits=limits,
+    )
+    try:
+        state = await workflow.ainvoke(order_id)
+    finally:
+        await client.aclose()
+    assert model.call_count == 6
+    assert state["iteration_count"] == 6
+    assert len(state["tool_history"]) == 6
+    assert state["termination_reason"] is AgentTerminationReason.MAX_ITERATIONS
+    assert state["information_gaps"]
+    assert state["errors"] == []
+    assert state["diagnosis"] is not None
+    assert state["diagnosis"].blocking_stage is BlockingStage.INSUFFICIENT_INFORMATION
+    assert f"TASK-{number:03d}-B" not in state["reviews"]
 
 
 @pytest.mark.parametrize(

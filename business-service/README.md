@@ -25,6 +25,10 @@ PORT
 
 健康检查继续兼容 `GET /health`。
 
+V4增量新增ORDER-006～030，不修改V2/V3及既有记录。只读`GET /api/orders`返回按订单号排序的
+`data.orders`；overview每个任务包含`reworkTasks`（无返工为[]）。固定基线及场景边界见
+[演示数据](../docs/DEMO_DATA.md)，独立V3升级保留测试为`DemoMigrationUpgradeIntegrationTest`。
+
 ## M0.5 写接口契约
 
 | 接口 | 请求体 | 成功结果 |

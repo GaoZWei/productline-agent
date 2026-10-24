@@ -63,6 +63,15 @@ export interface TaskOverview {
   task: ProductionTask;
   steps: ProductionStep[];
   qualityIssues: QualityIssueOverview[];
+  reworkTasks: ReworkTask[];
+}
+
+export interface ReworkTask {
+  reworkTaskId: string;
+  taskId: string;
+  sourceIssueId: string | null;
+  status: string;
+  reason: string;
 }
 
 export interface OrderOverview {

@@ -40,17 +40,17 @@ class DemoDataIntegrityIntegrationTest extends PostgresIntegrationTestSupport {
     @Autowired private DeliveryRecordRepository deliveryRepository;
 
     @Test
-    void seedsExactlyTheFiveDocumentedOrderScenarios() {
+    void seedsExactlyTheThirtyDocumentedOrderScenarios() {
         assertThat(orderRepository.findAll())
                 .extracting(Order::getOrderId)
-                .containsExactlyInAnyOrder(
-                        "ORDER-001", "ORDER-002", "ORDER-003", "ORDER-004", "ORDER-005");
-        assertThat(taskRepository.count()).isEqualTo(5);
-        assertThat(stepRepository.count()).isEqualTo(5);
-        assertThat(issueRepository.count()).isEqualTo(3);
-        assertThat(reviewRepository.count()).isEqualTo(3);
-        assertThat(reworkRepository.count()).isZero();
-        assertThat(deliveryRepository.count()).isEqualTo(5);
+                .containsExactlyInAnyOrderElementsOf(java.util.stream.IntStream.rangeClosed(1, 30)
+                        .mapToObj(number -> "ORDER-%03d".formatted(number)).toList());
+        assertThat(taskRepository.count()).isEqualTo(34);
+        assertThat(stepRepository.count()).isEqualTo(38);
+        assertThat(issueRepository.count()).isEqualTo(24);
+        assertThat(reviewRepository.count()).isEqualTo(23);
+        assertThat(reworkRepository.count()).isEqualTo(3);
+        assertThat(deliveryRepository.count()).isEqualTo(31);
 
         assertScenario(
                 "ORDER-001",
@@ -131,12 +131,92 @@ class DemoDataIntegrityIntegrationTest extends PostgresIntegrationTestSupport {
     }
 
     @Test
-    void keepsAllFiveSeededOrdersBusinessStateConsistent() {
+    void keepsAllThirtySeededOrdersBusinessStateConsistent() {
         BusinessStateConsistencyValidator validator =
                 new BusinessStateConsistencyValidator();
 
         assertThat(orderRepository.findAll())
                 .allSatisfy(order -> assertThat(validator.validate(order)).isEmpty());
+    }
+
+    @Test
+    void matchesTheExpandedScenarioContractsAndParentRelationships() {
+        String matrix = """
+                006|CREATED|-|-|-|-|NOT_READY
+                007|PRODUCING|PENDING|PENDING|-|-|NOT_READY
+                008|PRODUCING|RUNNING|COMPLETED,RUNNING,PENDING|-|-|NOT_READY
+                009|BLOCKED|FAILED|COMPLETED,FAILED,PENDING|-|-|NOT_READY
+                010|PRODUCING|COMPLETED,RUNNING|COMPLETED,RUNNING|-|-|NOT_READY
+                011|BLOCKED|FAILED,RUNNING|FAILED,RUNNING|-|-|NOT_READY
+                012|QUALITY_CHECKING|COMPLETED|COMPLETED|COORDINATE_SYSTEM:PROCESSING|PENDING|BLOCKED
+                013|QUALITY_CHECKING|COMPLETED|COMPLETED|CLOUD_COVER:OPEN|PENDING|BLOCKED
+                014|QUALITY_CHECKING|COMPLETED|COMPLETED|GEOMETRIC_ACCURACY:OPEN|PENDING|BLOCKED
+                015|QUALITY_CHECKING|COMPLETED|COMPLETED|RADIOMETRIC_QUALITY:OPEN|PENDING|BLOCKED
+                016|QUALITY_CHECKING|COMPLETED|COMPLETED|COORDINATE_SYSTEM:OPEN,CLOUD_COVER:OPEN|PENDING,PENDING|BLOCKED
+                017|QUALITY_CHECKING|COMPLETED|COMPLETED|COORDINATE_SYSTEM:CLOSED,GEOMETRIC_ACCURACY:OPEN|APPROVED,PENDING|BLOCKED
+                018|QUALITY_CHECKING|COMPLETED,COMPLETED|COMPLETED,COMPLETED|COORDINATE_SYSTEM:OPEN,COORDINATE_SYSTEM:OPEN|PENDING,PENDING|BLOCKED
+                019|REVIEWING|COMPLETED|COMPLETED|CLOUD_COVER:RESOLVED|PENDING|BLOCKED
+                020|REVIEWING|COMPLETED|COMPLETED|COORDINATE_SYSTEM:RESOLVED|REJECTED|BLOCKED
+                021|REVIEWING|COMPLETED|COMPLETED|COORDINATE_SYSTEM:RESOLVED|REWORK_REQUIRED|BLOCKED
+                022|QUALITY_CHECKING|COMPLETED|COMPLETED|COORDINATE_SYSTEM:RESOLVED|-|BLOCKED
+                023|REVIEWING|COMPLETED,COMPLETED|COMPLETED,COMPLETED|CLOUD_COVER:RESOLVED,CLOUD_COVER:RESOLVED|PENDING,PENDING|BLOCKED
+                024|READY_FOR_DELIVERY|COMPLETED|COMPLETED|-|-|NOT_READY
+                025|BLOCKED|COMPLETED|COMPLETED|-|-|FAILED
+                026|DELIVERING|COMPLETED|COMPLETED|COORDINATE_SYSTEM:CLOSED|APPROVED|DELIVERING
+                027|DELIVERED|COMPLETED|COMPLETED|COORDINATE_SYSTEM:CLOSED|APPROVED|DELIVERED
+                028|BLOCKED|COMPLETED|COMPLETED|-|-|READY,FAILED
+                029|QUALITY_CHECKING|COMPLETED|COMPLETED|COORDINATE_SYSTEM:OPEN|REWORK_REQUIRED|BLOCKED
+                030|QUALITY_CHECKING|COMPLETED,COMPLETED|COMPLETED,COMPLETED|COORDINATE_SYSTEM:PROCESSING,COORDINATE_SYSTEM:RESOLVED|REWORK_REQUIRED,PENDING|BLOCKED
+                """;
+        matrix.lines().forEach(row -> {
+            String[] expected = row.split("[|]");
+            String orderId = "ORDER-" + expected[0];
+            Order order = orderRepository.findById(orderId).orElseThrow();
+            var tasks = taskRepository.findAllByOrderOrderIdOrderByTaskIdAsc(orderId);
+            assertThat(order.getStatus().name()).as(orderId).isEqualTo(expected[1]);
+            assertThat(tasks.stream().map(task -> task.getStatus().name()).toList())
+                    .as(orderId).containsExactlyElementsOf(values(expected[2]));
+            assertThat(tasks.stream().flatMap(task -> stepRepository
+                    .findAllByTaskTaskIdOrderBySequenceNumberAsc(task.getTaskId()).stream())
+                    .map(step -> step.getStatus().name()).toList())
+                    .as(orderId).containsExactlyElementsOf(values(expected[3]));
+            assertThat(tasks.stream().flatMap(task -> issueRepository
+                    .findAllByTaskTaskIdOrderByIssueIdAsc(task.getTaskId()).stream())
+                    .map(issue -> issue.getIssueType() + ":" + issue.getStatus().name()).toList())
+                    .as(orderId).containsExactlyElementsOf(values(expected[4]));
+            assertThat(tasks.stream().flatMap(task -> reviewRepository
+                    .findAllByTaskIdOrderByReviewIdAsc(task.getTaskId()).stream())
+                    .map(review -> review.getStatus().name()).toList())
+                    .as(orderId).containsExactlyElementsOf(values(expected[5]));
+            assertThat(deliveryRepository.findAllByOrderOrderIdOrderByDeliveryIdAsc(orderId).stream()
+                    .map(delivery -> delivery.getStatus().name()).toList())
+                    .as(orderId).containsExactlyElementsOf(values(expected[6]));
+        });
+        assertThat(orderRepository.findAll()).allSatisfy(order -> {
+            assertThat(order.getProductType()).isEqualTo("DOM");
+            order.getTasks().forEach(task -> {
+                assertThat(task.getOrder().getOrderId()).isEqualTo(order.getOrderId());
+                assertThat(task.getVersion()).isZero();
+                task.getSteps().forEach(step -> assertThat(step.getTask().getTaskId()).isEqualTo(task.getTaskId()));
+                task.getQualityIssues().forEach(issue -> {
+                    assertThat(issue.getTask().getTaskId()).isEqualTo(task.getTaskId());
+                    issue.getReviewRecords().forEach(review ->
+                            assertThat(review.getIssue().getIssueId()).isEqualTo(issue.getIssueId()));
+                });
+            });
+        });
+        assertThat(reworkRepository.findAll()).allSatisfy(rework -> {
+            assertThat(rework.getReworkTaskId()).doesNotStartWith("REWORK-WRITE-");
+            assertThat(rework.getSourceIssue()).isNotNull();
+            assertThat(rework.getSourceIssue().getTask().getTaskId()).isEqualTo(rework.getTask().getTaskId());
+        });
+        assertThat(reworkRepository.findById("REWORK-029-01").orElseThrow().getStatus()).isEqualTo(ProductionTaskStatus.PENDING);
+        assertThat(reworkRepository.findById("REWORK-030-A-01").orElseThrow().getStatus()).isEqualTo(ProductionTaskStatus.RUNNING);
+        assertThat(reworkRepository.findById("REWORK-030-B-01").orElseThrow().getStatus()).isEqualTo(ProductionTaskStatus.COMPLETED);
+    }
+
+    private java.util.List<String> values(String value) {
+        return value.equals("-") ? java.util.List.of() : java.util.List.of(value.split(","));
     }
 
     private void assertScenario(

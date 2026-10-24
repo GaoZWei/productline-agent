@@ -1,27 +1,9 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
-import { fetchOrder, fetchOrderOverview } from "../api/businessApi";
+import { fetchOrders, fetchOrderOverview } from "../api/businessApi";
 import { BusinessApiError } from "../api/businessClient";
 import type { Order, OrderOverview } from "../types/business";
-
-export const DEMO_ORDER_IDS = [
-  "ORDER-001",
-  "ORDER-002",
-  "ORDER-003",
-  "ORDER-004",
-  "ORDER-005",
-] as const;
-
-export type DemoOrderId = (typeof DEMO_ORDER_IDS)[number];
-
-export const ORDER_SCENES: Record<DemoOrderId, string> = {
-  "ORDER-001": "正常生产",
-  "ORDER-002": "生产阻塞",
-  "ORDER-003": "质检问题阻塞",
-  "ORDER-004": "等待复核",
-  "ORDER-005": "满足交付",
-};
 
 export const useOrderStore = defineStore("orders", () => {
   const orders = ref<Order[]>([]);
@@ -43,8 +25,8 @@ export const useOrderStore = defineStore("orders", () => {
     listLoading.value = true;
     error.value = undefined;
     try {
-      const results = await Promise.all(DEMO_ORDER_IDS.map((orderId) => fetchOrder(orderId)));
-      orders.value = results.map((result) => result.data);
+      const result = await fetchOrders();
+      orders.value = result.data.orders;
       initialized.value = true;
       await selectOrder("ORDER-003");
     } catch (reason) {
@@ -95,7 +77,7 @@ export const useOrderStore = defineStore("orders", () => {
       if (result.data.order.orderId !== orderId) {
         throw new BusinessApiError({ code: "RESPONSE_VALIDATION_ERROR", message: "返回的订单与目标不一致" });
       }
-      // 演示侧栏固定五单，非目录目标也由Java响应决定能否读取。
+      // 是否允许读取始终由 Java 决定。
       selectedOrderId.value = orderId;
       overview.value = result.data;
       traceId.value = result.traceId;

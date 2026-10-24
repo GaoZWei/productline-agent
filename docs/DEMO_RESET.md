@@ -8,7 +8,7 @@
 
 | 内容 | 重置结果 |
 | --- | --- |
-| Java业务数据 | 恢复五个固定订单；清除新增复核、返工、幂等记录和操作日志；任务版本归零 |
+| Java业务数据 | 恢复30个固定订单；清除新增写入，恢复23条预置复核和3条预置返工；清空幂等、操作日志；任务版本归零 |
 | Agent会话、Run、Step、Approval及操作日志 | 一并清除，旧Session和确认单不能复用 |
 | 知识文档、Chunk和向量 | 一并清除，需要重新迁移和执行Embedding入库 |
 | 本地代码、`.env`、知识源文件、已导出的演示快照 | 保留 |
@@ -30,7 +30,7 @@ docker compose ps
 核对显示的是准备重置的本地Compose项目。以下第一条命令会删除该项目的数据库卷；不要在需要保留的数据库上执行。
 
 ```sh
-# 1. 清空演示数据库，恢复Java固定数据，校验Flyway V1～V3、任务版本和写入历史。
+# 1. 清空演示数据库，恢复Java固定数据，校验Flyway V1～V4、任务版本和写入历史。
 make reset-demo
 
 # 2. 构建Agent，执行Agent迁移，使用当前Embedding配置重新生成并写入知识索引。
@@ -79,10 +79,14 @@ SELECT 'agent_migration=' || version_num FROM agent_alembic_version;
 
 当前代码和知识源对应的预期：
 
+此处是全量重置并重新入库后的基线，完整规模为30订单、34任务、38步骤、24问题、23复核、
+3返工、31交付。3条返工为V4预置数据；重置清除人工新增写入，再恢复预置返工，不能把全库返工为0作为成功条件。
+仅应用V4增量迁移时，原人工记录会保留，复核和返工总数可高于该基线。
+
 ```text
 task_version=0
-reviews=3
-reworks=0
+reviews=23
+reworks=3
 idempotency_records=0
 java_operation_logs=0
 agent_runs=0

@@ -1,17 +1,17 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchOrder, fetchOrderOverview } from "../api/businessApi";
+import { fetchOrders, fetchOrderOverview } from "../api/businessApi";
 import { BusinessApiError } from "../api/businessClient";
 import { orderFixtures, overviewFixture } from "../test/fixtures";
-import { DEMO_ORDER_IDS, useOrderStore } from "./orderStore";
+import { useOrderStore } from "./orderStore";
 
 vi.mock("../api/businessApi", () => ({
-  fetchOrder: vi.fn(),
+  fetchOrders: vi.fn(),
   fetchOrderOverview: vi.fn(),
 }));
 
-const mockedFetchOrder = vi.mocked(fetchOrder);
+const mockedFetchOrder = vi.mocked(fetchOrders);
 const mockedFetchOverview = vi.mocked(fetchOrderOverview);
 
 beforeEach(() => {
@@ -20,6 +20,19 @@ beforeEach(() => {
 });
 
 describe("order store", () => {
+  it("列表请求失败可重试，恢复后一次加载30单", async () => {
+    const store = useOrderStore();
+    mockedFetchOrder.mockRejectedValueOnce(new BusinessApiError({ code: "UPSTREAM_UNAVAILABLE", message: "暂不可用" }));
+    await store.initialize();
+    expect(store.error?.code).toBe("UPSTREAM_UNAVAILABLE");
+    expect(store.orders).toEqual([]);
+    mockedFetchOrder.mockResolvedValueOnce({ data: { orders: orderFixtures }, traceId: "trace-list" });
+    mockedFetchOverview.mockResolvedValueOnce(resultFor("ORDER-003"));
+    await store.retry();
+    expect(store.orders).toHaveLength(30);
+    expect(store.error).toBeUndefined();
+    expect(store.overview?.order.orderId).toBe("ORDER-003");
+  });
   it("Agent目标加载失败保留原订单与业务快照", async () => {
     const store = useOrderStore();
     mockedFetchOverview.mockResolvedValueOnce(resultFor("ORDER-001"));
@@ -42,11 +55,8 @@ describe("order store", () => {
     await rejected;
     expect(store.overview?.order.orderId).toBe("ORDER-005");
   });
-  it("初始化时加载固定五单并默认展示黄金场景 ORDER-003", async () => {
-    mockedFetchOrder.mockImplementation(async (orderId) => ({
-      data: orderFixtures.find((item) => item.orderId === orderId)!,
-      traceId: `trace-${orderId}`,
-    }));
+  it("初始化时加载Java 订单列表并默认展示黄金场景 ORDER-003", async () => {
+    mockedFetchOrder.mockResolvedValue({ data: { orders: orderFixtures }, traceId: "trace-list" });
     mockedFetchOverview.mockResolvedValue({
       data: overviewFixture(),
       traceId: "trace-overview-003",
@@ -55,7 +65,9 @@ describe("order store", () => {
     const store = useOrderStore();
     await store.initialize();
 
-    expect(store.orders.map((order) => order.orderId)).toEqual(DEMO_ORDER_IDS);
+    expect(store.orders.map((order) => order.orderId)).toEqual(orderFixtures.map((order) => order.orderId));
+    expect(mockedFetchOrder).toHaveBeenCalledTimes(1);
+    expect(store.orders).toHaveLength(30);
     expect(store.selectedOrderId).toBe("ORDER-003");
     expect(store.overview?.tasks[0]?.qualityIssues[0]?.issue.issueId).toBe("ISSUE-001");
   });

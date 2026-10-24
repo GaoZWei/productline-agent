@@ -2,6 +2,7 @@ package com.productline.business.api;
 
 import com.productline.business.api.dto.DeliveryStatusResponse;
 import com.productline.business.api.dto.OrderOverviewResponse;
+import com.productline.business.api.dto.OrderListResponse;
 import com.productline.business.api.dto.OrderTasksResponse;
 import com.productline.business.application.BusinessQueryService;
 import com.productline.business.domain.dto.OrderDto;
@@ -20,6 +21,11 @@ public class OrderQueryController {
 
     public OrderQueryController(BusinessQueryService queryService) {
         this.queryService = queryService;
+    }
+
+    @GetMapping
+    public OrderListResponse getOrders() {
+        return queryService.getOrders();
     }
 
     // 查询订单详情

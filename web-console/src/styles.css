@@ -189,9 +189,48 @@ input {
 }
 
 .order-list {
+  max-height: 62vh;
+  overflow-y: auto;
   display: grid;
+  /* 滚动区域限制总高度，但不能把30张卡片的内容压缩进可视高度。 */
+  grid-auto-rows: max-content;
+  align-content: start;
+  flex-shrink: 0;
   gap: 8px;
 }
+
+.order-filters {
+  display: grid;
+  gap: 8px;
+  margin: 12px 16px;
+}
+.order-filters input, .order-filters select {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px;
+  border: 1px solid #d8dde7;
+  border-radius: 6px;
+  background: white;
+}
+.scenario-boundary {
+  margin: 16px;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  background: #fff8e6;
+  border-radius: 8px;
+}
+.rework-list {
+  margin-top: 16px;
+  border-top: 1px solid #d8dde7;
+}
+.rework-list h3 { font-size: 14px; }
+.rework-item {
+  padding: 10px 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.rework-item p { margin: 6px 0; }
 
 .order-button {
   position: relative;
@@ -199,6 +238,8 @@ input {
   grid-template-columns: 34px 1fr auto;
   gap: 11px;
   align-items: center;
+  min-height: 64px;
+  flex-shrink: 0;
   width: 100%;
   padding: 12px;
   overflow: hidden;

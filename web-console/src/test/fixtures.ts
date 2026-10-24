@@ -6,6 +6,16 @@ export const orderFixtures: Order[] = [
   { orderId: "ORDER-003", productType: "DOM", status: "QUALITY_CHECKING" },
   { orderId: "ORDER-004", productType: "DOM", status: "REVIEWING" },
   { orderId: "ORDER-005", productType: "DOM", status: "READY_FOR_DELIVERY" },
+  ...Array.from({ length: 25 }, (_, i) => ({
+    orderId: `ORDER-${String(i + 6).padStart(3, "0")}`,
+    productType: "DOM",
+    status: ({
+      6: "CREATED", 7: "PRODUCING", 8: "PRODUCING", 9: "BLOCKED",
+      10: "PRODUCING", 11: "BLOCKED", 19: "REVIEWING", 20: "REVIEWING",
+      21: "REVIEWING", 23: "REVIEWING", 24: "READY_FOR_DELIVERY",
+      25: "BLOCKED", 26: "DELIVERING", 27: "DELIVERED", 28: "BLOCKED",
+    } as Record<number, string>)[i + 6] ?? "QUALITY_CHECKING",
+  })),
 ];
 
 export function overviewFixture(orderId = "ORDER-003"): OrderOverview {
@@ -31,6 +41,7 @@ export function overviewFixture(orderId = "ORDER-003"): OrderOverview {
             status: "COMPLETED",
           },
         ],
+        reworkTasks: [],
         qualityIssues:
           orderId === "ORDER-003"
             ? [

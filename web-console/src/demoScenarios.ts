@@ -1,0 +1,36 @@
+// 仅保存演示目录与能力说明；订单状态及业务事实以 Java 响应为准。
+export const SCENARIO_CATEGORIES = ["生产", "质检", "复核", "交付", "返工"] as const;
+interface Scenario { name: string; category: string; boundary?: string }
+export const ORDER_SCENARIOS: Record<string, Scenario> = {
+  "ORDER-001": {"name":"正常生产","category":"生产"},
+  "ORDER-002": {"name":"生产阻塞","category":"生产"},
+  "ORDER-003": {"name":"质检问题阻塞","category":"质检"},
+  "ORDER-004": {"name":"等待复核","category":"复核"},
+  "ORDER-005": {"name":"满足交付","category":"交付"},
+  "ORDER-006": {"name":"尚未创建任务","category":"生产"},
+  "ORDER-007": {"name":"等待生产","category":"生产"},
+  "ORDER-008": {"name":"多步骤生产中","category":"生产"},
+  "ORDER-009": {"name":"多步骤生产失败","category":"生产"},
+  "ORDER-010": {"name":"部分任务生产中","category":"生产","boundary":"多任务诊断仍受 6 轮决策、8 次 Tool 调用预算约束，事实未收齐时可能返回信息不足。"},
+  "ORDER-011": {"name":"多任务生产阻塞","category":"生产","boundary":"多任务诊断仍受 6 轮决策、8 次 Tool 调用预算约束，事实未收齐时可能返回信息不足。"},
+  "ORDER-012": {"name":"坐标系处理中","category":"质检"},
+  "ORDER-013": {"name":"云量问题待处理","category":"质检","boundary":"非坐标系问题本轮仅验证只读查询，未实现对应返工类型。"},
+  "ORDER-014": {"name":"几何精度待处理","category":"质检","boundary":"非坐标系问题本轮仅验证只读查询，未实现对应返工类型。"},
+  "ORDER-015": {"name":"辐射质量待处理","category":"质检","boundary":"非坐标系问题本轮仅验证只读查询，未实现对应返工类型。"},
+  "ORDER-016": {"name":"同任务多问题","category":"质检","boundary":"非坐标系问题本轮仅验证只读查询，未实现对应返工类型。"},
+  "ORDER-017": {"name":"部分问题已关闭","category":"质检","boundary":"非坐标系问题本轮仅验证只读查询，未实现对应返工类型。"},
+  "ORDER-018": {"name":"多任务质检问题","category":"质检","boundary":"多任务诊断仍受 6 轮决策、8 次 Tool 调用预算约束，事实未收齐时可能返回信息不足。"},
+  "ORDER-019": {"name":"云量处理待复核","category":"复核","boundary":"非坐标系问题本轮仅验证只读查询，未实现对应返工类型。"},
+  "ORDER-020": {"name":"复核被驳回","category":"复核"},
+  "ORDER-021": {"name":"复核要求返工","category":"复核"},
+  "ORDER-022": {"name":"缺少复核记录","category":"复核"},
+  "ORDER-023": {"name":"多任务等待复核","category":"复核","boundary":"多任务诊断仍受 6 轮决策、8 次 Tool 调用预算约束，事实未收齐时可能返回信息不足。非坐标系问题本轮仅验证只读查询，未实现对应返工类型。"},
+  "ORDER-024": {"name":"等待准备交付","category":"交付"},
+  "ORDER-025": {"name":"交付失败","category":"交付"},
+  "ORDER-026": {"name":"正在交付","category":"交付"},
+  "ORDER-027": {"name":"已经交付","category":"交付"},
+  "ORDER-028": {"name":"多条交付记录","category":"交付"},
+  "ORDER-029": {"name":"已有待执行返工","category":"返工"},
+  "ORDER-030": {"name":"多任务返工进度","category":"返工","boundary":"多任务诊断仍受 6 轮决策、8 次 Tool 调用预算约束，事实未收齐时可能返回信息不足。"},
+};
+

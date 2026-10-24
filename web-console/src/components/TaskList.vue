@@ -44,6 +44,15 @@ function statusClass(status: string) {
           <span class="step-status">{{ step.status }}</span>
         </li>
       </ol>
+      <section v-if="item.reworkTasks.length" class="rework-list" aria-label="已有返工任务">
+        <h3>已有返工任务</h3>
+        <div v-for="rework in item.reworkTasks" :key="rework.reworkTaskId" class="rework-item">
+          <strong>{{ rework.reworkTaskId }}</strong>
+          <span class="status-pill" :class="statusClass(rework.status)">{{ rework.status }}</span>
+          <p>来源问题：{{ rework.sourceIssueId ?? "无" }}</p>
+          <p>{{ rework.reason }}</p>
+        </div>
+      </section>
     </article>
   </section>
 </template>

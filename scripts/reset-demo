@@ -15,19 +15,19 @@ run_sql() {
         sh "$1"
 }
 
-migration_query="SELECT COUNT(*) FROM flyway_schema_history WHERE success AND version IN ('1', '2', '3');"
+migration_query="SELECT COUNT(*) FROM flyway_schema_history WHERE success AND version IN ('1', '2', '3', '4');"
 attempt=1
 while [ "$attempt" -le 60 ]; do
     migration_count=$(run_sql "$migration_query" 2>/dev/null || true)
-    if [ "$migration_count" = "3" ]; then
+    if [ "$migration_count" = "4" ]; then
         break
     fi
     attempt=$((attempt + 1))
     sleep 1
 done
 
-if [ "${migration_count:-0}" != "3" ]; then
-    echo "M0.3 demo reset failed: Flyway V1-V3 were not applied within 60 seconds." >&2
+if [ "${migration_count:-0}" != "4" ]; then
+    echo "M0.3 demo reset failed: Flyway V1-V4 were not applied within 60 seconds." >&2
     docker compose logs --no-color business-service >&2
     exit 1
 fi
@@ -69,7 +69,7 @@ fixed_counts=$(run_sql "
         (SELECT COUNT(*) FROM operation_logs));
 ")
 
-if [ "$fixed_counts" != "5|5|5|3|3|0|5|0|0|0" ] || [ "$golden_count" != "1" ]; then
+if [ "$fixed_counts" != "30|34|38|24|23|3|31|0|0|0" ] || [ "$golden_count" != "1" ]; then
     echo "M0.3 demo reset failed: fixed data verification did not pass." >&2
     exit 1
 fi
@@ -104,5 +104,5 @@ snapshot=$(
 
 echo "M0.3 demo data reset complete."
 echo "orders=$order_count"
-echo "task_versions=0;reviews=3;reworks=0;idempotency_records=0;operation_logs=0"
+echo "task_versions=0;reviews=23;reworks=3;idempotency_records=0;operation_logs=0"
 echo "snapshot=$snapshot"

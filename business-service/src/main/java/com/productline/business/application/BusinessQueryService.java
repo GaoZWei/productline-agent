@@ -1,6 +1,7 @@
 package com.productline.business.application;
 
 import com.productline.business.api.dto.DeliveryStatusResponse;
+import com.productline.business.api.dto.OrderListResponse;
 import com.productline.business.api.dto.OrderOverviewResponse;
 import com.productline.business.api.dto.OrderTasksResponse;
 import com.productline.business.api.dto.ProductionProgressResponse;
@@ -15,6 +16,7 @@ import com.productline.business.domain.dto.ProductionStepDto;
 import com.productline.business.domain.dto.ProductionTaskDto;
 import com.productline.business.domain.dto.QualityIssueDto;
 import com.productline.business.domain.dto.ReviewRecordDto;
+import com.productline.business.domain.dto.ReworkTaskDto;
 import com.productline.business.domain.enums.QualityIssueStatus;
 import com.productline.business.domain.model.DeliveryRecord;
 import com.productline.business.domain.model.Order;
@@ -22,15 +24,18 @@ import com.productline.business.domain.model.ProductionStep;
 import com.productline.business.domain.model.ProductionTask;
 import com.productline.business.domain.model.QualityIssue;
 import com.productline.business.domain.model.ReviewRecord;
+import com.productline.business.domain.model.ReworkTask;
 import com.productline.business.domain.repository.DeliveryRecordRepository;
 import com.productline.business.domain.repository.OrderRepository;
 import com.productline.business.domain.repository.ProductionStepRepository;
 import com.productline.business.domain.repository.ProductionTaskRepository;
 import com.productline.business.domain.repository.QualityIssueRepository;
 import com.productline.business.domain.repository.ReviewRecordRepository;
+import com.productline.business.domain.repository.ReworkTaskRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,6 +52,7 @@ public class BusinessQueryService {
         private final QualityIssueRepository issueRepository;
         private final ReviewRecordRepository reviewRepository;
         private final DeliveryRecordRepository deliveryRepository;
+        private final ReworkTaskRepository reworkRepository;
 
         public BusinessQueryService(
                         OrderRepository orderRepository,
@@ -54,13 +60,20 @@ public class BusinessQueryService {
                         ProductionStepRepository stepRepository,
                         QualityIssueRepository issueRepository,
                         ReviewRecordRepository reviewRepository,
-                        DeliveryRecordRepository deliveryRepository) {
+                        DeliveryRecordRepository deliveryRepository,
+                        ReworkTaskRepository reworkRepository) {
                 this.orderRepository = orderRepository;
                 this.taskRepository = taskRepository;
                 this.stepRepository = stepRepository;
                 this.issueRepository = issueRepository;
                 this.reviewRepository = reviewRepository;
                 this.deliveryRepository = deliveryRepository;
+                this.reworkRepository = reworkRepository;
+        }
+
+        public OrderListResponse getOrders() {
+                return new OrderListResponse(orderRepository.findAll(Sort.by("orderId")).stream()
+                                .map(this::toDto).toList());
         }
 
         // 查询订单详情
@@ -157,7 +170,15 @@ public class BusinessQueryService {
                                                                 reviewsByIssue.getOrDefault(
                                                                                 issue.getIssueId(), List.of())))
                                 .toList();
-                return new TaskOverviewResponse(toDto(task), steps, issues);
+                List<ReworkTaskDto> reworks = reworkRepository.findAllByTaskTaskIdOrderByReworkTaskIdAsc(taskId)
+                                .stream().map(this::toDto).toList();
+                return new TaskOverviewResponse(toDto(task), steps, issues, reworks);
+        }
+
+        private ReworkTaskDto toDto(ReworkTask rework) {
+                return new ReworkTaskDto(rework.getReworkTaskId(), rework.getTask().getTaskId(),
+                                rework.getSourceIssue() == null ? null : rework.getSourceIssue().getIssueId(),
+                                rework.getStatus(), rework.getReason());
         }
 
         private Order requireOrder(String orderId) {
