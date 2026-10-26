@@ -119,7 +119,7 @@ class QualityIssue(ToolSchema):
     status: QualityIssueStatus
     description: NonBlankText
 
-
+# 质检问题返回结构定义
 class QualityIssueList(ToolSchema):
     """保留父任务 ID 和质检问题数组的查询结果。"""
 

@@ -232,7 +232,7 @@ class BusinessHttpClient:
             trace_id=envelope.trace_id,
             status_code=response.status_code,
         )
-    # 成功响应校验: 校验最外层和最内层 Schema。
+    # 成功响应校验: 校验最外层和最内层 Schema。（http client的校验）
     @staticmethod
     def _validate_success_response(
         response: httpx.Response,

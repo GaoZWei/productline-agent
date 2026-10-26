@@ -202,7 +202,7 @@ class GetProductionProgressTool(_BusinessReadTool[TaskIdInput, ProgressResult]):
             self._raise_resource_mismatch(response.trace_id)
         return response.data
 
-# 质检问题 Tool: 根据任务 ID 查询质检问题。
+# 质检问题 Tool: 根据任务 ID 查询质检问题。（任务归属校验）
 class GetQualityIssuesTool(_BusinessReadTool[TaskIdInput, QualityIssueList]):
     """根据任务 ID 查询全部质检问题而不自行过滤事实。"""
 
