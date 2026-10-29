@@ -2,7 +2,7 @@
 
 本说明用于理解知识库中16份文档分别解决什么问题、什么时候使用，以及相近文档之间的分工。
 这些文档都是项目自定义的演示规范，不代表真实行业标准。
-本说明位于`docs`目录，不属于知识库入库清单，不会作为规范依据参与检索。
+本说明位于`docs/knowledge`目录，不属于知识库入库清单，不会作为规范依据参与检索。
 
 ## 一、先理解整体关系
 
@@ -66,7 +66,7 @@
 
 ### 1. DOM产品生产控制规范
 
-原文：[DOM产品生产控制规范](../knowledge-base/active/dom/dom-production-v2.md)。
+原文：[DOM产品生产控制规范](../../knowledge-base/active/dom/dom-production-v2.md)。
 
 **作用：说明生产开始前要准备什么，什么条件下才算生产完成。**
 
@@ -79,7 +79,7 @@
 
 ### 2. DOM成果元数据规范
 
-原文：[DOM成果元数据规范](../knowledge-base/active/dom/dom-metadata-v2.md)。
+原文：[DOM成果元数据规范](../../knowledge-base/active/dom/dom-metadata-v2.md)。
 
 **作用：规定一份影像成果的说明材料需要写清哪些信息。**
 
@@ -92,7 +92,7 @@
 
 ### 3. DOM成果组织规范
 
-原文：[DOM成果组织规范](../knowledge-base/active/dom/dom-packaging-v2.md)。
+原文：[DOM成果组织规范](../../knowledge-base/active/dom/dom-packaging-v2.md)。
 
 **作用：规定文件、目录、命名和清单怎样组织，方便查找及核对。**
 
@@ -107,7 +107,7 @@
 
 ### 4. DOM云量检查规范
 
-原文：[DOM云量检查规范](../knowledge-base/active/quality/cloud-screening-v2.md)。
+原文：[DOM云量检查规范](../../knowledge-base/active/quality/cloud-screening-v2.md)。
 
 **作用：说明怎样检查云遮挡对成果使用的影响。**
 
@@ -120,7 +120,7 @@
 
 ### 5. DOM几何精度检查规范
 
-原文：[DOM几何精度检查规范](../knowledge-base/active/quality/geometric-accuracy-v2.md)。
+原文：[DOM几何精度检查规范](../../knowledge-base/active/quality/geometric-accuracy-v2.md)。
 
 **作用：说明怎样检查影像地物位置、接边和异常位移等空间关系。**
 
@@ -133,7 +133,7 @@
 
 ### 6. DOM辐射质量检查规范
 
-原文：[DOM辐射质量检查规范](../knowledge-base/active/quality/radiometric-quality-v2.md)。
+原文：[DOM辐射质量检查规范](../../knowledge-base/active/quality/radiometric-quality-v2.md)。
 
 **作用：说明怎样检查影像异常、色调一致性和无效像元等质量问题。**
 
@@ -146,7 +146,7 @@
 
 ### 7. 质检问题闭环规范
 
-原文：[质检问题闭环规范](../knowledge-base/active/quality/quality-issue-handling-v2.md)。
+原文：[质检问题闭环规范](../../knowledge-base/active/quality/quality-issue-handling-v2.md)。
 
 **作用：规定发现质量问题后，怎样跟踪处理、保留证据并重新判断后续条件。**
 
@@ -161,7 +161,7 @@
 
 ### 8. DOM坐标参考要求
 
-原文：[DOM坐标参考要求](../knowledge-base/active/coordinate-system/coordinate-reference-v2.md)。
+原文：[DOM坐标参考要求](../../knowledge-base/active/coordinate-system/coordinate-reference-v2.md)。
 
 **作用：规定成果应该具备哪些坐标信息，以及不同材料之间怎样保持一致。**
 
@@ -174,7 +174,7 @@
 
 ### 9. 坐标系异常处理规范
 
-原文：[坐标系异常处理规范](../knowledge-base/active/coordinate-system/coordinate-exception-v2.md)。
+原文：[坐标系异常处理规范](../../knowledge-base/active/coordinate-system/coordinate-exception-v2.md)。
 
 **作用：说明发现坐标系异常后，怎样提出返工和后续复核要求。**
 
@@ -188,7 +188,7 @@
 
 ### 10. 质检复核提交规范
 
-原文：[质检复核提交规范](../knowledge-base/active/review/review-submission-v2.md)。
+原文：[质检复核提交规范](../../knowledge-base/active/review/review-submission-v2.md)。
 
 **作用：说明准备复核申请时，需要哪些材料、怎样描述处理情况。**
 
@@ -201,7 +201,7 @@
 
 ### 11. 质检复核判定规范
 
-原文：[质检复核判定规范](../knowledge-base/active/review/review-decision-v2.md)。
+原文：[质检复核判定规范](../../knowledge-base/active/review/review-decision-v2.md)。
 
 **作用：为复核人员提供通过、驳回及理由记录的判断依据。**
 
@@ -216,7 +216,7 @@
 
 ### 12. DOM成果交付前置条件
 
-原文：[DOM成果交付前置条件](../knowledge-base/active/delivery/delivery-preconditions-v2.md)。
+原文：[DOM成果交付前置条件](../../knowledge-base/active/delivery/delivery-preconditions-v2.md)。
 
 **作用：判断当前成果是否具备交付条件。**
 
@@ -229,7 +229,7 @@
 
 ### 13. DOM交付包组织规范
 
-原文：[DOM交付包组织规范](../knowledge-base/active/delivery/delivery-package-v2.md)。
+原文：[DOM交付包组织规范](../../knowledge-base/active/delivery/delivery-package-v2.md)。
 
 **作用：检查本次准备交付的一整套材料是否齐全、匹配且符合安全要求。**
 
@@ -242,7 +242,7 @@
 
 ### 14. DOM成果交付验收规范
 
-原文：[DOM成果交付验收规范](../knowledge-base/active/delivery/delivery-acceptance-v2.md)。
+原文：[DOM成果交付验收规范](../../knowledge-base/active/delivery/delivery-acceptance-v2.md)。
 
 **作用：说明怎样核查拟交付材料，并形成有依据的验收结论。**
 
@@ -257,7 +257,7 @@
 
 ### 15. DOM坐标参考要求（历史版本）
 
-原文：[旧版DOM坐标参考要求](../knowledge-base/historical/coordinate-system/coordinate-reference-v1.md)。
+原文：[旧版DOM坐标参考要求](../../knowledge-base/historical/coordinate-system/coordinate-reference-v1.md)。
 
 **作用：回查旧坐标要求，进行版本对比，并验证失效版本过滤。**
 
@@ -269,7 +269,7 @@
 
 ### 16. DOM成果交付前置条件（历史版本）
 
-原文：[旧版DOM成果交付前置条件](../knowledge-base/historical/delivery/delivery-preconditions-v1.md)。
+原文：[旧版DOM成果交付前置条件](../../knowledge-base/historical/delivery/delivery-preconditions-v1.md)。
 
 **作用：解释旧交付条件与当前条件的差异，验证系统能否避免误用旧规则。**
 
@@ -313,7 +313,7 @@
 - 模型可以整理事实、解释规范和生成建议或草稿；写操作必须人工确认，由Java重新校验后执行。
 - 规范要求提供检查证据，不代表项目已经实现自动云量识别、几何测量或辐射检测算法。
 - 当前返工链路止于创建待处理任务，实际修正成果、重新生产、完整申请处理及最终验收交付尚未全部接入。
-- 文档标识、版本、有效期和权限等信息以[catalog.json](../knowledge-base/catalog.json)为准；目录说明见[知识库README](../knowledge-base/README.md)。
+- 文档标识、版本、有效期和权限等信息以[catalog.json](../../knowledge-base/catalog.json)为准；目录说明见[语料与索引说明](KNOWLEDGE_BASE.md)。
 
 ## 十一、知识规范与Agent运行约束的分工
 

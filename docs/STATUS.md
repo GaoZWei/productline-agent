@@ -2,6 +2,11 @@
 
 - 当前里程碑：M7运行观测、生产闭环集成与统一评测（已完成并通过完整验收）
 - 当前子阶段：30单业务场景扩充已上线，订单列表卡片压缩样式已修复并更新Web；当前Flyway V4，ORDER-003仍版本2，知识READY且16/80；未进入新里程碑
+- 知识库当前批次（2026-10-29）：KB-01需求与资料台账已完成，见[知识库需求、资料台账与开发计划](knowledge/KNOWLEDGE_REQUIREMENTS.md)；固化R01～R09已确认需求、K01～K16的身份/适用范围/有效期/替代关系及共同管理信息、16项代表问题或历史详情检查、接口能力清单、分批停止线与自动/真实验收场景。KB-02～KB-05均未开始，本轮停在KB-01，不自动进入新里程碑
+- 知识库文档集中整理（2026-10-29）：需求与资料台账、规范作用说明、原语料README详细说明已统一迁至`docs/knowledge/`，新增[文档导航](knowledge/README.md)；`knowledge-base/README.md`保留语料目录入口，状态及面试准备记录的现行引用已修正，历史测试命令原样保留。后续知识库专用需求与说明统一在该目录维护，综合计划通过导航访问
+- 本次集中整理验证：在agent-service执行`.venv/bin/pytest -q tests/knowledge/test_knowledge_documents.py tests/knowledge/test_document_chunking.py tests/integration/rag/test_rag_acceptance.py tests/test_diagnosis_rules.py`为27 passed；根目录`agent-service/.venv/bin/python -`内联检查通过，覆盖4份集中文档、1份语料入口、53个本地链接、35个需求/接口/验收编号及文档不入库边界；迁移正文保留与25个保护文件哈希核对通过，固定16份语料、catalog、评测题集及既有面试答案未改动，`git diff --check`通过。仅整理文档，未调用模型、入库、部署或推进KB-02；无本次未完成项、无新增问题或阻塞、无临时/替代方案、无新增Agent面试关注点，下一最小任务仍为KB-02.1知识管理授权契约
+- KB-01实际验证：在agent-service执行`.venv/bin/pytest -q tests/knowledge/test_knowledge_documents.py tests/integration/rag/test_rag_acceptance.py tests/test_diagnosis_rules.py`为21 passed；根目录`agent-service/.venv/bin/python -`内联文档检查通过，16/16资料身份与元数据、16/16引用章节、14/14现有代表题、35个需求/接口/验收编号及22个本地链接一致，管理文档未加入入库清单；`git diff --check -- docs/KNOWLEDGE_REQUIREMENTS.md docs/STATUS.md`及新文档空白检查通过
+- KB-01边界与下一任务：本轮仅新增需求台账并更新状态，固定规范、catalog、评测题集、黄金业务数据及原有面试准备文件保持不变；未运行真实模型评测、入库、数据库变更或部署。无新增阻塞、无临时方案、无新增已实现的Agent面试关注点；既有关键词零召回和最终回答引用标注评测缺口保留。下一最小任务为KB-02.1确定并验证Java知识管理授权契约，先明确身份、管理动作、确认绑定及版本/状态校验职责与失败行为，不同时建设上传页面
 - 已完成任务：T001～T153、T201～T275、T301～T354、T401～T487、T501～T555、T601～T670、T701～T793，以及M7.7场景01～24、M7.9全部领域指标
 - 当前场景：订单页统一Agent抽屉通过`POST /api/agent/messages`承载状态、动态诊断、规范问答、受控澄清和Review Approval五类结果；同一订单复用Session，每轮消息及确认创建独立SSE，切换订单隔离迟到响应；Review写回与返工分别确认，固定诊断仍作为显式入口保留
 - 通过测试：2026-10-11 `make test`完整通过，含三端smoke、Agent隔离PostgreSQL持久化52/52、Java测试59/59、前端64/64及生产构建；`make quality`的Ruff通过，mypy检查203个源文件无问题；`make eval-all`两组24/24与58/58通过；补充验收中隔离Java+PostgreSQL Agent E2E 16/16、24场景矩阵的Java链路8/8与Python异常检查23/23、统一页面组件32/32、隔离PostgreSQL链路1/1及Docker烟测通过
