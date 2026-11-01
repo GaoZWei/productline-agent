@@ -13,6 +13,7 @@
 *.log
 *.pid
 tmp/
+.local/knowledge-storage/
 
 # Python
 __pycache__/

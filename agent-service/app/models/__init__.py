@@ -17,6 +17,18 @@ from app.models.approval import (
     PendingToolName,
 )
 from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
+from app.models.managed_knowledge import (
+    ManagedKnowledgeDocument,
+    ManagedKnowledgeLibrary,
+    ManagedKnowledgeRevision,
+    ManagedKnowledgeVersion,
+)
+from app.models.managed_knowledge_processing import (
+    ManagedKnowledgeChunk,
+    ManagedKnowledgeIndexGeneration,
+    ManagedKnowledgeOperation,
+    ManagedKnowledgeTask,
+)
 from app.models.operation_log import OperationLogRecord
 
 __all__ = [
@@ -32,6 +44,14 @@ __all__ = [
     "ApprovalStatus",
     "KnowledgeChunk",
     "KnowledgeDocument",
+    "ManagedKnowledgeChunk",
+    "ManagedKnowledgeDocument",
+    "ManagedKnowledgeIndexGeneration",
+    "ManagedKnowledgeLibrary",
+    "ManagedKnowledgeOperation",
+    "ManagedKnowledgeRevision",
+    "ManagedKnowledgeTask",
+    "ManagedKnowledgeVersion",
     "OperationLogRecord",
     "OperationType",
     "PendingToolName",

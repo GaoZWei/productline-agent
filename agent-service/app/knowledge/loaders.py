@@ -119,6 +119,17 @@ class _Utf8DocumentLoader:
         """允许具体格式在读取后验证正文契约。"""
 
 
+def validate_markdown_title(content: str, expected_title: str) -> None:
+    """单份Markdown的首个非空行必须是与元数据一致的一级标题。"""
+
+    first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
+    if not first_line.startswith("# ") or first_line.startswith("## "):
+        raise DocumentLoadError("Markdown document requires a level-one title")
+    title = first_line[2:].rstrip().rstrip("#").rstrip()
+    if title != expected_title:
+        raise DocumentLoadError("Markdown title does not match document metadata title")
+
+
 class MarkdownDocumentLoader(_Utf8DocumentLoader):
     """读取带一级标题且标题与目录元数据一致的Markdown规范。"""
     # 格式支持markdown文件
@@ -127,18 +138,9 @@ class MarkdownDocumentLoader(_Utf8DocumentLoader):
     supported_suffixes = frozenset({".md"})
 
     def _validate_content(self, document: LoadedDocument) -> None:
-        # 读取完成后, 它会取得第一个非空行作为标题行
-        first_line = next(
-            (line.strip() for line in document.content.splitlines() if line.strip()),
-            "",
-        )
-        # 然后要求它必须是一级标题
-        if not first_line.startswith("# ") or first_line.startswith("## "):
-            raise DocumentLoadError("Markdown document requires a level-one title")
-        title = first_line[2:].rstrip().rstrip("#").rstrip()
-        # 标题必须等于DocumentMetadata.title
-        if title != document.metadata.title:
-            raise DocumentLoadError("Markdown title does not match document metadata title")
+        """固定资料与管理上传共用标题规则。"""
+
+        validate_markdown_title(document.content, document.metadata.title)
 
 # 纯文本Loader
 class PlainTextDocumentLoader(_Utf8DocumentLoader):

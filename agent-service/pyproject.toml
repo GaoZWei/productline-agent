@@ -51,6 +51,7 @@ allowed-confusables = ["，", "：", "（", "）", "？"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+explicit_package_bases = true
 plugins = ["pydantic.mypy"]
 files = ["app", "tests"]
 exclude = ["^migrations/"]

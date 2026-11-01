@@ -1,6 +1,7 @@
 """由环境变量提供的服务配置。"""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
@@ -24,6 +25,9 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, ge=1, le=65535)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_url: str = "postgresql://agent:agent-local-only@localhost:5432/remote_sensing_agent"
+    knowledge_storage_root: Path = (
+        Path(__file__).resolve().parents[2] / ".local" / "knowledge-storage"
+    )
     business_service_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8080")
     business_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=60)
     business_read_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
@@ -56,6 +60,17 @@ class Settings(BaseSettings):
     embedding_max_backoff_seconds: float = Field(default=2.0, gt=0, le=30)
     embedding_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     embedding_index_version: str = "text-embedding-3-small-1536-v1"
+
+    @field_validator("knowledge_storage_root")
+    @classmethod
+    def validate_knowledge_storage_root(cls, value: Path) -> Path:
+        """显式目录必须为绝对路径，不依赖容器或CLI的工作目录。"""
+
+        if not value.is_absolute() or ".." in value.parts:
+            raise ValueError(
+                "KNOWLEDGE_STORAGE_ROOT must be an absolute path without parent traversal"
+            )
+        return value
 
     @field_validator("embedding_dimension", mode="before")
     @classmethod

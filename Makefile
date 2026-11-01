@@ -164,9 +164,14 @@ eval-router: ## 验证 M3.7 固定路由数据集、评测指标、混淆矩阵�
 test-knowledge-docs: ## 验证 M4.1 规范目录、元数据、版本关系和演示文档
 	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_documents.py
 
-test-knowledge-models: ## 验证 M4.2 知识Schema、ORM模型和PostgreSQL迁移
-	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_models.py tests/knowledge/test_knowledge_documents.py tests/test_alembic.py
+test-knowledge-models: ## 验证知识Schema、管理草稿ORM与PostgreSQL迁移
+	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_models.py tests/knowledge/test_managed_knowledge_models.py tests/knowledge/test_managed_knowledge_processing_models.py tests/knowledge/test_knowledge_documents.py tests/test_alembic.py
 	./scripts/test-agent-persistence.sh -k knowledge
+
+.PHONY: test-knowledge-management
+test-knowledge-management: ## 验证KB-02.6原件、上传修订、解析及失败事务
+	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_original_storage.py tests/knowledge/test_document_loading.py tests/knowledge/test_document_chunking.py tests/test_business_client.py
+	./scripts/test-agent-persistence.sh -k knowledge_management
 
 test-knowledge-loading: ## 验证 M4.3 文档加载、分块、稳定ID和重复检测
 	cd agent-service && uv run --frozen pytest -q tests/knowledge

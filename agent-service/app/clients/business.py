@@ -1,4 +1,4 @@
-"""用于调用 Java 业务事实与写入接口的异步 HTTP 客户端。"""
+"""用于调用Java业务事实、知识授权与写入接口的异步HTTP客户端。"""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from app.settings import Settings
 
 DataT = TypeVar("DataT")
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_READONLY_POST_PATHS = frozenset({"/api/knowledge/authorize"})
 _JAVA_ERROR_MAPPING: dict[int, tuple[str, ToolErrorCode]] = {
     400: ("PARAM_VALIDATION_ERROR", ToolErrorCode.PARAM_VALIDATION_ERROR),
     401: ("PERMISSION_DENIED", ToolErrorCode.PERMISSION_DENIED),
@@ -126,6 +127,29 @@ class BusinessHttpClient:
                 json=dict(json_body),
             )
         except httpx.RequestError as exc:  # 请求阶段统一捕获 httpx.RequestError 异常
+            self._raise_request_error(exc, headers["X-Trace-Id"])
+        return self._validate_response(response, response_type, headers["X-Trace-Id"])
+
+    async def post_readonly(
+        self,
+        path: str,
+        response_type: type[DataT],
+        *,
+        json_body: Mapping[str, object],
+        identity: BusinessIdentity,
+        trace_id: str | None = None,
+    ) -> BusinessResponse[DataT]:
+        """只为显式白名单中的无副作用POST查询复用连接池，不放宽写入契约。"""
+
+        validated_path = self._validate_path(path)
+        if validated_path not in _READONLY_POST_PATHS:
+            raise ValueError("path is not an approved read-only POST endpoint")
+        headers = self._build_headers(identity=identity, trace_id=trace_id)
+        try:
+            response = await self._client.post(
+                validated_path, headers=headers, json=dict(json_body)
+            )
+        except httpx.RequestError as exc:
             self._raise_request_error(exc, headers["X-Trace-Id"])
         return self._validate_response(response, response_type, headers["X-Trace-Id"])
 

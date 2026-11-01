@@ -34,3 +34,9 @@ def test_alembic_configuration_points_to_migrations() -> None:
     assert (
         project_root / "migrations" / "versions" / "0014_review_source_run.py"
     ).is_file()
+    assert (
+        project_root / "migrations" / "versions" / "0015_managed_knowledge_drafts.py"
+    ).is_file()
+    assert (
+        project_root / "migrations" / "versions" / "0016_managed_knowledge_state.py"
+    ).is_file()

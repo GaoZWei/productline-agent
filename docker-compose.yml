@@ -55,6 +55,7 @@ services:
       BUSINESS_POOL_TIMEOUT_SECONDS: ${BUSINESS_POOL_TIMEOUT_SECONDS:-1.0}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-1800}
       APPROVAL_TTL_SECONDS: ${APPROVAL_TTL_SECONDS:-900}
+      KNOWLEDGE_STORAGE_ROOT: /var/lib/productline-agent/knowledge
       DATABASE_URL: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent-local-only}@postgres:5432/${POSTGRES_DB:-remote_sensing_agent}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-openai_compatible}
       MODEL_NAME: ${MODEL_NAME:-}
@@ -82,6 +83,8 @@ services:
       EMBEDDING_INDEX_VERSION: ${EMBEDDING_INDEX_VERSION:-text-embedding-3-small-1536-v1}
     ports:
       - "${AGENT_SERVICE_PORT:-8000}:8000"
+    volumes:
+      - knowledge-data:/var/lib/productline-agent/knowledge
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,3 +112,4 @@ services:
 
 volumes:
   postgres-data:
+  knowledge-data:

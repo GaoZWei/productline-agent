@@ -1,14 +1,17 @@
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
 from app.clients.business import BusinessHttpClient
+from app.clients.knowledge_authorization import KnowledgeAuthorizationClient
 from app.errors import ToolErrorCode, ToolException
 from app.main import create_app
 from app.observability import reset_trace_id, set_trace_id
 from app.schemas.business import BusinessIdentity
+from app.services.knowledge_management import KnowledgeManagementService
 from app.settings import Settings
 from app.tools import READ_TOOL_NAMES, ToolRegistry
 
@@ -64,13 +67,16 @@ def test_business_client_settings_validate_url_and_timeouts() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_fastapi_lifespan_owns_business_client() -> None:
-    app = create_app(Settings(environment="test"))
+async def test_fastapi_lifespan_owns_business_client(tmp_path: Path) -> None:
+    app = create_app(Settings(environment="test", knowledge_storage_root=tmp_path / "knowledge"))
 
     async with app.router.lifespan_context(app):
         client = app.state.business_client
         registry = app.state.tool_registry
         assert isinstance(client, BusinessHttpClient)
+        assert isinstance(app.state.knowledge_authorization_client, KnowledgeAuthorizationClient)
+        assert isinstance(app.state.knowledge_management_service, KnowledgeManagementService)
+        assert not (tmp_path / "knowledge").exists()
         assert client.is_closed is False
         assert isinstance(registry, ToolRegistry)
         assert registry.names == tuple(sorted(READ_TOOL_NAMES))

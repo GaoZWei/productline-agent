@@ -1857,3 +1857,107 @@
 - 页面默认ORDER-003，名称和分类独立于Java事实；多任务与非坐标系场景显示既有预算及只读能力边界。
 - 全量重置恢复30订单、34任务、38步骤、24问题、23复核、3返工和31交付，清除人工新增写入及历史。
 - 动态诊断继续使用6轮决策、8次Tool上限；事实未齐保留信息不足和真实终止原因，不新增返工类型或自动模型调用。
+
+## 2026-10-29 — `[KB-02.1] 知识管理授权契约`
+
+### 核心解决的问题
+
+后续知识管理需要统一的Java角色权限依据，不能由页面或模型自报知识权限、人工确认及当前状态。
+本任务提供无写入的知识授权查询，明确Java权限判断与Python知识版本、状态和确认事务的职责。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/KnowledgeAuthorizationController.java`：`authorize`接口。
+- `business-service/src/main/java/com/productline/business/application/KnowledgeAuthorizationService.java`：`authorize`演示角色授权。
+- `KnowledgeAuthorizationRequest/KnowledgeAuthorizationResponse`：严格请求与授权结果DTO。
+- `KnowledgeManagementAction/KnowledgePermissionScope`：动作白名单、人工确认策略及服务端知识范围。
+
+### 实现的核心功能
+
+- `POST /api/knowledge/authorize`接收演示身份及单个动作，返回同一用户/动作、`INTERNAL_REVIEWER`范围及人工确认要求，沿用统一错误与Trace ID信封。
+- 支持READ、UPLOAD、PUBLISH、DISABLE和RETRY_INDEX；非READ动作均要求人工确认，未知字段、非法动作和非REVIEWER角色拒绝。
+- 授权查询无数据库或模型依赖，不生成执行凭证；Python接线、确认持久化、知识版本状态事务及实际管理操作尚未实现。
+
+## 2026-10-29 — `[KB-02.2] Python知识授权Schema与HTTP Client`
+
+### 核心解决的问题
+
+Java角色权限查询需要由Python按严格契约调用，响应格式正确仍可能属于其他用户、动作或请求，不能直接交给知识写入流程。
+本任务增加带请求关联检查、失败阻断和有限重试的Python授权Client，明确无副作用POST查询与业务写POST的边界。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/knowledge_authorization.py`：`KnowledgeAuthorizationRequest/Response`及`KnowledgeManagementAction`。
+- `agent-service/app/clients/business.py`：`BusinessHttpClient.post_readonly`固定路径白名单及既有信封/错误复用。
+- `agent-service/app/clients/knowledge_authorization.py`：`KnowledgeAuthorizationClient.authorize`与`_query_with_retry`。
+- `agent-service/app/main.py`：应用lifespan装配授权Client，借用既有业务HTTP连接池。
+
+### 实现的核心功能
+
+- 请求仅包含动作，响应严格校验字段、范围和确认策略，并绑定本次用户、动作及Trace；失败抛出分类异常，不缓存成功结果。
+- 默认总预算覆盖全部请求和退避，只对明确瞬时错误最多额外重试一次；拒绝、非法响应和不可重试的Java错误直接停止，取消向上传播。
+- 固定只读POST白名单不放宽业务写入的幂等要求；应用启动不主动查询Java，不新增数据库、管理接口或实际知识写入。
+
+## 2026-10-31 — `[KB-02.4] 知识管理草稿Schema、ORM与增量迁移`
+
+### 核心解决的问题
+
+知识管理设计需要可验证的数据底座，避免规范版本重复、当前修订悬空或资料指向其他资料的版本。
+本任务把内部库、资料、版本及修订落为独立持久化模型，与旧入库和检索表隔离。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/managed_knowledge.py`：`ManagedKnowledgeLibraryState/DocumentState`、`ManagedKnowledgeDraftVersion`、`ManagedKnowledgeMetadata.metadata_digest`及`ManagedKnowledgeRevisionSnapshot`。
+- `agent-service/app/models/managed_knowledge.py`：四表ORM、版本唯一约束、当前版本归属及延迟修订外键。
+- `agent-service/migrations/versions/0015_managed_knowledge_drafts.py`：基于0014新增四表和LEGACY单例，提供本版对象的降级。
+
+### 实现的核心功能
+
+- 内部快照校验来源、规范版本、日期、权限范围、MD/TXT原件定位和解析结果，服务端计算元数据哈希，并验证正文哈希且保留首尾空白。
+- 数据库约束同资料规范版本唯一、引用身份唯一、原件key唯一，以及资料/版本/修订归属；同事务先写版本再写修订，提交时禁止悬空。
+- 四表与旧索引隔离，默认LEGACY且仅接受DRAFT；不创建上传、修订或发布应用，不导入既有语料，不切换问答源。
+
+## 2026-10-31 — `[KB-02.5] 知识操作、任务、候选索引及版本封存模型`
+
+### 核心解决的问题
+
+首批四表不能保存人工操作、构建失败和重试记录，也不能保留多个候选或历史索引并约束发布证据归属。
+本任务补齐处理模型，给后续知识管理服务提供确认、幂等、任务和封存关系的数据基础。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/managed_knowledge_processing.py`：确认、操作、任务、候选批次及分块的严格内部记录。
+- `agent-service/app/schemas/managed_knowledge.py`：`ManagedKnowledgeVersionState`封存状态；保留仅接受DRAFT的输入Schema。
+- `agent-service/app/models/managed_knowledge_processing.py`：操作、任务、索引批次和Chunk四表，操作幂等、活动任务排他及重试归属约束。
+- `agent-service/app/models/managed_knowledge.py`：封存修订/批次外键、发布状态字段及同资料单一发布版本索引。
+- `agent-service/migrations/versions/0016_managed_knowledge_state.py`：基于0015补齐八表模型及封存关系，有封存版本时拒绝降级。
+
+### 实现的核心功能
+
+- 确认快照限制固定字段并绑定操作身份，状态、时间和受控错误码组合须一致；不保存Token、正文或供应商原始异常。
+- 操作幂等键唯一、同修订同类活动任务排他；任务绑定所属操作/修订/批次，重试引用同修订同类原任务，保留失败历史。
+- 分块按批次共存并拥有独立GIN/HNSW索引；版本封存指向本修订的批次，同资料最多一个PUBLISHED版本，历史导入不伪造平台发布时间。
+- 保持LEGACY检索源，不增加文件接收、后台执行、发布事务或管理接口；数据模型不代替Java授权、确认事实复查或批次完整性校验。
+
+## 2026-10-31 — `[KB-02.6] 独立原件、草稿修订与解析应用`
+
+### 核心解决的问题
+
+知识管理需要接收真实文件并保存失败/重试事实，只有模型定义无法防止重复上传、过期草稿上下文和迟到解析覆盖新修订。
+本任务把Java权限、原件持久化及短事务接成内部上传/解析应用，让原字节、历史修订和处理结果可以回查。
+
+### 实现的核心代码
+
+- `agent-service/app/knowledge/storage.py`：`KnowledgeOriginalStorage.stage/commit/read/discard`原件边界及校验。
+- `agent-service/app/knowledge/managed_parsing.py`、`chunking.py`、`loaders.py`：单份规范化、标题校验及稳定分块输入协议。
+- `agent-service/app/repositories/managed_knowledge.py`：`accept_upload/claim_parse/finish_parse/recover_interrupted`事务、执行权及修订保护。
+- `agent-service/app/services/knowledge_management.py`：`upload/preview/read_original/start`授权、流程与脱敏异常。
+- `agent-service/app/schemas/knowledge_management.py`：上传命令、修订预期及安全结果；`settings.py`、`main.py`和`docker-compose.yml`提供惰性装配及独立持久化配置。
+
+### 实现的核心功能
+
+- 原件逐级拒绝符号链接，流式限制大小、UTF-8及非空文本；固定服务端key原子创建，原始字节与规范化正文分别校验，不覆盖仓库资料或已提交原件。
+- Java授权后接受新资料、新规范版本或DRAFT修正；事务复查规范版本和预期资料计数/修订，保存幂等操作、任务及快照，旧活动任务失效。
+- 文件、HTTP及解析等待不占用数据库事务，提交结果前核对owner、状态、当前修订及只写一次条件；失败或中断记录保留，旧任务不能覆盖新正文。
+- 授权预览和原件读取绑定版本及修订，原件缺失不替换既有正文；文件提交而DB失败保留未引用原件，同字节可校验重用，不提供自动永久删除。
+- 应用启动只装配服务，管理激活时处理旧owner中断，不调用Embedding、发布或切换问答源，不提供HTTP管理接口。

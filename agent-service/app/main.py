@@ -21,6 +21,7 @@ from app.api.sessions import router as sessions_router
 from app.api.tool_debug import ToolDebugRunContextStore
 from app.api.tool_debug import router as tool_debug_router
 from app.clients.business import BusinessHttpClient
+from app.clients.knowledge_authorization import KnowledgeAuthorizationClient
 from app.clients.model import OpenAICompatibleChatClient
 from app.database import Database
 from app.knowledge import (
@@ -28,7 +29,9 @@ from app.knowledge import (
     EmbeddingConfig,
     OpenAICompatibleEmbeddingProvider,
 )
+from app.knowledge.storage import KnowledgeOriginalStorage
 from app.observability import TraceIdMiddleware, configure_logging
+from app.repositories.managed_knowledge import ManagedKnowledgeRepository
 from app.services import (
     DatabaseApprovalExecutionStore,
     KnowledgeIndexCapabilityService,
@@ -36,6 +39,7 @@ from app.services import (
     ProductionAgentSkillDispatcher,
     RunEventService,
 )
+from app.services.knowledge_management import KnowledgeManagementService
 from app.settings import Settings, get_settings
 from app.tools import create_read_tool_registry, create_write_tool_registry
 from app.versioning import build_run_version_snapshot
@@ -68,6 +72,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # FastAPI 应用级共享状态供路由处理访问数据库和业务客户端。
         application.state.database = database
         application.state.business_client = business_client
+        application.state.knowledge_authorization_client = KnowledgeAuthorizationClient(
+            business_client
+        )
+        application.state.knowledge_management_service = KnowledgeManagementService(
+            ManagedKnowledgeRepository(database),
+            KnowledgeOriginalStorage(resolved_settings.knowledge_storage_root),
+            application.state.knowledge_authorization_client,
+        )
         application.state.model_client = model_client
         application.state.run_event_service = RunEventService()
         # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。

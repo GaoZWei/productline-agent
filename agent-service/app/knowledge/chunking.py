@@ -7,8 +7,32 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Protocol
 
-from app.knowledge.loaders import DocumentFormat, LoadedDocument
+from app.knowledge.loaders import DocumentFormat
+
+
+class ChunkMetadata(Protocol):
+    """分块只需要稳定规范身份与标题，不依赖固定目录的生命周期。"""
+
+    @property
+    def document_id(self) -> str: ...
+
+    @property
+    def title(self) -> str: ...
+
+
+class ChunkSource(Protocol):
+    """固定资料与管理修订共用的最小正文输入。"""
+
+    @property
+    def metadata(self) -> ChunkMetadata: ...
+
+    @property
+    def document_format(self) -> DocumentFormat: ...
+
+    @property
+    def content(self) -> str: ...
 
 _HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$")
 _FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
@@ -45,7 +69,7 @@ class HeadingDocumentChunker:
         self._max_chunk_characters = max_chunk_characters
         self._token_counter = token_counter or _count_lexical_tokens
 
-    def split(self, document: LoadedDocument) -> tuple[DocumentChunk, ...]:
+    def split(self, document: ChunkSource) -> tuple[DocumentChunk, ...]:
         """保持目录顺序生成Chunk, ID不依赖全局chunk_index。"""
 
         sections: tuple[tuple[tuple[str, ...], str], ...]
@@ -98,7 +122,7 @@ class HeadingDocumentChunker:
 
 # 处理代码围栏内的井号
 def _markdown_sections(
-    document: LoadedDocument,
+    document: ChunkSource,
 ) -> tuple[tuple[tuple[str, ...], str], ...]:
     """忽略代码围栏内的井号, 按ATX标题维护完整层级路径。"""
 
@@ -211,7 +235,7 @@ def _count_lexical_tokens(content: str) -> int:
 
     return len(_TOKEN_PATTERN.findall(content))
 
-# 稳定Chunk ID算法(不依赖位置,在前面插入别的东西，也不会影响当前片段的id，但是标题会修改id，内容会修改id)
+# 稳定Chunk ID不依赖全局位置，章节标题或正文变化时才改变对应身份。
 def _stable_chunk_id(
     *,
     document_id: str,

@@ -217,8 +217,81 @@ Java 400/401/403/404/409/500、httpx 网络/超时异常和响应契约错误统
 `ToolException`。POST 强制提供安全格式的幂等键。
 
 Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTTP/SOCKS 代理劫持。Client
-自身不重试，只负责把上游失败转换为带 `retryable` 的 `ToolException`；是否重试由具体 Tool
-显式绑定的 `RetryPolicy` 决定，避免未来写 Tool 因共享 Client 行为而被意外重放。
+自身不重试，只负责把上游失败转换为带 `retryable` 的 `ToolException`；重试由具体Tool或独立授权Client
+显式绑定的`RetryPolicy`及各自总预算控制，避免未来写Tool因共享Client行为而被意外重放。
+
+## KB-02.2 知识授权Client
+
+`KnowledgeAuthorizationClient.authorize`复用应用lifespan管理的`BusinessHttpClient`连接池，调用
+`POST /api/knowledge/authorize`。独立`post_readonly`入口只接受该固定路径，不放宽普通写POST的强制幂等键要求。
+请求只包含动作，响应必须通过Java信封、严格知识授权Schema、确认策略及本次用户/动作/Trace绑定检查。
+未知权限范围、隐式布尔转换、错误用户或动作均作为不可重试的响应校验错误阻断，不缓存成功结果。
+
+默认5秒总预算覆盖HTTP尝试和退避，最多额外重试一次明确可重试的超时或网络故障，首次退避100ms。
+参数、权限、响应校验和Java当前`retryable=false`的500均不重试；调用取消向上传播，总预算耗尽停止且不再标为可重试。
+重试责任仅位于该授权Client，后续调用方不再叠加自动重试。日志只保存Trace、错误码、重试次数和退避时长。
+应用仅装配Client，启动不会查询Java；管理应用、页面、确认记录和知识状态事务仍待后续开发。
+完整契约见[知识管理授权](../docs/knowledge/KNOWLEDGE_AUTHORIZATION.md)。
+
+局部验证：`.venv/bin/pytest -q tests/test_knowledge_authorization_client.py tests/test_business_client.py tests/test_write_tools.py tests/test_retry_policy.py`。
+
+## KB-02.4 管理草稿数据底座
+
+`app.schemas.managed_knowledge`定义内部库、资料、规范版本、元数据及修订快照；它们不是对外上传API。
+`app.models.managed_knowledge`将library/document/version/revision映射到四张`managed_knowledge_*`表，
+与旧CLI的`knowledge_documents/knowledge_chunks`隔离，不复制Java业务数据。
+规范版本在同一资料内唯一，修订指针必须在事务提交时指向实际修订；资料当前版本和修订规范版本均由组合外键核对归属。
+快照Schema计算元数据哈希、核对解析正文哈希并保留正文首尾空白，原件key只允许服务端身份生成的固定形式。
+
+`0015_managed_knowledge_drafts`仅新增四表及LEGACY单例，版本状态只允许DRAFT；迁移不导入资料或切换检索源。
+本任务未部署或执行开发库迁移。原件落盘、修订操作、幂等/任务记录、解析封存、发布及接口待后续实现；
+Schema冻结不代表数据库已禁止所有直接更新，后续应用仍须调用Java授权并保护知识状态事务。
+
+根目录`make test-knowledge-models`验证新旧Schema和隔离PostgreSQL迁移。
+已有专用测试PostgreSQL时，也可配置`AGENT_PERSISTENCE_TEST_DATABASE_URL`并执行
+`.venv/bin/pytest -q tests/knowledge/test_managed_knowledge_persistence.py`；测试自行创建并清理临时数据库。
+具体范围见[存储隔离设计](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md)。
+
+## KB-02.5 操作、任务与候选索引模型
+
+`app.models.managed_knowledge_processing`补齐操作、任务、索引批次和Chunk四表，
+`app.schemas.managed_knowledge_processing`提供严格确认快照、处理记录及分块输入。
+确认快照只保存身份、动作、版本/修订和哈希等固定字段；幂等键唯一约束和活动任务部分唯一索引仲裁并发重复。
+任务通过组合外键绑定所属操作、修订、批次和原重试任务，失败历史可与新任务共存；没有后台领取或重试执行器。
+
+Chunk按批次保留正文及1536维向量，新增独立GIN/HNSW索引，不加入旧检索Repository。
+内部快照使用不可变向量元组，传给pgvector前应转换为列表（测试使用`model_dump(mode="json")`）。
+`0016_managed_knowledge_state`基于0015补齐版本封存关系及发布状态，限制同资料最多一个PUBLISHED版本；
+已存在封存版本时拒绝降级到0015，避免静默改写发布历史。
+新建/修正输入仍使用仅接受DRAFT的Schema，完整状态使用`ManagedKnowledgeVersionState`。
+
+当前模型不代表已核实Java权限或完成用户确认，也不能单独证明候选READY、实际分块完整性或跨行发布状态一致。
+这些条件须由后续应用服务在事务中复查。本任务保持LEGACY读源，无文件落盘、外部模型调用或管理接口。
+根目录`make test-knowledge-models`覆盖新旧模型和隔离数据库约束；KB-02.6应用范围见下节。
+
+## KB-02.6 原件与上传解析应用
+
+`KnowledgeManagementService`复用Java授权Client，依次接收受控原件、提交草稿修订/UPLOAD操作/PARSE任务，
+再在事务外规范化及分块，最后事务内核对owner、任务状态和当前修订，一次写入正文与哈希。
+草稿修正要求原规范版本号不变及预期资料计数/修订号，旧活动任务失效；封存版本更新必须新建规范版本。
+相同用户/UPLOAD/幂等键同输入返回原操作及任务，不同输入冲突，每次都重新校验权限。
+`preview`和`read_original`分别查询READ授权后按知识范围读取；分块只有预览，不写向量或检索表。
+
+`KNOWLEDGE_STORAGE_ROOT`本机默认仓库根`.local/knowledge-storage/`，支持显式绝对路径，不能有父级跳转或目录符号链接。
+Compose使用`/var/lib/productline-agent/knowledge`及`knowledge-data`命名卷，本任务未部署或迁移现有服务。
+原件最多10MiB，只接受MD/UTF-8 TXT；保存原字节及SHA-256，逐级NOFOLLOW并原子创建不可覆盖的最终入口。
+文件与数据库不共事务，数据库失败可能保留未引用原件；同修订同字节可校验复用，不同字节拒绝覆盖，不能自动删除。
+
+FastAPI lifespan只装配`knowledge_management_service`，不创建目录或访问新表/Java。
+显式`start()`或首次已授权管理调用激活单实例恢复：旧owner未完成任务标记中断，不自动重试模型或旧任务。
+启用管理调用前需显式执行已有迁移；缺少表会返回脱敏的持久化不可用错误，不影响普通应用启动。
+当前没有HTTP管理路由、后台模型/索引执行、发布、停用或页面；下一任务为KB-02.7只读管理接口。
+
+验收入口：根目录`make test-knowledge-management`；已有专用测试PostgreSQL时设置
+`AGENT_PERSISTENCE_TEST_DATABASE_URL`，在agent-service执行
+`.venv/bin/pytest -q tests/knowledge/test_knowledge_management_persistence.py`。
+测试使用真实授权Client及模拟Java响应、真实临时数据库和目录，未做真实Java联调或容器重启验收。
+完整契约见[存储隔离设计](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md)。
 
 ## Tool 基础协议
 
@@ -728,7 +801,7 @@ make test-eval-metrics
 
 ## 数据边界
 
-`app.database.Base` 当前只映射 Agent Session、Message、Run、Step及知识文档/分块，并可继续承载Approval。
+`app.database.Base` 映射Agent运行记录、Approval、操作日志、旧知识文档/分块及管理库八表。
 知识表只保存规范及检索数据，不复制业务事实。Python服务
 不得为 Java 的订单、生产、质检、复核或交付表建立 ORM 映射，也不得绕过 Java API
 读取或修改业务事实。

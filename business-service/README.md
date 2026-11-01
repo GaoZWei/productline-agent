@@ -49,6 +49,15 @@ M0.5 只建立 Java 侧最小权限上下文，Header 尚未连接真实认证�
 make test-java-write
 ```
 
+## KB-02.1 知识管理授权
+
+新增无写入查询`POST /api/knowledge/authorize`，请求只包含`action`，使用现有`X-User-Id`和`X-User-Role: REVIEWER`演示身份。
+成功返回`userId`、`action`、服务端确定的`permissionScope=INTERNAL_REVIEWER`及`confirmationRequired`；除READ外，UPLOAD、PUBLISH、DISABLE、RETRY_INDEX均要求人工确认。
+成功不是执行凭证或已确认的证明。Java只裁决角色权限，后续知识版本、状态与确认快照由Python依据自有知识表在执行事务中核对。
+接口不访问数据库或模型；Python已提供严格调用Client，知识管理应用及页面仍待接入，完整输入、错误与边界见[知识管理授权契约](../docs/knowledge/KNOWLEDGE_AUTHORIZATION.md)。
+
+局部验证：`mvn -o --file business-service/pom.xml -Dtest=KnowledgeAuthorizationApiTest,KnowledgeAuthorizationServiceTest test`（在仓库根目录执行）。
+
 ## M0.6 统一响应
 
 所有 `/api` 业务端点使用以下响应结构；Actuator `/health` 保持原生健康检查结构。

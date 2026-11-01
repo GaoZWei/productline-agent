@@ -397,6 +397,14 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "approval_records",
         "knowledge_chunks",
         "knowledge_documents",
+        "managed_knowledge_libraries",
+        "managed_knowledge_documents",
+        "managed_knowledge_versions",
+        "managed_knowledge_revisions",
+        "managed_knowledge_index_generations",
+        "managed_knowledge_operations",
+        "managed_knowledge_tasks",
+        "managed_knowledge_chunks",
     }
 
     assert set(Base.metadata.tables["agent_sessions"].columns.keys()) == {

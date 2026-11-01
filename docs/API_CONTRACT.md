@@ -5,6 +5,7 @@
 本文固定 Java API 向后续 Python Tool 和 Web Console 暴露的查询/写入路径、响应结构与
 状态字符串。当前已实现9个只读端点（含V4扩充后的订单列表），M0.5已实现提交复核和创建返工两个写端点，
 M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
+KB-02.1新增无写入的知识管理授权查询`POST /api/knowledge/authorize`，详见[知识管理授权契约](knowledge/KNOWLEDGE_AUTHORIZATION.md)。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
