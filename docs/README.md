@@ -25,7 +25,7 @@
 | 题库与答案 | [主问题](interview/Agent-Question.md)、[扩展问题](interview/Agent-Question-Extend.md)、[成熟答案](interview/Agent-Answer.md) | 主问题、追问和已认可答案；题目进度以准备计划为准 |
 | 面试工程要点 | [关注点](interview/needCare.md)、[优化事项](interview/Agent-Optimization.md) | 已有工程价值、当前边界及待验证事项 |
 | 简历与项目图片 | [简历 PDF](<interview/assets/AI Agent CV（9.13）.pdf>)、[agent项目.png](interview/assets/agent项目.png) | 面试原始附件，不能据其推断已实现或已验证能力 |
-| 工程学习 | [Python 学习手册](learning/pythonKnowledge.md)、[Agent 开发学习 PDF](<learning/AI Agent 开发（云老师结合版）11.2.pdf>) | 手册主要对应 M1.1～M2.8；PDF 为学习附件，不作为当前实现依据 |
+| 工程学习 | [Python 学习手册](learning/pythonKnowledge.md)、[Agent 开发学习 PDF](<interview/assets/AI Agent 开发（云老师结合版）11.2.pdf>) | 手册主要对应 M1.1～M2.8；PDF 为学习附件，不作为当前实现依据 |
 | 历史架构 | [M0～M4 思维导图](archive/system-mindmap-m0-m4.md) | 2026-08-22 的历史快照，不作为当前系统现状 |
 
 ## 模块入口

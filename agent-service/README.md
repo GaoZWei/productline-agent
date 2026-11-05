@@ -286,7 +286,8 @@ Compose使用`/var/lib/productline-agent/knowledge`及`knowledge-data`命名卷�
 FastAPI lifespan只装配`knowledge_management_service`，不创建目录或访问新表/Java。
 显式`start()`或首次已授权管理调用激活单实例恢复：旧owner未完成任务标记中断，不自动重试模型或旧任务。
 启用管理调用前需显式执行已有迁移；缺少表会返回脱敏的持久化不可用错误，不影响普通应用启动。
-当前没有HTTP管理路由、后台模型/索引执行、发布、停用或页面；下一任务为KB-02.7只读管理接口。
+KB-02.7～02.10已接入管理、上传修订、正文预览和原件下载HTTP；后台索引执行、发布、停用及页面仍待实现。
+下一最小任务为KB-02管理底座收口验收，详见本文知识管理接口说明。
 
 验收入口：根目录`make test-knowledge-management`；已有专用测试PostgreSQL时设置
 `AGENT_PERSISTENCE_TEST_DATABASE_URL`，在agent-service执行
@@ -802,6 +803,72 @@ make test-eval-metrics
 `unit` 标记不使用外部服务；`integration` 标记覆盖 FastAPI 生命周期、中间件和 HTTP
 边界及 PostgreSQL 持久化。`make test-agent-persistence` 使用随机宿主端口和临时数据目录启动
 隔离 PostgreSQL，完成后自动删除，避免误用本机或开发数据库。
+
+## 知识管理只读接口（KB-02.7）
+
+`/api/agent/knowledge`下提供六个GET入口：`/documents`、`/documents/{document_id}`、
+`/documents/{document_id}/versions`、`/documents/{document_id}/versions/{version_id}`、
+`/documents/{document_id}/tasks`和`/tasks/{task_id}`。三个列表使用`page/page_size`分页，默认1/20，
+每页最多100项。每次透传演示身份到Java执行READ授权，再按返回范围读取管理表；不从旧索引补数据。
+需预先显式执行已有0015/0016迁移，普通启动不自动迁移或恢复管理任务。
+
+返回资料及版本元数据、任务状态和固定错误文案，不返回正文、原件路径、内部执行快照或异常原文。
+查询不触发解析、恢复、索引或发布；版本管理可见不代表可以进入默认问答。上传、预览及原件下载HTTP见后文，页面仍待开发。
+完整路径、错误及边界见[存储设计第十二节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十二kb-027-资料版本和任务只读管理接口)。
+`make test-knowledge-management`验证授权Client/HTTP边界及隔离数据库，不调用真实模型。
+
+## 知识文件上传与草稿修订（KB-02.8）
+
+前缀为`/api/agent/knowledge`，使用multipart POST到`/documents`新建资料，
+到`/documents/{document_id}/versions`新增规范版本，或到
+`/documents/{document_id}/versions/{version_id}/revisions`修正草稿。
+每次携带演示身份和`Idempotency-Key`，仅提供`command` JSON文本及`file`文件各一个；
+metadata沿用严格业务Schema，新版本还需`expected_row_version`，修订还需`expected_revision_no`。
+
+```bash
+curl -X POST http://localhost:8000/api/agent/knowledge/documents \
+  -H 'X-User-Id: demo-reviewer' -H 'X-User-Role: REVIEWER' \
+  -H 'Idempotency-Key: demo-upload-001' \
+  -F 'command={"metadata":{"title":"测试规范","document_type":"QUALITY_SPEC","specification_version":"1.0","effective_date":"2026-01-01","permission_scope":"INTERNAL_REVIEWER","change_summary":"首次上传"}}' \
+  -F 'file=@/absolute/path/spec.md;type=text/markdown'
+```
+
+示例需替换为本地文件路径，MD第一个一级标题必须与title一致；仅演示资料，不作为正式标准。
+文件上限10MiB，命令16KiB，总请求10MiB+64KiB；拒绝客户端自报状态、哈希、路径及重复JSON键。
+先Java授权再接收表单，应用提交前再次授权；所有临时文件在成功、失败或中断时关闭。
+201表示草稿已接收，200表示幂等重放；解析失败仍保留草稿及失败任务，可查询任务状态并上传新修订。
+保持原幂等键和相同输入才能安全重试，已记录操作改动输入返回409；已发布版本必须新增规范版本。
+原件与数据库不共事务，失败原件的保留约定不变，不自动清理或覆盖原件。
+
+新增依赖`python-multipart`已写入锁文件，现有依赖未升级；使用`uv sync --frozen`安装。
+启用调用前需显式迁移0015/0016，普通启动不迁移；本批无部署或模型调用，草稿不进入默认问答。
+接口及错误详情见[存储设计第十三节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十三kb-028-上传及草稿修订http接口)。
+
+## 知识正文与分块预览（KB-02.9）
+
+`GET /api/agent/knowledge/documents/{document_id}/versions/{version_id}/revisions/{revision_no}/preview`
+携带现有演示身份Header，明确指定修订（1～2147483647），每次Java READ授权后同时核对资料/版本归属及修订权限。
+成功返回元数据、规范化正文和分块，保留正文首尾空白；历史修订可回查，is_current_revision仅针对该规范版本。
+不返回原件字节、路径、哈希或内部快照，响应禁用缓存且不渲染Markdown/HTML。
+
+没有已完成正文返回409/PREVIEW_NOT_READY，范围或归属不符返回404，正文/元数据校验或读取失败返回503安全结果；
+不触发解析、管理恢复、模型或索引写入，也不从原件或旧库补正文。原件缺失时，已校验正文仍可预览。
+本批没有新增依赖或迁移；原件下载见下一节，发布和页面仍待开发，真实Java HTTP联调和真实进程重启仍待后续验收。
+详情见[存储设计第十四节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十四kb-029-正文与分块预览http接口)。
+
+## 知识原始文件下载（KB-02.10）
+
+`GET /api/agent/knowledge/documents/{document_id}/versions/{version_id}/revisions/{revision_no}/original`
+携带现有演示身份Header，明确指定修订。每次Java READ授权及SQL归属/权限校验后，
+按数据库中的服务端key读取原件并校验实际大小和SHA-256；全部通过后返回200原始字节。
+
+响应为`application/octet-stream`附件，UTF-8文件名编码并保留固定ASCII回退名，禁用缓存和内容嗅探。
+保留BOM和原换行；未解析、解析失败及历史修订也可下载，但不意味着发布。
+不接受调用方指定路径/文件名，不提供范围下载、ETag或304；GET不激活任务恢复、不解析或写入索引。
+资源不可见404/RESOURCE_NOT_FOUND，原件缺失404/ORIGINAL_NOT_FOUND，
+原件大小或哈希异常503/ORIGINAL_INTEGRITY_ERROR，其他数据或存储异常503安全结果；不会改发预览正文。
+原件异常不改写已存正文，预览仍独立校验；详情见[设计第十五节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十五kb-0210-原件读取http接口)。
+下一最小任务为KB-02收口验收，本批无新依赖、迁移或部署，不自动推进发布及页面。
 
 ## 数据边界
 

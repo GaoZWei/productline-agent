@@ -169,8 +169,8 @@ test-knowledge-models: ## 验证知识Schema、管理草稿ORM与PostgreSQL迁�
 	./scripts/test-agent-persistence.sh -k knowledge
 
 .PHONY: test-knowledge-management
-test-knowledge-management: ## 验证KB-02.6原件、上传修订、解析及失败事务
-	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_original_storage.py tests/knowledge/test_document_loading.py tests/knowledge/test_document_chunking.py tests/test_business_client.py
+test-knowledge-management: ## 验证知识原件、上传修订及管理HTTP接口
+	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_knowledge_original_storage.py tests/knowledge/test_document_loading.py tests/knowledge/test_document_chunking.py tests/test_business_client.py tests/test_knowledge_management_read_api.py tests/test_knowledge_upload_api.py tests/knowledge/test_knowledge_upload_body.py tests/test_knowledge_preview_api.py tests/test_knowledge_original_api.py
 	./scripts/test-agent-persistence.sh -k knowledge_management
 
 test-knowledge-loading: ## 验证 M4.3 文档加载、分块、稳定ID和重复检测

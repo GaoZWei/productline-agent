@@ -10,7 +10,7 @@
 | 2 | [知识库规范作用说明](KNOWLEDGE_GUIDE.md) | 理解每份规范解决的问题、适用场景和业务边界 |
 | 3 | [语料与索引说明](KNOWLEDGE_BASE.md) | 查看语料目录、元数据、版本约定、入库与索引历史说明 |
 | 4 | [知识管理授权契约](KNOWLEDGE_AUTHORIZATION.md) | 查看KB-02.1 Java接口与KB-02.2 Python Client、动作权限及人工确认边界 |
-| 5 | [资料、版本与存储隔离设计](KNOWLEDGE_STORAGE_DESIGN.md) | 查看KB-02.3设计、KB-02.4/02.5八表、KB-02.6上传解析应用及后续接口/发布边界 |
+| 5 | [资料、版本与存储隔离设计](KNOWLEDGE_STORAGE_DESIGN.md) | 查看隔离八表、上传解析应用、KB-02.7～02.10管理/预览/原件HTTP及收口、发布边界 |
 
 ## 相关入口
 

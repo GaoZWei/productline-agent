@@ -223,20 +223,23 @@ class KnowledgeManagementService:
         *,
         identity: BusinessIdentity,
         trace_id: str | None = None,
+        document_id: str | None = None,
     ) -> KnowledgePreview:
-        """读取正文及分块前独立检查READ权限，结果绑定具体修订和资料版本。"""
+        """纯读取具体修订，独立检查READ及资料归属，不激活管理恢复或重跑任务。"""
 
         scope, _ = await self._authorize(KnowledgeManagementAction.READ, identity, trace_id)
-        await self.start()
         try:
-            record = await self.repository.read_revision(version_id, revision_no, scope)
+            record = await self.repository.read_revision(
+                version_id, revision_no, scope, document_id=document_id
+            )
         except SQLAlchemyError:
             raise KnowledgeManagementError("KNOWLEDGE_PERSISTENCE_UNAVAILABLE") from None
         snapshot = record.snapshot
         if snapshot.body is None:
             raise KnowledgeManagementError("PREVIEW_NOT_READY")
         try:
-            parsed = parse_managed_revision(
+            parsed = await asyncio.to_thread(
+                parse_managed_revision,
                 snapshot.body.encode(),
                 citation_document_id=record.citation_document_id,
                 title=snapshot.title,
@@ -273,15 +276,19 @@ class KnowledgeManagementService:
         *,
         identity: BusinessIdentity,
         trace_id: str | None = None,
+        document_id: str | None = None,
     ) -> KnowledgeOriginalFile:
-        """原件读取独立验证READ与范围，不接收文件key或使用仓库正文兜底。"""
+        """纯读取并校验指定修订原件，不激活恢复、不接收文件key或回退替代正文。"""
 
         scope, _ = await self._authorize(KnowledgeManagementAction.READ, identity, trace_id)
-        await self.start()
         try:
-            record = await self.repository.read_revision(version_id, revision_no, scope)
+            record = await self.repository.read_revision(
+                version_id, revision_no, scope, document_id=document_id
+            )
         except SQLAlchemyError:
             raise KnowledgeManagementError("KNOWLEDGE_PERSISTENCE_UNAVAILABLE") from None
         snapshot = record.snapshot
-        raw = self.storage.read(snapshot.original_key, snapshot.raw_hash, snapshot.byte_size)
+        raw = await asyncio.to_thread(
+            self.storage.read, snapshot.original_key, snapshot.raw_hash, snapshot.byte_size
+        )
         return KnowledgeOriginalFile(filename=snapshot.original_filename, content=raw)

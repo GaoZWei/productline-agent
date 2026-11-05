@@ -363,25 +363,28 @@ class ManagedKnowledgeRepository:
             revision.metadata_hash,
         )
 
-    async def read_revision(self, version_id: str, revision_no: int, scope: str) -> RevisionRead:
-        """授权读取范围过滤在返回正文前执行，历史修订不回退其他原件。"""
+    async def read_revision(
+        self, version_id: str, revision_no: int, scope: str, *, document_id: str | None = None
+    ) -> RevisionRead:
+        """权限及可选资料归属在SQL中核对，历史修订不回退其他正文或原件。"""
 
         async with self.database.session() as session:
-            row = (
-                await session.execute(
-                    select(Document, Version, Revision)
-                    .join(
-                        Version,
-                        Version.document_id == Document.document_id,
-                    )
-                    .join(Revision, Revision.version_id == Version.version_id)
-                    .where(
-                        Version.version_id == version_id,
-                        Revision.revision_no == revision_no,
-                        Revision.permission_scope == scope,
-                    )
+            statement = (
+                select(Document, Version, Revision)
+                .join(
+                    Version,
+                    Version.document_id == Document.document_id,
                 )
-            ).one_or_none()
+                .join(Revision, Revision.version_id == Version.version_id)
+                .where(
+                    Version.version_id == version_id,
+                    Revision.revision_no == revision_no,
+                    Revision.permission_scope == scope,
+                )
+            )
+            if document_id is not None:
+                statement = statement.where(Document.document_id == document_id)
+            row = (await session.execute(statement)).one_or_none()
             if row is None:
                 raise KnowledgeManagementError("RESOURCE_NOT_FOUND")
             return self._read_record(*row)

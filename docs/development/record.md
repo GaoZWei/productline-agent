@@ -1961,3 +1961,85 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 文件、HTTP及解析等待不占用数据库事务，提交结果前核对owner、状态、当前修订及只写一次条件；失败或中断记录保留，旧任务不能覆盖新正文。
 - 授权预览和原件读取绑定版本及修订，原件缺失不替换既有正文；文件提交而DB失败保留未引用原件，同字节可校验重用，不提供自动永久删除。
 - 应用启动只装配服务，管理激活时处理旧owner中断，不调用Embedding、发布或切换问答源，不提供HTTP管理接口。
+
+## 2026-11-04 — `[KB-02.7] 资料、版本和任务只读管理接口`
+
+### 核心解决的问题
+
+上传解析应用已有资料与处理记录，但管理端无法通过HTTP查询，也不能直接把包含正文、原件位置及内部快照的记录返回页面。
+本任务接通Java READ授权、范围过滤和公开字段映射，让资料与历史处理状态具有可验证的查询入口。
+
+### 实现的核心代码
+
+- `agent-service/app/api/knowledge_management.py`：资料/版本/任务六个GET入口、身份解析、参数及安全错误响应。
+- `agent-service/app/services/knowledge_management_read.py`：`KnowledgeManagementReadService.query`逐次Java授权和固定错误映射。
+- `agent-service/app/repositories/knowledge_management_read.py`：`query`权限过滤、稳定分页、同快照计数及版本归属检查。
+- `agent-service/app/schemas/knowledge_management_read.py`：查询目标校验、资料/版本/任务白名单和分页Schema；`app/main.py`注册路由。
+
+### 实现的核心功能
+
+- Java授权结束后才查询知识自有管理表，所有集合及计数过滤权限；资源不存在、无权访问及版本归属错误统一404。
+- 资料附最新可访问规范版本，版本查询保留草稿、停用及历史状态；任务按所属修订过滤，明确是否当前修订，不提供重试执行。
+- 不查询正文列，不返回原件位置、哈希、内部操作者或确认快照；失败仅返回受控错误码及固定文案。
+- GET不激活上传服务、不恢复或领取任务，不生成索引或切换LEGACY问答源，既有上传解析应用及Java授权契约保持兼容。
+
+## 2026-11-04 — `[KB-02.8] 上传与草稿修订HTTP接口`
+
+### 核心解决的问题
+
+只读管理入口不能提交真实文件和修正失败草稿，直接使用框架默认表单解析又可能在授权前接收大文件或回显不安全输入。
+本任务把已有上传应用接入明确的HTTP文件提交，补齐授权门禁、接收限制和安全失败结果。
+
+### 实现的核心代码
+
+- `agent-service/app/api/knowledge_uploads.py`：三个POST入口、UPLOAD预检、应用授权接线、幂等状态及固定错误映射。
+- `agent-service/app/api/knowledge_upload_body.py`：`upload_body`有界multipart、严格命令组装、部分文件清理及分段读取。
+- `agent-service/app/schemas/knowledge_upload.py`：元数据/预期快照的HTTP白名单和安全错误结构。
+- `agent-service/app/main.py`：注册上传路由；`pyproject.toml`及`uv.lock`新增multipart解析依赖。
+
+### 实现的核心功能
+
+- 新资料、新规范版本和草稿修正分别由路由确定目标，文件名及幂等键来自文件/Header，不接受JSON自报发布状态、原件位置或哈希。
+- 首次Java授权后接收一个文件与一个命令，限制实际请求字节、字段数量和命令大小；成功、失败、断流和取消均关闭暂存文件。
+- 复用KB-02.6应用再次授权及事务保护，返回首次201/幂等重放200，区分接收成功和解析失败；原字节及历史修订保留，封存版本不可覆盖。
+- 未提供预览/原件下载、发布、停用、索引执行或页面，不迁移运行库、不切换LEGACY规范问答源。
+
+## 2026-11-04 — `[KB-02.9] 正文与分块预览HTTP接口`
+
+### 核心解决的问题
+
+上传结果和任务状态无法让用户核对正文及历史修订；内部预览还会调用管理激活，直接接为GET可能意外改变旧任务。
+本任务接入指定修订的纯读取预览，保留证据身份并明确区分未就绪、无权限和证据损坏。
+
+### 实现的核心代码
+
+- `agent-service/app/api/knowledge_management.py`：`preview_revision`READ身份、完整目标、禁用缓存及安全错误映射。
+- `agent-service/app/services/knowledge_management.py`：`preview`去除管理激活，复用快照校验和线程内确定性分块。
+- `agent-service/app/repositories/managed_knowledge.py`：`read_revision`新增可选document_id归属条件，和权限/版本/修订同一SQL核对。
+
+### 实现的核心功能
+
+- 明确资料、版本和修订身份，返回既有预览Schema的元数据、正文及章节分块；历史修订不改查最新正文。
+- 每次重新Java授权，范围不符或归属错误统一404；未完成正文409，读取或哈希校验失败503，不返回伪造空正文或替代证据。
+- 预览不读原件、不激活恢复或执行任务，不写操作、索引或发布数据；已存正文不因原件缺失而被改写。
+- 正文保留规范化后的首尾空白，响应禁止缓存且仅返回JSON，不记录正文或暴露内部路径/快照；默认问答仍使用LEGACY源。
+
+## 2026-11-04 — `[KB-02.10] 原始文件下载HTTP接口`
+
+### 核心解决的问题
+
+规范化预览不能取回原始上传字节，直接按文件路径下载又无法保证权限、资料归属和文件未被篡改。
+本任务按指定修订提供经过完整性校验的附件，并明确区分文件缺失、损坏及资源不可见。
+
+### 实现的核心代码
+
+- `agent-service/app/api/knowledge_management.py`：`download_original`附件响应和安全错误，`_attachment_headers`受控文件名编码。
+- `agent-service/app/services/knowledge_management.py`：`read_original`去除管理激活、传递资料归属，在读取事务外执行原件完整性校验。
+- 复用`ManagedKnowledgeRepository.read_revision`的归属/范围查询及`KnowledgeOriginalStorage.read`的NOFOLLOW、普通文件、大小和SHA-256校验。
+
+### 实现的核心功能
+
+- 每次Java READ授权并核对资料/版本/修订，完整校验原件后返回字节；历史、未解析和解析失败记录均可回查可信原件。
+- 附件采用固定MIME、安全UTF-8显示名及ASCII回退名，禁止缓存和内容嗅探，不接收客户端文件key或物理路径。
+- 文件缺失、大小/哈希不符或非法路径/显示名返回固定安全错误，不返回部分原件，也不替换为当前正文或仓库资料。
+- 下载不恢复或改变任务/操作，不解析或写索引；原件损坏不改写既有正文，既有预览与LEGACY问答源保持。

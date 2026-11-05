@@ -13,6 +13,8 @@ from pydantic import BaseModel
 from app.api.agent_messages import router as agent_messages_router
 from app.api.approvals import router as approvals_router
 from app.api.knowledge_index_capabilities import router as knowledge_index_capabilities_router
+from app.api.knowledge_management import router as knowledge_management_router
+from app.api.knowledge_uploads import router as knowledge_uploads_router
 from app.api.model_capabilities import router as model_capabilities_router
 from app.api.order_diagnosis import router as order_diagnosis_router
 from app.api.run_events import router as run_events_router
@@ -157,6 +159,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.include_router(model_capabilities_router)
     application.include_router(knowledge_index_capabilities_router)
+    application.include_router(knowledge_management_router)
+    application.include_router(knowledge_uploads_router)
     application.include_router(agent_messages_router)
     application.include_router(order_diagnosis_router)
     application.include_router(run_events_router)
