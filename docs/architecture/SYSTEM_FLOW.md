@@ -1,6 +1,7 @@
 # 系统全链路与业务分支
 
-以2026-10-24当前代码为准。先看业务阶段和三端职责，再看统一入口，最后看两次人工确认。
+本文说明截至2026-10-24已接通的订单业务链路。先看业务阶段和三端职责，再看统一入口，最后看两次人工确认。
+后续知识管理底座与待开发接口见[知识库导航](../knowledge/README.md)，最新实现与验证边界见[STATUS](../STATUS.md)。
 
 便于直接查看和分享的业务流程图片见[业务流程图目录](flow/README.md)。
 
@@ -433,23 +434,23 @@ flowchart LR
 | 无阻塞 | 005、026、027 | 区分可交付、交付中、已交付 |
 | 已有返工 | 029、030；当前003 | PENDING、RUNNING、COMPLETED，不把创建任务当成实际修复完成 |
 
-固定数据见[DEMO_DATA](DEMO_DATA.md)，历史真实演示见[AGENT_DEMO_FLOW](AGENT_DEMO_FLOW.md)。
+固定数据见[DEMO_DATA](../demo/DEMO_DATA.md)，历史真实演示见[AGENT_DEMO_FLOW](../demo/AGENT_DEMO_FLOW.md)。
 本图未新增真实模型调用；场景覆盖和受控测试不代表真实模型准确率。
 
 ## 10. 核心代码索引
 
 | 文件 | 职责 |
 | --- | --- |
-| [BusinessQueryService.java](../business-service/src/main/java/com/productline/business/application/BusinessQueryService.java) | Java目录与详情事实聚合 |
-| [BusinessWriteService.java](../business-service/src/main/java/com/productline/business/application/BusinessWriteService.java) | 最终权限、版本、幂等、复核及返工写入 |
-| [orderStore.ts](../web-console/src/stores/orderStore.ts) | 订单加载与迟到响应隔离 |
-| [AgentWorkspaceDrawer.vue](../web-console/src/components/AgentWorkspaceDrawer.vue) | 消息、切页、SSE和人工确认 |
-| [agent_messages.py](../agent-service/app/services/agent_messages.py) | Session/Run、上下文路由、澄清与分发 |
-| [production_agent_skills.py](../agent-service/app/services/production_agent_skills.py) | 四个Skill的生产装配 |
-| [order_status.py](../agent-service/app/workflows/order_status.py) | 订单查询与任务跟踪 |
-| [dynamic_diagnosis.py](../agent-service/app/workflows/dynamic_diagnosis.py) / [diagnosis_rules.py](../agent-service/app/workflows/diagnosis_rules.py) | 动作循环、信息缺口与正式阶段 |
-| [specification_qa.py](../agent-service/app/workflows/specification_qa.py) | 规范检索、重排、回答及引用门禁 |
-| [knowledge_ingestion.py](../agent-service/app/services/knowledge_ingestion.py) | 知识入库与失败保留旧数据 |
-| [review_draft.py](../agent-service/app/workflows/review_draft.py) | 来源诊断、最新事实、规范及草稿 |
-| [approval_orchestration.py](../agent-service/app/services/approval_orchestration.py) | 取消及独立返工确认单 |
-| [approval_confirmation.py](../agent-service/app/services/approval_confirmation.py) | 确认、过期/失效、执行权及写Tool |
+| [BusinessQueryService.java](../../business-service/src/main/java/com/productline/business/application/BusinessQueryService.java) | Java目录与详情事实聚合 |
+| [BusinessWriteService.java](../../business-service/src/main/java/com/productline/business/application/BusinessWriteService.java) | 最终权限、版本、幂等、复核及返工写入 |
+| [orderStore.ts](../../web-console/src/stores/orderStore.ts) | 订单加载与迟到响应隔离 |
+| [AgentWorkspaceDrawer.vue](../../web-console/src/components/AgentWorkspaceDrawer.vue) | 消息、切页、SSE和人工确认 |
+| [agent_messages.py](../../agent-service/app/services/agent_messages.py) | Session/Run、上下文路由、澄清与分发 |
+| [production_agent_skills.py](../../agent-service/app/services/production_agent_skills.py) | 四个Skill的生产装配 |
+| [order_status.py](../../agent-service/app/workflows/order_status.py) | 订单查询与任务跟踪 |
+| [dynamic_diagnosis.py](../../agent-service/app/workflows/dynamic_diagnosis.py) / [diagnosis_rules.py](../../agent-service/app/workflows/diagnosis_rules.py) | 动作循环、信息缺口与正式阶段 |
+| [specification_qa.py](../../agent-service/app/workflows/specification_qa.py) | 规范检索、重排、回答及引用门禁 |
+| [knowledge_ingestion.py](../../agent-service/app/services/knowledge_ingestion.py) | 知识入库与失败保留旧数据 |
+| [review_draft.py](../../agent-service/app/workflows/review_draft.py) | 来源诊断、最新事实、规范及草稿 |
+| [approval_orchestration.py](../../agent-service/app/services/approval_orchestration.py) | 取消及独立返工确认单 |
+| [approval_confirmation.py](../../agent-service/app/services/approval_confirmation.py) | 确认、过期/失效、执行权及写Tool |

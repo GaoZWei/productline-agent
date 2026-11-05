@@ -1,5 +1,7 @@
 # Web Console
 
+项目文档入口见[文档总导航](../docs/README.md)，当前进度和实际验证见[STATUS](../docs/STATUS.md)。
+
 M7.6-G 订单业务与统一Agent页面，使用 Vue 3、TypeScript、Vite、Pinia、Axios 和 Element Plus。
 页面通过Java的`GET /api/orders`加载`ORDER-001`～`ORDER-030`，支持订单号/场景名称搜索、分类筛选与滚动，默认打开黄金场景`ORDER-003`，并从Java
 `/api/orders/{orderId}` 与 `/api/orders/{orderId}/overview` 读取业务事实。统一Agent抽屉先查询

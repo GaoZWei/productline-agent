@@ -76,7 +76,7 @@ Flyway 版本化迁移演进。
 ## 5. 跨服务状态词汇
 
 状态值是未来 Java API、Python Tool 与前端契约的固定字符串，完整定义见
-`docs/API_CONTRACT.md`。当前模型包含：
+`docs/api/API_CONTRACT.md`。当前模型包含：
 
 - `OrderStatus`
 - `ProductionTaskStatus`（生产步骤和返工任务复用）
@@ -120,7 +120,7 @@ HTTP 层不直接序列化 JPA Entity。这样可以避免懒加载关系、循�
 
 步骤按 `sequenceNumber` 排序，其他集合按稳定业务 ID 排序。确定性顺序不会改变业务
 事实，但能降低 Tool Schema 消费、快照比较和 Agent 回归评测中的无意义波动。完整
-路径与响应示例见 `docs/API_CONTRACT.md`。
+路径与响应示例见 `docs/api/API_CONTRACT.md`。
 
 ## 8. M0.5 写入一致性边界
 

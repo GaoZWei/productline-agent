@@ -8,19 +8,21 @@
 用户当前明确要求
 → 更近目录的 AGENTS.md
 → 本文件
-→ doc/detailed-plan.md 当前阶段
-→ doc/plan.md
+→ docs/planning/detailed-plan.md 当前阶段
+→ docs/planning/plan.md
 → 现有实现与其他文档
 ```
 
 开始任务时只读取完成当前工作所需的最小上下文：
 
+项目文档总入口为 `docs/README.md`；仍按下列顺序按需读取，不要求逐份浏览导航中的全部文档。
+
 1. 必读 `docs/STATUS.md`；
-2. 只读取 `doc/detailed-plan.md` 当前 `Mx.y` 小节，不读取整份文件；
+2. 只读取 `docs/planning/detailed-plan.md` 当前 `Mx.y` 小节，不读取整份文件；
 3. 读取目标模块 README、相关代码、测试和配置；
-4. 需要确认架构、业务边界或里程碑时，才读取 `doc/plan.md` 相关章节；
-5. 需要了解既有实现时，才读取 `doc/record.md` 对应里程碑；
-6. 完成 Agent 面试价值评估或更新条目时，才读取 `doc/needCare.md` 用途说明和相关条目；
+4. 需要确认架构、业务边界或里程碑时，才读取 `docs/planning/plan.md` 相关章节；
+5. 需要了解既有实现时，才读取 `docs/development/record.md` 对应里程碑；
+6. 完成 Agent 面试价值评估或更新条目时，才读取 `docs/interview/needCare.md` 用途说明和相关条目；
 7. 里程碑状态变化时才读取并更新 `docs/ROADMAP.md`。
 
 优先用 `rg` 定位标题、符号或关键词，再用小范围 `sed` 读取。除非用户要求全文整理或局部信息不足，
@@ -89,7 +91,7 @@ Python 模块、类、函数、方法的说明性文档字符串及关键流程�
 
 ## 4. 测试与完成标准
 
-根据当前任务运行 `doc/detailed-plan.md` 指定命令、局部测试、类型/格式检查和必要回归；根级入口按需使用
+根据当前任务运行 `docs/planning/detailed-plan.md` 指定命令、局部测试、类型/格式检查和必要回归；根级入口按需使用
 `make validate`、`make test-tools`、`make test-agent-e2e`、`make eval-*` 等，不要求无关模块重复测试。
 
 完成任务必须满足：
@@ -105,7 +107,7 @@ Python 模块、类、函数、方法的说明性文档字符串及关键流程�
 
 ## 5. 开发文档门禁
 
-### `doc/detailed-plan.md`
+### `docs/planning/detailed-plan.md`
 
 首次开发 `Mx.y` 时，在二级标题下依次增加 `### 解决的问题` 和 `### 核心作用`。`解决的问题`用2～3句，
 采用“实际痛点→能力补足”：先说明缺少本阶段时会出现的具体困扰或风险，再说明补上的能力。`核心作用`用
@@ -116,7 +118,7 @@ Python 模块、类、函数、方法的说明性文档字符串及关键流程�
 每次完成当前阶段开发时都要复核这两段说明；事实、职责、边界或表述清晰度发生变化时同步修正。内容必须具体、
 通俗并与实际实现一致，不写测试数字、文件流水账或未实现能力。
 
-### `doc/record.md`
+### `docs/development/record.md`
 
 只记录实际功能里程碑或改变运行行为的核心开发；环境、治理、知识文档、注释语言和纯视觉调整不记录。
 每条只允许：
@@ -130,7 +132,7 @@ Python 模块、类、函数、方法的说明性文档字符串及关键流程�
 二级标题使用日期、任务编号和阶段名称；核心代码只列关键路径和符号，不复制文件，不重复测试、风险、
 下一任务或面试内容。历史可为去重和纠错精简，但不得篡改事实。
 
-### `doc/needCare.md`
+### `docs/interview/needCare.md`
 
 仅当已实现内容体现 Agent/Tool/Workflow/RAG/上下文/路由/Approval/评测、事实与权限边界，或解决
 幻觉、重试、幂等、可观测性等 Agent 工程问题时才记录。普通 CRUD、环境、治理、样板代码和规划不记录。
@@ -170,9 +172,9 @@ Python 模块、类、函数、方法的说明性文档字符串及关键流程�
 
 ## 8. Agent 面试问题梳理
 
-处理 `Agent-Question*.md`、`Agent-Answer.md`、Agent 简历内容或相关面试准备时，先读取
-`Agent-Question-Plan.md` 中的“固定的问题梳理与回答流程”，并以该节作为详细规范的唯一来源。
+处理 `docs/interview/Agent-Question*.md`、`docs/interview/Agent-Answer.md`、Agent 简历内容或相关面试准备时，先读取
+`docs/interview/Agent-Question-Plan.md` 中的“固定的问题梳理与回答流程”，并以该节作为详细规范的唯一来源。
 
 一次只处理一个问题：先解释问题并给出初版思路，再通过沟通完善；主回答与追问分开；只有用户认可或明确要求
-同步的成熟答案才写入 `Agent-Answer.md`。每次同步成熟答案时，同时将项目描述修改、当前边界、验证事项、
-优化点和待实现功能分类写入 `Agent-Optimization.md`；每项只写一句，主问题标记为 `[001]`，具体追问标记为`[004-2]`，不得重复追加或展开设计。
+同步的成熟答案才写入 `docs/interview/Agent-Answer.md`。每次同步成熟答案时，同时将项目描述修改、当前边界、验证事项、
+优化点和待实现功能分类写入 `docs/interview/Agent-Optimization.md`；每项只写一句，主问题标记为 `[001]`，具体追问标记为`[004-2]`，不得重复追加或展开设计。

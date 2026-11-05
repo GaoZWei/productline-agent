@@ -14,10 +14,11 @@
 
 ## 相关入口
 
+- [文档总导航](../README.md)：项目架构、演示、开发、学习与面试资料的统一入口。
 - [固定规范语料目录](../../knowledge-base/README.md)：原始规范保存在`knowledge-base/active/`和`knowledge-base/historical/`。
 - [规范元数据目录](../../knowledge-base/catalog.json)：文档身份、适用范围、有效期及替代关系的事实来源。
-- [项目总体计划](../../doc/plan.md)：参阅M4 RAG规范检索与M7生产闭环集成相关章节。
-- [项目详细计划](../../doc/detailed-plan.md)：参阅M4各子阶段及M7.6-C知识库可运行入库，按任务需要读取。
+- [项目总体计划](../planning/plan.md)：参阅M4 RAG规范检索与M7生产闭环集成相关章节。
+- [项目详细计划](../planning/detailed-plan.md)：参阅M4各子阶段及M7.6-C知识库可运行入库，按任务需要读取。
 - [当前状态](../STATUS.md)：查看实际完成情况、测试摘要、已知问题与下一任务。
 
 ## 维护约定

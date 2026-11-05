@@ -1,5 +1,7 @@
 # Business Service
 
+项目文档入口见[文档总导航](../docs/README.md)，当前进度和实际验证见[STATUS](../docs/STATUS.md)。
+
 Java 21 + Spring Boot 3.5 + Spring Data JPA + Flyway 的遥感数据产线业务服务。当前已提供固定演示数据、查询/写入接口、统一响应和 Trace ID，以及 M0.7 开发故障模拟。
 
 使用 Docker 启动：
@@ -27,7 +29,7 @@ PORT
 
 V4增量新增ORDER-006～030，不修改V2/V3及既有记录。只读`GET /api/orders`返回按订单号排序的
 `data.orders`；overview每个任务包含`reworkTasks`（无返工为[]）。固定基线及场景边界见
-[演示数据](../docs/DEMO_DATA.md)，独立V3升级保留测试为`DemoMigrationUpgradeIntegrationTest`。
+[演示数据](../docs/demo/DEMO_DATA.md)，独立V3升级保留测试为`DemoMigrationUpgradeIntegrationTest`。
 
 ## M0.5 写接口契约
 
@@ -54,7 +56,8 @@ make test-java-write
 新增无写入查询`POST /api/knowledge/authorize`，请求只包含`action`，使用现有`X-User-Id`和`X-User-Role: REVIEWER`演示身份。
 成功返回`userId`、`action`、服务端确定的`permissionScope=INTERNAL_REVIEWER`及`confirmationRequired`；除READ外，UPLOAD、PUBLISH、DISABLE、RETRY_INDEX均要求人工确认。
 成功不是执行凭证或已确认的证明。Java只裁决角色权限，后续知识版本、状态与确认快照由Python依据自有知识表在执行事务中核对。
-接口不访问数据库或模型；Python已提供严格调用Client，知识管理应用及页面仍待接入，完整输入、错误与边界见[知识管理授权契约](../docs/knowledge/KNOWLEDGE_AUTHORIZATION.md)。
+接口不访问数据库或模型；Python严格调用Client已接入KB-02.6上传解析与预览应用，管理HTTP接口、页面及发布/停用仍待开发。
+完整输入、错误与边界见[知识管理授权契约](../docs/knowledge/KNOWLEDGE_AUTHORIZATION.md)，最新进度见[STATUS](../docs/STATUS.md)。
 
 局部验证：`mvn -o --file business-service/pom.xml -Dtest=KnowledgeAuthorizationApiTest,KnowledgeAuthorizationServiceTest test`（在仓库根目录执行）。
 

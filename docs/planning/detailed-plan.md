@@ -172,7 +172,7 @@ BLOCKED
 
 | ID   | 任务                   | 主要产物                   | 验证方式          | 工时 |
 | ---- | -------------------- | ---------------------- | ------------- | -: |
-| T007 | 编写领域对象关系文档           | `docs/DOMAIN_MODEL.md` | 人工检查          | 2h |
+| T007 | 编写领域对象关系文档           | `docs/architecture/DOMAIN_MODEL.md` | 人工检查          | 2h |
 | T008 | 定义统一业务枚举             | Java Enum、接口文档         | 单元测试          | 2h |
 | T009 | 定义 Order 模型          | 实体、DTO、数据库表            | Repository 测试 | 2h |
 | T010 | 定义 ProductionTask 模型 | 实体、DTO、数据库表            | Repository 测试 | 2h |

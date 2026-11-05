@@ -1,19 +1,16 @@
 # Agent Service
 
-M3 Python 3.12/FastAPI 服务。当前包含工程基础、Agent 自有数据库连接、结构化日志、
-调用 Java 的共享异步 HTTP Client、标准 Tool 错误映射、Tool 基础协议和七个只读业务 Tool；
-只读 Tool 已具备显式有限退避重试、Run 内重复调用检测和仅开发环境启用的调试 API。当前还
-包含 Session/Message/Run/Step 模型、Alembic迁移、Repository、最小Run/Step生命周期和
-Workflow状态/诊断Schema、严格页面与会话上下文、稳定意图与路由Prompt契约、固定LangGraph数据加载节点、
-确定性阻塞阶段规则、诊断文案生成和对外诊断API；路由和诊断模型均使用可注入结构化接口，公共OpenAI兼容
-Chat Client及五类业务模型适配器已经可发出严格结构化请求，但尚未接入统一路由HTTP入口。M4.2已加入严格知识元数据Schema、文档/分块ORM、pgvector和
-全文检索字段；M4.3已实现确定性文档加载和分块，M4.4已实现OpenAI兼容Embedding、批处理、有限重试、
-固定1536维pgvector入库和索引版本记录，M4.5～M4.12已实现中文关键词、同版本余弦检索、统一元数据门禁、
-RRF混合排序、可降级模型重排、引用结构、固定规范问答图和四策略RAG评测；M7.6-C又提供显式全目录入库命令和
-索引就绪查询，但尚未接入统一路由HTTP入口。M5.1～M5.4已扩展动态诊断状态、实现结构化动作决策、可回环LangGraph执行图和
-确定性执行限制，但尚无具体动作模型供应商。M6.1～M6.8已加入Approval生命周期、严格复核草稿、安全草稿生成、
-执行结果持久化、不暴露给动态模型的复核/返工写Tool、确认HTTP接口、与终态原子提交的Agent操作日志，以及覆盖
-未确认、修改、重复、取消、过期、事实变化、无权限和Java异常的安全验收矩阵。
+Python 3.12/FastAPI Agent 编排服务。Java HTTP Client 和七个只读业务 Tool 提供事实，确定性规则生成正式
+诊断，模型负责路由、受限动作选择、规范归纳和草稿。统一消息 HTTP 入口已接入订单状态、动态诊断、规范问答
+和 Review 四类生产 Skill；复核与返工通过独立 Approval 人工确认后，重新读取 Java 事实并调用写 Tool。
+
+服务已提供持久化 Session/Message/Run/Step、模型调用观测、SSE 及本人运行历史；RAG 包含版本与权限过滤、
+关键词/向量混合检索、重排和引用校验。OpenAI 兼容 Chat Client、Embedding Provider 和五类模型适配器已经接入
+生产装配，实际调用依赖配置、网络及索引就绪状态；固定诊断 API 继续使用独立的确定性 Workflow。
+
+知识库管理完成至 KB-02.6：已有 Java 授权、八表模型、独立原件存储及上传修订/解析预览应用，尚无管理 HTTP
+接口、后台索引执行、发布/停用或问答切源。当前进度与实际验证见[STATUS](../docs/STATUS.md)，完整阅读入口见
+[文档导航](../docs/README.md)。历史验收不代表当前运行库状态，小样本模型验收不代替完整真实质量评测。
 
 ## 本地开发
 
@@ -58,7 +55,8 @@ API Key。该结果只证明配置通过校验，不探测模型网络，也不�
 只有超时、网络错误、HTTP 408/425/429及5xx会按配置有限退避重试，参数、鉴权、非法响应和非法结构化输出不会重试。
 `ObservedModelInvoker`在真实请求边界创建`LLM` Step，成功时保存供应商实际返回的模型名、输入/输出/总Token、耗时和
 实际重试次数，失败时保存稳定错误码及能够确认的配置模型名与重试次数；Prompt、模型正文、API Key和供应商错误正文
-均不进入Step。Run历史接口和页面会展示这些独立指标；具体Protocol适配器见下节，但尚未装配到统一生产入口，因此固定诊断仍不调用该Client。
+均不进入Step。Run历史接口和页面会展示这些独立指标；统一生产入口已装配下述Protocol适配器。
+固定诊断 API 使用独立的确定性链路，不调用该 Chat Client。
 
 DeepSeek示例配置：
 
@@ -128,8 +126,8 @@ Router和Action适配器原样复用已有版本化System Prompt与JSON数据载
 
 适配器只返回已经过公共Client校验的`RouterResult`、`ActionDecision`、`SpecificationAnswerDraft`、`RerankResponse`
 或`ReviewDraft`候选。用户原文实体证据、注册表LOW风险和资源身份、citation_id白名单、全部候选覆盖以及草稿任务、问题、
-引用白名单仍由原组件二次校验；Review适配器不会取得Tool、Store或Approval执行入口。当前五个适配器可由内部组件注入，
-但统一Agent HTTP入口和生产Skill装配仍留在M7.6-D～F，因此固定诊断API的行为不变。
+引用白名单仍由原组件二次校验；Review适配器不会取得Tool、Store或Approval执行入口。五个适配器已接入
+统一Agent HTTP入口及生产Skill，并逐次记录LLM Step；固定诊断API继续使用独立的确定性链路。
 
 ## 知识库全量入库与就绪能力
 
@@ -154,7 +152,8 @@ make knowledge-ingest
 
 2026-10-20使用真实千问`qwen3.7-text-embedding`完成一次全量入库: 16份文档、80个唯一Chunk及1536维向量，
 索引版本为`qwen3.7-text-embedding-1536-v1`，清理文档数0。只读核对源文档哈希、分块正文、章节及向量维度均一致，
-索引能力返回`READY / ready=true`。本次只执行一次真实全量生成，检索质量、重排及回答效果尚待验证。
+索引能力返回`READY / ready=true`。该次只执行一次真实全量生成；后续规范问答已有小样本链路验收，
+但尚无全量真实检索质量评测。最新验证范围见[STATUS](../docs/STATUS.md)。
 
 全量命令构建新镜像后不会自动替换已有服务容器; 本次另外执行
 `docker compose up -d --no-deps --force-recreate agent-service`加载同一份新镜像，并核对运行中的规范与源文件一致。
@@ -230,7 +229,8 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 默认5秒总预算覆盖HTTP尝试和退避，最多额外重试一次明确可重试的超时或网络故障，首次退避100ms。
 参数、权限、响应校验和Java当前`retryable=false`的500均不重试；调用取消向上传播，总预算耗尽停止且不再标为可重试。
 重试责任仅位于该授权Client，后续调用方不再叠加自动重试。日志只保存Trace、错误码、重试次数和退避时长。
-应用仅装配Client，启动不会查询Java；管理应用、页面、确认记录和知识状态事务仍待后续开发。
+启动只装配Client和管理应用，不查询Java。KB-02.6管理应用已使用UPLOAD/READ授权并保护草稿修订与任务事务；
+管理HTTP接口、页面和发布/停用确认仍待开发，详见下文KB-02.6及当前状态。
 完整契约见[知识管理授权](../docs/knowledge/KNOWLEDGE_AUTHORIZATION.md)。
 
 局部验证：`.venv/bin/pytest -q tests/test_knowledge_authorization_client.py tests/test_business_client.py tests/test_write_tools.py tests/test_retry_policy.py`。
@@ -244,8 +244,8 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 快照Schema计算元数据哈希、核对解析正文哈希并保留正文首尾空白，原件key只允许服务端身份生成的固定形式。
 
 `0015_managed_knowledge_drafts`仅新增四表及LEGACY单例，版本状态只允许DRAFT；迁移不导入资料或切换检索源。
-本任务未部署或执行开发库迁移。原件落盘、修订操作、幂等/任务记录、解析封存、发布及接口待后续实现；
-Schema冻结不代表数据库已禁止所有直接更新，后续应用仍须调用Java授权并保护知识状态事务。
+KB-02.4当时未部署或执行开发库迁移，仅交付草稿模型。后续KB-02.5补齐操作/任务及索引批次模型，KB-02.6
+接入原件、草稿修订、幂等和解析应用；发布及HTTP管理接口尚未实现。Schema冻结不代替Java授权与知识状态事务。
 
 根目录`make test-knowledge-models`验证新旧Schema和隔离PostgreSQL迁移。
 已有专用测试PostgreSQL时，也可配置`AGENT_PERSISTENCE_TEST_DATABASE_URL`并执行
@@ -266,7 +266,8 @@ Chunk按批次保留正文及1536维向量，新增独立GIN/HNSW索引，不加
 新建/修正输入仍使用仅接受DRAFT的Schema，完整状态使用`ManagedKnowledgeVersionState`。
 
 当前模型不代表已核实Java权限或完成用户确认，也不能单独证明候选READY、实际分块完整性或跨行发布状态一致。
-这些条件须由后续应用服务在事务中复查。本任务保持LEGACY读源，无文件落盘、外部模型调用或管理接口。
+这些条件须由应用服务在事务中复查。KB-02.5当时仅交付模型；KB-02.6已接入独立原件与上传解析应用。
+当前仍保持LEGACY读源，未接入外部索引模型、发布或HTTP管理接口。
 根目录`make test-knowledge-models`覆盖新旧模型和隔离数据库约束；KB-02.6应用范围见下节。
 
 ## KB-02.6 原件与上传解析应用
@@ -323,7 +324,7 @@ FastAPI lifespan只装配`knowledge_management_service`，不创建目录或访�
 `SUCCEEDED`或`FAILED`。重复提交已成功的同一确认会读取并返回首次`execution_result`，不会再次调用Java。
 
 当前确认服务按`REVIEWER`演示角色重新构造只读及写权限，Java仍执行最终角色、任务状态、版本和幂等校验。确认前
-重校验当前不重新运行RAG；前端已有确认请求客户端，但诊断侧边栏尚未取得和挂载Approval卡片。
+重校验当前不重新运行RAG；统一Agent抽屉已展示Approval卡片，复核和返工分别要求独立人工确认。
 
 确认执行结束时会把最终授权摘要、Java结果或失败机器摘要、用户相对模型原始草稿的字段级修改，以及成功响应的
 Java Trace写入`agent_operation_logs`。日志创建与Approval从`EXECUTING`进入`SUCCEEDED`、`STALE`或`FAILED`使用
@@ -331,7 +332,8 @@ Java Trace写入`agent_operation_logs`。日志创建与Approval从`EXECUTING`�
 `operation_logs`业务事务日志，因此Agent使用物理表前缀隔离，且不会直接读取或复用Java表。
 
 原确认人可通过`GET /api/agent/approvals/{approval_id}/operation-log`读取严格详情；其他用户、非`REVIEWER`角色和
-不存在的日志分别返回结构化权限或资源错误。前端已有只读Client和运行时响应校验，但尚未建设日志展示页面。
+不存在的日志分别返回结构化权限或资源错误。前端已有只读Client和运行时响应校验，运行历史详情会展示
+Approval修改差异与受控操作结果，尚无独立操作日志聚合页。
 
 `make test-approval`会统一运行Approval生命周期、草稿、写Tool、确认执行、操作日志和前端契约测试；其中
 `tests/test_approval_security.py`把T661～T670连接到模拟Java HTTP写接口，直接断言允许写入的次数、最终提交内容和
@@ -538,7 +540,7 @@ Schema在读写边界重新校验；`expires_at`实现默认30分钟滑动TTL。
 
 M3.3定义`ORDER_QUERY/ORDER_DIAGNOSIS/TASK_TRACKING/SPEC_QA/REVIEW_GENERATION/UNKNOWN`六类
 稳定意图。只读意图目录统一声明进入业务Skill前的必填参数：订单查询和诊断需要`order_id`，任务跟踪和
-复核草稿需要`task_id`，规范问答不强制业务ID；意图分别映射到规划中的`OrderStatusSkill`、
+复核草稿需要`task_id`，规范问答不强制业务ID；意图分别映射到`OrderStatusSkill`、
 `DiagnosisSkill`、`SpecificationSkill`和`ReviewSkill`，`UNKNOWN`不映射任何Skill。
 
 `RouterResult`严格约束0～1置信度、有界业务实体、准确`missing_fields`和`need_clarification`。
@@ -549,19 +551,19 @@ M3.3定义`ORDER_QUERY/ORDER_DIAGNOSIS/TASK_TRACKING/SPEC_QA/REVIEW_GENERATION/U
 Schema；输出可为对象或纯JSON文本，Markdown围栏和额外说明会被拒绝。首次Schema失败追加固定纠错指令
 重试一次，二次失败或模型异常返回置信度0、无实体、必须澄清的`UNKNOWN`。`entities`只允许包含本轮消息
 明确给出的实体，页面和会话值由服务端合并器按`USER_MESSAGE > CONFIRMED_SESSION > PAGE_CONTEXT >
-SESSION_CANDIDATE`选择并保留来源。不同值会生成冲突记录；最高优先级仍有多个值时不选择任何值。当前没有
-具体模型供应商、HTTP入口或动态Skill分发。
+SESSION_CANDIDATE`选择并保留来源。不同值会生成冲突记录；最高优先级仍有多个值时不选择任何值。
+统一消息入口已装配Router模型适配器和生产Skill分发；配置不可用时返回安全错误，不伪装为模型执行成功。
 
 模型实体还必须能在本轮`user_message`中匹配到独立文本证据，否则按非法输出重试并回退`UNKNOWN`，防止
 页面或会话值被模型升级为`USER_MESSAGE`。`RoutingDecision`按`UNKNOWN`、未解决冲突、必填参数缺失、
 低置信度、中置信度确认和模型主动澄清的顺序生成确定性问题。高置信度且参数完整时为`READY`；中置信度
 需要用户确认，低置信度要求重新描述。候选选择或缺参补充会标记为`USER_MESSAGE`并恢复原意图，无需再次
-调用模型。当前决策和恢复仍是内部组件，尚未接入HTTP或持久化路由Run。
+调用模型。决策与澄清续接已接入统一消息HTTP入口，关联持久化Session、Run及路由Step。
 
 M3.7在`evaluation/router_cases.jsonl`保存60条固定路由期望，严格覆盖明确意图、同义表达、页面和会话
 指代、缺参、多候选、意图混淆及无关请求。`RouterEvaluationSubject`允许注入真实模型、离线回放或测试
 替身；执行器计算意图准确率、参数完整率和六意图混淆矩阵，并可输出不含用户消息及上下文的JSONL失败
-样本。仓库当前只用可控Subject验收评测基础设施，没有具体模型Provider，因此不声明真实模型准确率。
+样本。现有模型Provider已接入生产链路，但评测基础设施的受控Subject验收不能作为真实模型准确率。
 `make eval-router`可重复验证数据分布、指标和失败输出。
 
 M7.9在同一固定集上进一步区分字段级指标：明确表达、同义表达和意图混淆用于计算参数提取率，页面与会话指代
@@ -571,22 +573,23 @@ Tool路由率统计全部用例中已`READY`且会进入非预期业务Skill的�
 
 Tool指标使用不包含原始参数和业务响应的`ToolEvaluationOutcome`作为输入：首次参数校验通过率按全部用例计算，
 错误修正后成功率只以首次校验失败用例为分母，最终有效调用成功率、平均重试次数和重复调用率均以全部用例为
-分母；`retry_count`只记录首次外部尝试之后的重试次数。当前指标层只负责公式，真实Tool结果采集由T785接线。
+分母；`retry_count`只记录首次外部尝试之后的重试次数。统一Suite已接入强类型Outcome Provider，
+真实指标仍要求调用方提供实际Tool执行观测，框架不会自动生成真实结果。
 
 RAG指标在既有Hit@5、MRR和Top-5无关片段占比之外，增加版本过滤正确率与引用文档正确率。完整链路Subject用
 `version_filter_passed`和`citation_document_correct`提交每条用例的确定性观测；仅检索Subject保留`None`，不进入
 对应分母。报告同时保存已观测数、正确数和比率，无观测时比率稳定为`0.0`但分母为零，不能解读为真实质量为零；
-T786仍需从实际过滤结果和最终引用白名单生成这两项观测，不能采用模型自报值。
+统一RAG Suite已提供完整链路Subject接线；真实评测仍须提交实际过滤结果和最终引用白名单，不能采用模型自报值。
 
 Agent指标使用最小`AgentEvaluationOutcome`聚合E2E成功率、平均已执行Tool调用数、无效与重复Tool尝试率、平均诊断
 耗时和阻塞阶段判断正确率。每次Tool尝试必须完整归类为已执行、参数无效或重复拒绝；前两项调用率以全部尝试为分母，
-诊断耗时只统计具有计时的用例，阻塞阶段只统计声明预期阶段的诊断用例。当前只完成指标Schema与公式，T788仍需从真实
-Run、Step和Tool调用账本生成观测。
+诊断耗时只统计具有计时的用例，阻塞阶段只统计声明预期阶段的诊断用例。统一Suite已接入强类型Outcome Provider，
+真实结果仍依赖实际Run、Step和Tool调用账本采集，受控观测只验证指标口径。
 
 观测指标使用`ObservabilityEvaluationOutcome`比较稳定错误类型与预期失败Step，并对已采集的排查耗时计算中位数。
 步骤可定位率只统计具有预期Step的异常，且实际定位必须与预期相同；错误类型准确率以全部异常用例为分母，未识别也计
-失败；中位时长只统计有计时的样本。当前公式由可控观测验证，后续异常矩阵接线必须从Run/Step与测试计时生成结果，
-不保存原始异常、用户输入或业务响应。
+失败；中位时长只统计有计时的样本。统一Suite已接入强类型观测Provider，受控观测验证公式；真实演练仍需从
+Run/Step及实际计时采集结果，不保存原始异常、用户输入或业务响应。
 
 ## 演示规范文档
 
@@ -729,8 +732,9 @@ Tool标准失败转换为`StepError`后，条件边直接进入`END`，因此失
 `generate_diagnosis`根据机器裁决装配阶段说明、稳定根因、Tool字段证据、建议和置信度，并以`RULE`
 Step记录。`refine_diagnosis`只有在调用方注入`DiagnosisNarrativeModel`时才执行模型调用；模型结果先
 经过严格Schema校验，再检查根因code和建议action type与规则结果完全一致，最后只覆盖说明文字。
-调用异常或结构无效会记录失败的`LLM` Step并保留规则诊断，不写入Workflow业务错误通道。当前只
-提供供应商无关的模型适配接口，具体模型客户端留给后续运行时装配。
+调用异常或结构无效会记录失败的`LLM` Step并保留规则诊断，不写入Workflow业务错误通道。此处的
+`DiagnosisNarrativeModel`是固定Workflow的可注入接口，固定诊断API不装配该可选模型；统一入口的动态诊断
+另由Action模型适配器和确定性规则实现，不能将两条诊断路径混为一谈。
 
 ## 订单诊断 API
 

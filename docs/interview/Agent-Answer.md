@@ -160,14 +160,14 @@
 
 ### 代码与测试证据
 
-- [ApprovalConfirmationService.confirm_and_execute](agent-service/app/services/approval_confirmation.py)：编排权限与确认内容校验、事实刷新、执行权竞争、Java 写 Tool 调用和结果保存。
-- [ApprovalRecordRepository.transition_status](agent-service/app/repositories/approval.py)：执行带确认单 ID 和预期状态条件的原子更新；同文件保存执行结果时也要求匹配执行状态。
-- [DatabaseApprovalConfirmationStore.transition](agent-service/app/services/approval_confirmation.py)：在本地事务中提交执行权竞争与 Step 流转，事务结束后才返回给调用方。
-- [BusinessWriteService.submitReview / reserveOrLoad](business-service/src/main/java/com/productline/business/application/BusinessWriteService.java)：重验角色、业务条件、幂等与任务版本，在本地事务内写入复核记录、幂等结果和业务日志。
-- [ProductionTaskRepository.incrementVersionIfMatches](business-service/src/main/java/com/productline/business/domain/repository/ProductionTaskRepository.java)：以任务 ID 和预期版本为条件推进任务版本。
-- [确认服务单元测试](agent-service/tests/test_approval_confirmation.py)：覆盖并发确认、成功后的相同确认重放、事实变化后零写入及 Java 写冲突处理，使用受控 Store 和 Tool。
-- [数据库条件更新测试](agent-service/tests/test_agent_persistence.py)：已有真实数据库确认与唯一执行权竞争测试，本次案例梳理未重新运行。
-- [Java 写接口测试](business-service/src/test/java/com/productline/business/api/BusinessWriteApiIntegrationTest.java)：已有旧版本拒绝、相同预期版本并发写入只成功一次等测试，本次案例梳理未重新运行。
+- [ApprovalConfirmationService.confirm_and_execute](../../agent-service/app/services/approval_confirmation.py)：编排权限与确认内容校验、事实刷新、执行权竞争、Java 写 Tool 调用和结果保存。
+- [ApprovalRecordRepository.transition_status](../../agent-service/app/repositories/approval.py)：执行带确认单 ID 和预期状态条件的原子更新；同文件保存执行结果时也要求匹配执行状态。
+- [DatabaseApprovalConfirmationStore.transition](../../agent-service/app/services/approval_confirmation.py)：在本地事务中提交执行权竞争与 Step 流转，事务结束后才返回给调用方。
+- [BusinessWriteService.submitReview / reserveOrLoad](../../business-service/src/main/java/com/productline/business/application/BusinessWriteService.java)：重验角色、业务条件、幂等与任务版本，在本地事务内写入复核记录、幂等结果和业务日志。
+- [ProductionTaskRepository.incrementVersionIfMatches](../../business-service/src/main/java/com/productline/business/domain/repository/ProductionTaskRepository.java)：以任务 ID 和预期版本为条件推进任务版本。
+- [确认服务单元测试](../../agent-service/tests/test_approval_confirmation.py)：覆盖并发确认、成功后的相同确认重放、事实变化后零写入及 Java 写冲突处理，使用受控 Store 和 Tool。
+- [数据库条件更新测试](../../agent-service/tests/test_agent_persistence.py)：已有真实数据库确认与唯一执行权竞争测试，本次案例梳理未重新运行。
+- [Java 写接口测试](../../business-service/src/test/java/com/productline/business/api/BusinessWriteApiIntegrationTest.java)：已有旧版本拒绝、相同预期版本并发写入只成功一次等测试，本次案例梳理未重新运行。
 
 2026-10-25 本次讨论中，在 `agent-service` 实际运行以下局部命令，结果为 **7 passed、6 deselected**；参数化事实变化用例产生多个测试项，结果只证明所选受控用例通过，不代表真实多进程端到端效果或线上指标：
 
@@ -234,7 +234,7 @@
 
    Tool 成功返回后，代码校验结果归属，再写入对应任务的状态。查询失败不会被记录为“没有问题”；模型不能直接修改业务事实或查询完成状态。
 
-   对应实现：[事实归档与任务范围校验](agent-service/app/workflows/dynamic_diagnosis.py)，核心符号为 `DynamicDiagnosisWorkflow._merge_business_fact` 与 `_validate_resource_identity`。
+   对应实现：[事实归档与任务范围校验](../../agent-service/app/workflows/dynamic_diagnosis.py)，核心符号为 `DynamicDiagnosisWorkflow._merge_business_fact` 与 `_validate_resource_identity`。
 
 4. **如何计算缺口、阻止提前结束？**
 
@@ -250,7 +250,7 @@
 
    只有 A 的结果时，缺口就是 B。模型提出 `FINISH` 后，代码检查缺口；仍有缺口就返回 `INSUFFICIENT_INFORMATION`。生成诊断前再检查一次，确保缺失证据不会变成“无阻塞”。
 
-   对应实现：[缺口规则](agent-service/app/workflows/information_gaps.py)中的 `InformationGapDetector.detect` 与 `_has_valid_quality_issues`，以及[结束检查](agent-service/app/workflows/dynamic_diagnosis.py)中的 `check_completion` 和 `generate_result`。
+   对应实现：[缺口规则](../../agent-service/app/workflows/information_gaps.py)中的 `InformationGapDetector.detect` 与 `_has_valid_quality_issues`，以及[结束检查](../../agent-service/app/workflows/dynamic_diagnosis.py)中的 `check_completion` 和 `generate_result`。
 
 ### 验收重点与当前边界
 
@@ -407,7 +407,7 @@ Java 幂等保证相同请求不重复生效，但不会主动修复 Agent 状�
 | 查询长期不可用 | 有限重试后转人工 |
 | 请求内容与原幂等记录不匹配 | 停止处理并保留冲突证据 |
 
-- 现有基础包括[Java 写入事务](business-service/src/main/java/com/productline/business/application/BusinessWriteService.java)中的 `submitReview` 和[幂等结果重放](business-service/src/main/java/com/productline/business/application/BusinessWriteService.java)中的 `reserveOrLoad`、`replayReview`。
+- 现有基础包括[Java 写入事务](../../business-service/src/main/java/com/productline/business/application/BusinessWriteService.java)中的 `submitReview` 和[幂等结果重放](../../business-service/src/main/java/com/productline/business/application/BusinessWriteService.java)中的 `reserveOrLoad`、`replayReview`。
 - 结果查询接口、恢复任务表、领取机制和 Agent 恢复状态规则尚未实现；当前写 Tool 不自动重试，Agent 没有自动对账入口。
 - 本节 SQL 是拟议方案示意，未修改数据库或迁移，也没有运行故障演练；表中场景是验收计划，没有实际测试结果或效果指标。
 - 下一最小任务是明确结果未知的判定条件、只读结果查询契约和失败终态的恢复展示方式，再分步实现与验收。
@@ -536,8 +536,8 @@ Java 幂等保证相同请求不重复生效，但不会主动修复 Agent 状�
 | 预算耗尽且证据未齐 | 返回信息不足 |
 | 已发出写请求但等待超时 | 保留结果未知，不盲目重发 |
 
-- 现有[只读 Tool 配置](agent-service/app/tools/readonly.py)中的 `_READ_TOOL_TIMEOUT_SECONDS`、`_READ_TOOL_MAX_RETRIES` 分别为5秒和额外重试1次，[BaseTool.execute / _execute_with_retry](agent-service/app/tools/base.py)将重试和退避纳入同一次 Tool 总超时。
-- [模型 Client](agent-service/app/clients/model.py)已有局部超时和有限重试，[只读重试策略](agent-service/app/tools/retry.py)已有错误与次数限制，动态 Agent 已有决策轮次和 Tool 次数限制；整轮共享预算尚未实现。
+- 现有[只读 Tool 配置](../../agent-service/app/tools/readonly.py)中的 `_READ_TOOL_TIMEOUT_SECONDS`、`_READ_TOOL_MAX_RETRIES` 分别为5秒和额外重试1次，[BaseTool.execute / _execute_with_retry](../../agent-service/app/tools/base.py)将重试和退避纳入同一次 Tool 总超时。
+- [模型 Client](../../agent-service/app/clients/model.py)已有局部超时和有限重试，[只读重试策略](../../agent-service/app/tools/retry.py)已有错误与次数限制，动态 Agent 已有决策轮次和 Tool 次数限制；整轮共享预算尚未实现。
 - 可通过可控时钟、等待函数和 HTTP 替身检查次数、时间和安全退出，再补真实链路评测；本次仅同步文档，表中场景是验证计划，没有新测试结果或性能指标。
 - 即使本地停止等待，远端仍可能继续执行或计费，请求次数限制不能单独保证费用上限；写请求的结果未知仍需按独立恢复规则核对。
 - 下一最小任务是明确预算对象和跨组件传递契约，并统计代表性正常路径需求，不将示例次数当作配置建议。
@@ -643,11 +643,11 @@ Java返回响应后，HTTP Client先检查JSON是否能解析、外层响应结�
 
 | 位置与核心符号 | 职责 |
 |---|---|
-| [BusinessHttpClient._validate_success_response](agent-service/app/clients/business.py) | 检查JSON、外层响应、业务Schema及响应头与正文Trace ID一致性 |
-| [QualityIssueList](agent-service/app/schemas/tools.py) | 定义必需任务编号和问题列表，不把缺失列表默认为空 |
-| [GetQualityIssuesTool._execute](agent-service/app/tools/readonly.py) | 检查响应外层与每条问题记录是否属于请求任务 |
-| [BaseTool.execute](agent-service/app/tools/base.py) | 统一执行Tool输出校验，将不合格输出转换为失败结果 |
-| [DynamicDiagnosisWorkflow.execute_action](agent-service/app/workflows/dynamic_diagnosis.py) | 失败结果形成错误Observation，不合并为业务事实 |
+| [BusinessHttpClient._validate_success_response](../../agent-service/app/clients/business.py) | 检查JSON、外层响应、业务Schema及响应头与正文Trace ID一致性 |
+| [QualityIssueList](../../agent-service/app/schemas/tools.py) | 定义必需任务编号和问题列表，不把缺失列表默认为空 |
+| [GetQualityIssuesTool._execute](../../agent-service/app/tools/readonly.py) | 检查响应外层与每条问题记录是否属于请求任务 |
+| [BaseTool.execute](../../agent-service/app/tools/base.py) | 统一执行Tool输出校验，将不合格输出转换为失败结果 |
+| [DynamicDiagnosisWorkflow.execute_action](../../agent-service/app/workflows/dynamic_diagnosis.py) | 失败结果形成错误Observation，不合并为业务事实 |
 
 此前本案例讨论中已在`agent-service`执行：
 
@@ -775,9 +775,9 @@ Agent最终保存的是“旧的质量问题状态＋新的复核状态”。每
 
 ### 现有基础与当前边界
 
-- [BusinessQueryService.getOrderOverview / toOverview](business-service/src/main/java/com/productline/business/application/BusinessQueryService.java)已经组装订单与任务相关事实，但当前类级只读事务未显式配置隔离级别，不能声称已有快照保障。
-- [OrderQueryController.getOrderOverview](business-service/src/main/java/com/productline/business/api/OrderQueryController.java)暴露已有聚合接口，[fetchOrderOverview](web-console/src/api/businessApi.ts)供页面调用。
-- [只读Tool](agent-service/app/tools/readonly.py)目前分别读取业务事实，[DynamicDiagnosisWorkflow._merge_business_fact](agent-service/app/workflows/dynamic_diagnosis.py)按动作将结果合并到诊断状态；最终统一取证和事实替换尚未接入。
+- [BusinessQueryService.getOrderOverview / toOverview](../../business-service/src/main/java/com/productline/business/application/BusinessQueryService.java)已经组装订单与任务相关事实，但当前类级只读事务未显式配置隔离级别，不能声称已有快照保障。
+- [OrderQueryController.getOrderOverview](../../business-service/src/main/java/com/productline/business/api/OrderQueryController.java)暴露已有聚合接口，[fetchOrderOverview](../../web-console/src/api/businessApi.ts)供页面调用。
+- [只读Tool](../../agent-service/app/tools/readonly.py)目前分别读取业务事实，[DynamicDiagnosisWorkflow._merge_business_fact](../../agent-service/app/workflows/dynamic_diagnosis.py)按动作将结果合并到诊断状态；最终统一取证和事实替换尚未接入。
 - 同一快照读取、诊断Tool接入和对应并发验证均待实现；本次只有面试文档，没有新增接口、事务配置、测试结果或性能指标，也不覆盖未来跨多个数据库或外部系统的一致性问题。
 - 本人识别风险的实际过程和主导工作仍需核实；下一最小任务是明确最终取证的必要字段与适用范围，再单独评估隔离配置和成本，不自动进入开发阶段，Q39/Q40继续暂缓。
 
@@ -879,10 +879,10 @@ Python解决参数的文本依据、来源、优先级和缺参问题；进入�
 
 | 位置与核心符号 | 职责 |
 |---|---|
-| [validate_user_message_entity_evidence / IntentRouter.route](agent-service/app/services/intent_router.py) | 校验模型提取的原文依据，有限纠错及严格错误或UNKNOWN边界 |
-| [merge_routing_entities / _SOURCE_PRIORITY](agent-service/app/routing/entity_merge.py) | 收集、校验并标记候选来源，按字段合并并保留冲突 |
-| [build_routing_decision / _missing_fields](agent-service/app/routing/decision.py) | 按合并结果重新检查缺参及冲突，形成确定性路由决策 |
-| [AgentMessageService](agent-service/app/services/agent_messages.py) | 统一入口启用严格路由模式并串联原文提取、实体合并和路由决策 |
+| [validate_user_message_entity_evidence / IntentRouter.route](../../agent-service/app/services/intent_router.py) | 校验模型提取的原文依据，有限纠错及严格错误或UNKNOWN边界 |
+| [merge_routing_entities / _SOURCE_PRIORITY](../../agent-service/app/routing/entity_merge.py) | 收集、校验并标记候选来源，按字段合并并保留冲突 |
+| [build_routing_decision / _missing_fields](../../agent-service/app/routing/decision.py) | 按合并结果重新检查缺参及冲突，形成确定性路由决策 |
+| [AgentMessageService](../../agent-service/app/services/agent_messages.py) | 统一入口启用严格路由模式并串联原文提取、实体合并和路由决策 |
 
 此前本案例讨论中已在agent-service执行：
 
@@ -1019,7 +1019,7 @@ Python解决参数的文本依据、来源、优先级和缺参问题；进入�
 | 查询失败或返回不合格数据 | 不因缺口判断误报完成 |
 | 证据未齐且预算耗尽 | 返回信息不足并保留退出原因 |
 
-已有基础包括[InformationGapDetector.detect](agent-service/app/workflows/information_gaps.py)、[DynamicDiagnosisWorkflow.check_completion / generate_result / plan_next_action](agent-service/app/workflows/dynamic_diagnosis.py)，以及[test_budget_exit_keeps_golden_diagnosis_when_information_is_complete](agent-service/tests/test_dynamic_diagnosis_workflow.py)。
+已有基础包括[InformationGapDetector.detect](../../agent-service/app/workflows/information_gaps.py)、[DynamicDiagnosisWorkflow.check_completion / generate_result / plan_next_action](../../agent-service/app/workflows/dynamic_diagnosis.py)，以及[test_budget_exit_keeps_golden_diagnosis_when_information_is_complete](../../agent-service/tests/test_dynamic_diagnosis_workflow.py)。
 
 此前本案例讨论中已在agent-service执行：
 
@@ -1918,7 +1918,7 @@ Session 解决的是“用户现在在谈哪个对象”，Java 解决的是“�
 
 ### 代码定位
 
-原文匹配位于[intent_router.py的`validate_user_message_entity_evidence()`](/Users/gao/Desktop/productline-agent/agent-service/app/services/intent_router.py:46)；路由收到模型结果后，先调用`parse_router_result()`做格式校验，再调用该函数检查原文依据，之后由实体合并代码标记来源并补充页面、会话参数。
+原文匹配位于[intent_router.py的`validate_user_message_entity_evidence()`](../../agent-service/app/services/intent_router.py#L46)；路由收到模型结果后，先调用`parse_router_result()`做格式校验，再调用该函数检查原文依据，之后由实体合并代码标记来源并补充页面、会话参数。
 
 > 模型提取本轮明确参数，服务端验证文本依据并补充上下文，目标语义与业务合法性继续校验。
 
@@ -2410,7 +2410,7 @@ approval:<写Tool名称>:<Approval ID的SHA-256前32个十六进制字符>
 
 但能重新算出键、Java能安全重放，不等于Agent会自动恢复。当前尚无自动对账、补齐Approval和Run终态的流程。
 
-生成位置：[`_idempotency_key()`](/Users/gao/Desktop/productline-agent/agent-service/app/services/approval_confirmation.py:818)。
+生成位置：[`_idempotency_key()`](../../agent-service/app/services/approval_confirmation.py#L818)。
 
 > 账本重启后会丢，原键可以重新计算，Java幂等防重复，自动恢复仍待实现。
 
@@ -2527,7 +2527,7 @@ Chunk就是文档切出来的小段，用于检索相关规范。项目先按Mar
 
 > 分块让相关规则容易被找到；稳定ID让位置变化后的原片段仍能被认出来。
 
-代码位置：[分块入口](/Users/gao/Desktop/productline-agent/agent-service/app/knowledge/chunking.py:34)、[ID生成函数](/Users/gao/Desktop/productline-agent/agent-service/app/knowledge/chunking.py:215)。
+代码位置：[分块入口](../../agent-service/app/knowledge/chunking.py#L34)、[ID生成函数](../../agent-service/app/knowledge/chunking.py#L215)。
 
 ### 追问 1｜当前按字符上限还是模型 Token 上限切分？统计值是否是实际计费 Token？
 

@@ -1,19 +1,21 @@
-# 当前项目 Python 工程学习手册
+# Python 工程学习手册（M1.1～M2.8 阶段）
 
-本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 的真实实现为准，并通过 Java Spring Boot 和 Node.js 服务进行类比。
+本文面向第一次接触 Python 后端项目的开发者，以本仓库 `agent-service` 在M1.1～M2.8阶段的实现为例，通过 Java Spring Boot 和 Node.js 服务进行类比。
 
-本文描述的是当前 M1.1～M2.8 已实现能力，不是通用 Python 项目模板。后续代码变化时，应先以仓库实现、`doc/detailed-plan.md` 和 `doc/record.md` 为准，再同步更新本文。
+本文主要用于学习M1.1～M2.8工程基础，不作为当前能力清单。下文“当前”“尚未实现”和目录示例均应结合所述阶段理解，
+部分后续补充有独立阶段标识；源码链接用于定位，现有实现可能已扩展。最新进度见[STATUS](../STATUS.md)，
+当前配置和使用方式见[Agent服务说明](../../agent-service/README.md)，完整入口见[文档导航](../README.md)。
 
 ## 1. 先建立整体认识
 
-当前 `agent-service` 是一个独立的 Python 后端服务，主要承担未来的 Tool 封装、Workflow、
-Agent、RAG、Approval 和运行记录。现阶段只完成工程基础、健康检查、数据库基础、迁移骨架、
+在本手册对应的早期阶段，`agent-service` 已是独立的 Python 后端服务，逐步补齐 Tool 封装、Workflow、
+Agent、RAG、Approval 和运行记录。当时主要完成工程基础、健康检查、数据库基础、迁移骨架、
 最小可观测性、Java 异步 HTTP Client、标准错误映射、Tool 基础协议和七个只读业务 Tool；
 只读 Tool 已实现一次有限退避重试和 Run 内重复调用检测。M2.1 已增加 Session、Message、Run、
 Step持久化基础，M2.2～M2.3已实现最小Run/Step状态流转，M2.4已定义Workflow状态与结构化诊断
 Schema，M2.5已实现固定LangGraph数据加载节点、状态合并、失败中断和Step记录适配，M2.6已实现
 确定性阻塞阶段规则和信息完整性门禁，M2.7已实现规则诊断文案、可选结构化模型改写和失败回退，
-M2.8已实现诊断HTTP入口与请求级Run闭环；具体模型供应商适配尚未实现。
+M2.8已实现诊断HTTP入口与请求级Run闭环；具体模型供应商适配在当时尚未实现，后续已接入统一生产链路。
 
 ### 1.1 Python、Java、Node 工程对应关系
 
@@ -118,7 +120,7 @@ __pycache__/    Python 字节码缓存
 
 ### 3.1 `.python-version`
 
-[`agent-service/.python-version`](../agent-service/.python-version) 内容为：
+[`agent-service/.python-version`](../../agent-service/.python-version) 内容为：
 
 ```text
 3.12
@@ -138,7 +140,7 @@ uv run python --version
 
 ### 3.2 `pyproject.toml`
 
-[`agent-service/pyproject.toml`](../agent-service/pyproject.toml) 是 Python 工程的核心配置。
+[`agent-service/pyproject.toml`](../../agent-service/pyproject.toml) 是 Python 工程的核心配置。
 它同时承担 Maven `pom.xml`、Node `package.json`、TypeScript/Ruff/mypy/pytest 配置的部分职责。
 
 项目和 Python 版本：
@@ -190,7 +192,7 @@ package = false
 
 ### 3.3 `uv.lock`
 
-[`agent-service/uv.lock`](../agent-service/uv.lock) 类似前端的 `package-lock.json`。
+[`agent-service/uv.lock`](../../agent-service/uv.lock) 类似前端的 `package-lock.json`。
 
 ```text
 pyproject.toml：声明允许的依赖版本范围
@@ -235,7 +237,7 @@ uv run ruff check .
 
 ### 4.1 `app/__init__.py`
 
-[`agent-service/app/__init__.py`](../agent-service/app/__init__.py) 表示 `app` 是可导入的
+[`agent-service/app/__init__.py`](../../agent-service/app/__init__.py) 表示 `app` 是可导入的
 Python 包，因此可以写：
 
 ```python
@@ -251,7 +253,7 @@ Java API 调用或模型调用；类、函数和轻量应用组装可以放在�
 
 ### 4.2 `app/main.py`
 
-[`agent-service/app/main.py`](../agent-service/app/main.py) 相当于：
+[`agent-service/app/main.py`](../../agent-service/app/main.py) 相当于：
 
 ```text
 Spring Boot Application
@@ -377,7 +379,7 @@ if __name__ == "__main__":
 
 ### 4.3 `app/settings.py`
 
-[`agent-service/app/settings.py`](../agent-service/app/settings.py) 相当于 Spring 的：
+[`agent-service/app/settings.py`](../../agent-service/app/settings.py) 相当于 Spring 的：
 
 ```text
 application.yml
@@ -451,7 +453,7 @@ PostgreSQL（Docker 中使用 pgvector/pgvector:pg16）
 
 ### 5.2 `app/database.py`
 
-[`agent-service/app/database.py`](../agent-service/app/database.py) 类似 Java 的 DataSource、
+[`agent-service/app/database.py`](../../agent-service/app/database.py) 类似 Java 的 DataSource、
 EntityManagerFactory 和 JPA 基础配置，也类似 Node 的 PrismaClient/TypeORM DataSource。
 
 #### `Base`
@@ -541,7 +543,7 @@ async with database.session() as session:
 
 ### 5.4 M2.1 的 Model 与 Repository
 
-[`agent-service/app/models/agent_runtime.py`](../agent-service/app/models/agent_runtime.py) 类似一组
+[`agent-service/app/models/agent_runtime.py`](../../agent-service/app/models/agent_runtime.py) 类似一组
 JPA `@Entity` 或 TypeORM Entity，定义四层关系：
 
 ```text
@@ -572,7 +574,7 @@ M7.3使用异步队列把执行事件发送给在线订阅者，同时用有界`
 因此Run/Step仍写PostgreSQL，Java仍保存业务事实；SSE只携带受控进度摘要，并对敏感键、嵌套深度、元素数量和字节大小
 设置硬边界。
 
-[`agent-service/app/repositories/agent_runtime.py`](../agent-service/app/repositories/agent_runtime.py)
+[`agent-service/app/repositories/agent_runtime.py`](../../agent-service/app/repositories/agent_runtime.py)
 类似 Spring Data Repository 或 TypeORM Repository，只封装 Run/Step 的增、删、查：
 
 ```python
@@ -594,7 +596,7 @@ Tool和Workflow自动接线仍未实现。
 
 ### 5.5 M2.2 的最小 Run 生命周期
 
-[`agent-service/app/services/run_lifecycle.py`](../agent-service/app/services/run_lifecycle.py) 类似
+[`agent-service/app/services/run_lifecycle.py`](../../agent-service/app/services/run_lifecycle.py) 类似
 Java中的`@Service`，在Repository之上集中控制以下状态机：
 
 ```text
@@ -634,7 +636,7 @@ M2.2没有提前实现。
 
 ### 5.6 M2.3 的最小 Step 记录
 
-[`agent-service/app/services/step_lifecycle.py`](../agent-service/app/services/step_lifecycle.py)类似
+[`agent-service/app/services/step_lifecycle.py`](../../agent-service/app/services/step_lifecycle.py)类似
 Java中的Step执行记录`@Service`。调用方开始一个步骤时传入稳定`step_id`、父`run_id`、序号、
 类型、名称和可选输入摘要，Service创建已经处于`RUNNING`的`AgentStep`：
 
@@ -672,7 +674,7 @@ Service和Repository仍只`flush`而不`commit`，事务由调用方控制。当
 
 ### 5.7 M2.4 的 Workflow 状态与诊断 Schema
 
-[`agent-service/app/schemas/workflow.py`](../agent-service/app/schemas/workflow.py)只定义后续固定
+[`agent-service/app/schemas/workflow.py`](../../agent-service/app/schemas/workflow.py)只定义后续固定
 Workflow交换的数据形状，不执行Tool、规则或模型。它包含两类不同的Python类型：
 
 ```text
@@ -736,7 +738,7 @@ description = 人类可读解释
 
 ### 5.8 M2.5 的固定 LangGraph Workflow
 
-[`agent-service/app/workflows/order_diagnosis.py`](../agent-service/app/workflows/order_diagnosis.py)
+[`agent-service/app/workflows/order_diagnosis.py`](../../agent-service/app/workflows/order_diagnosis.py)
 把M2.4的`OrderDiagnosisState`真正交给LangGraph `StateGraph`执行。可以类比为：
 
 | Python实现 | Java类比 | Node.js类比 |
@@ -778,7 +780,7 @@ ToolResult(success=false, error=ToolError)
 → 后续Tool不再调用
 ```
 
-[`agent-service/app/workflows/recording.py`](../agent-service/app/workflows/recording.py)定义
+[`agent-service/app/workflows/recording.py`](../../agent-service/app/workflows/recording.py)定义
 `WorkflowStepRecorder` Protocol，类似Java接口或TypeScript interface；测试可使用内存实现，运行时
 使用`DatabaseWorkflowStepRecorder`。数据库实现会在动作开始前单独提交`RUNNING` Step，HTTP调用
 结束后再用新事务标记成功或失败，因此不会把Java网络等待包在父Run行锁事务里。
@@ -790,7 +792,7 @@ M2.6在`load_delivery`后接入`diagnose_by_rules`。该节点只读取已加载
 
 ### 5.9 M2.6 的确定性诊断规则
 
-[`agent-service/app/workflows/diagnosis_rules.py`](../agent-service/app/workflows/diagnosis_rules.py)
+[`agent-service/app/workflows/diagnosis_rules.py`](../../agent-service/app/workflows/diagnosis_rules.py)
 是一组没有HTTP、数据库或模型依赖的纯函数。`evaluate_diagnosis_rules(state)`先验证订单、任务、
 进度、质检、复核和交付事实是否齐全且父子ID一致，再按业务链的最早阶段依次判断：
 
@@ -839,7 +841,7 @@ SUCCEEDED Run。标准Tool错误已经是`StepError`，因此可同时写入FAIL
 
 ### 6.1 `ContextVar`
 
-[`agent-service/app/observability.py`](../agent-service/app/observability.py) 使用：
+[`agent-service/app/observability.py`](../../agent-service/app/observability.py) 使用：
 
 ```python
 _trace_id: ContextVar[str]
@@ -933,7 +935,7 @@ M1.2 新增的调用链是：
 
 ### 7.1 `BusinessIdentity` 与响应 Schema
 
-[`agent-service/app/schemas/business.py`](../agent-service/app/schemas/business.py) 定义四类契约：
+[`agent-service/app/schemas/business.py`](../../agent-service/app/schemas/business.py) 定义四类契约：
 
 - `BusinessIdentity`：单次调用的用户 ID、角色和可选 Token；
 - `BusinessSuccessEnvelope`：Java 成功响应的六个固定字段；
@@ -959,7 +961,7 @@ retryable = false
 
 ### 7.2 `BusinessHttpClient` 生命周期与连接池
 
-[`agent-service/app/clients/business.py`](../agent-service/app/clients/business.py) 中的
+[`agent-service/app/clients/business.py`](../../agent-service/app/clients/business.py) 中的
 `BusinessHttpClient` 只创建一个 `httpx.AsyncClient`。FastAPI lifespan 启动时创建它并放入：
 
 ```python
@@ -1029,7 +1031,7 @@ HTTP 200 不等于业务响应可信。例如 Java 故障模拟返回缺少 `dat
 
 ### 7.5 `ToolException` 标准错误模型
 
-[`agent-service/app/errors.py`](../agent-service/app/errors.py) 中的 `ToolErrorCode` 是稳定机器
+[`agent-service/app/errors.py`](../../agent-service/app/errors.py) 中的 `ToolErrorCode` 是稳定机器
 错误码，`ToolException` 保存：
 
 ```text
@@ -1077,7 +1079,7 @@ M1.3 负责“错误分类”，M1.6 才在具体只读 Tool 上执行重试。t
 
 ### 7.7 Tool 基础协议如何协作
 
-M1.4 新增的 [`agent-service/app/tools/`](../agent-service/app/tools/) 可以类比为：
+M1.4 新增的 [`agent-service/app/tools/`](../../agent-service/app/tools) 可以类比为：
 
 | Python | Java 类比 | Node.js/TypeScript 类比 | 职责 |
 | --- | --- | --- | --- |
@@ -1537,7 +1539,7 @@ integration  覆盖应用组件边界的测试
 
 ### 10.2 当前测试文件
 
-[`agent-service/tests/test_health.py`](../agent-service/tests/test_health.py)：
+[`agent-service/tests/test_health.py`](../../agent-service/tests/test_health.py)：
 
 - 使用 `httpx.ASGITransport` 在测试进程内调用 FastAPI，不监听真实端口；
 - 显式进入 lifespan，覆盖启动和关闭；
@@ -1545,25 +1547,25 @@ integration  覆盖应用组件边界的测试
 
 它类似 Spring MockMvc 或 Node Supertest。
 
-[`agent-service/tests/test_database.py`](../agent-service/tests/test_database.py)：
+[`agent-service/tests/test_database.py`](../../agent-service/tests/test_database.py)：
 
 - 验证 `postgresql://` 转为 `postgresql+asyncpg://`；
 - 验证异步 PostgreSQL Engine 和 Session Factory；
 - 不执行 SQL，因此不依赖外部数据库。
 
-[`agent-service/tests/test_observability.py`](../agent-service/tests/test_observability.py)：
+[`agent-service/tests/test_observability.py`](../../agent-service/tests/test_observability.py)：
 
 - 构造日志记录；
 - 使用 `JsonFormatter` 序列化；
 - 验证 Trace、方法、路径和状态码等结构化字段。
 
-[`agent-service/tests/test_alembic.py`](../agent-service/tests/test_alembic.py)：
+[`agent-service/tests/test_alembic.py`](../../agent-service/tests/test_alembic.py)：
 
 - 验证 `alembic.ini` 可以加载；
 - 验证迁移目录、`env.py` 和模板存在；
 - 不执行数据库迁移。
 
-[`agent-service/tests/test_business_client.py`](../agent-service/tests/test_business_client.py)：
+[`agent-service/tests/test_business_client.py`](../../agent-service/tests/test_business_client.py)：
 
 - 验证 Base URL 和 connect/read/write/pool 超时；
 - 验证 FastAPI 启动/关闭与共享 Client 生命周期；
@@ -1601,7 +1603,7 @@ def get_name() -> str:
 
 ### 10.4 根级验收命令
 
-[`Makefile`](../Makefile) 提供：
+[`Makefile`](../../Makefile) 提供：
 
 ```bash
 make test-agent-foundation  # 运行工程基础和结构化日志回归
@@ -1622,7 +1624,7 @@ make test                   # 当前仓库完整回归
 
 ### 11.1 `agent-service/Dockerfile`
 
-[`agent-service/Dockerfile`](../agent-service/Dockerfile) 使用多阶段构建：
+[`agent-service/Dockerfile`](../../agent-service/Dockerfile) 使用多阶段构建：
 
 ```text
 官方 uv 镜像
@@ -1648,7 +1650,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 ### 11.2 根级 `docker-compose.yml`
 
-[`docker-compose.yml`](../docker-compose.yml) 中的 Agent 服务：
+[`docker-compose.yml`](../../docker-compose.yml) 中的 Agent 服务：
 
 - 从 `agent-service/Dockerfile` 构建；
 - 容器内监听 8000；
@@ -1769,9 +1771,9 @@ async def lifespan(...):
 `ContextVar` 保存当前异步调用链中的值，适合Trace、请求用户或Run ID。普通全局变量会在
 并发请求间共享，`threading.local` 又不能完整表达异步任务上下文，因此需要专门的上下文变量。
 
-## 13. 当前能力边界和后续目录
+## 13. M1.1～M2.8 阶段边界和后续目录
 
-### 13.1 M1.1～M2.6 已完成
+### 13.1 早期已实现能力（含M2.8补充）
 
 - uv和Python 3.12工程；
 - FastAPI/Uvicorn启动；
@@ -1822,16 +1824,17 @@ async def lifespan(...):
 - pytest、Ruff、mypy；
 - Docker/Compose运行。
 
-### 13.2 当前尚未实现
+### 13.2 当时尚未实现
 
 - 数据库readiness；
 - 调试API自动记录Run/Step，以及多轮会话上下文；
 - 具体模型供应商适配、Prompt版本管理、真实模型评测和动态Agent；
 - RAG、SSE和Approval。
 
+以上为早期阶段边界；模型适配、RAG、动态Agent、SSE和Approval后续已实现，具体以当前状态及服务说明为准。
 环境变量、依赖或目录骨架存在，不等于相应功能已经完成。
 
-### 13.3 当前 M2.8 结构和后续可能增加的内容
+### 13.3 M2.8 结构和当时规划的后续内容
 
 当前关键结构为：
 

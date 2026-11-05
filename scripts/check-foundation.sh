@@ -21,8 +21,9 @@ business-service/Dockerfile
 business-service/pom.xml
 business-service/src/main/java/com/productline/business/BusinessServiceApplication.java
 business-service/src/main/resources/db/migration/V1__create_business_domain.sql
-docs/API_CONTRACT.md
-docs/DOMAIN_MODEL.md
+docs/README.md
+docs/api/API_CONTRACT.md
+docs/architecture/DOMAIN_MODEL.md
 web-console/Dockerfile
 web-console/server.mjs
 "

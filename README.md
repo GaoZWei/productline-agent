@@ -1,36 +1,27 @@
 # 遥感数据产线 Agent
 
-面向遥感数据生产订单、生产任务、质检、复核和交付环节的智能协同 Agent。项目第一阶段以 `ORDER-003` 未交付诊断为黄金链路，按“业务接口 → Tool → 确定性 Workflow → 动态 Agent”的顺序迭代。
+面向遥感数据生产订单、任务、质检、复核和交付环节的协同 Agent。页面采集上下文，Python 编排 Tool、Workflow、规范检索和人工确认，Java 提供业务事实并完成权限、状态、版本和幂等校验后的最终写入。
 
-当前进度为 **M7 可观测性里程碑进行中，M7.5 Run历史页面已完成**：Java业务事实经七个只读Tool进入固定LangGraph诊断链，Python输出
-可追溯根因、字段证据和建议；Web订单页已经接入严格PageContext。诊断现在可以复用持久化Session继承
-当前订单或任务，并继续通过Java事实重校验。内部路由器已具备六类意图、上下文Prompt注入、严格结构化
-解析、一次Schema重试、`UNKNOWN`回退、来源化实体合并，以及固定置信度、缺参/冲突澄清和补参恢复；
-60条固定样本、可注入评测执行器、指标、混淆矩阵和脱敏失败样本已经建立。首批14份有效演示规范和2份
-历史失效版本已登记为严格元数据契约；Agent数据库已经具备知识文档、分块、pgvector和全文检索字段。
-统一Loader现在可安全读取Markdown/纯文本、按标题和长度确定性分块、生成稳定ID并拦截重复正文；OpenAI兼容
-Provider可按批生成固定1536维向量、有限重试瞬时错误，并将Chunk与索引版本写入pgvector。当前支持中文双字
-预处理和GIN关键词排名，也支持同索引身份下的HNSW余弦检索、TopK和相似度阈值。两条检索路径在排名前
-共享产品、卫星、文档类型、规范版本、当前生效时间和权限过滤；两路候选现在通过RRF融合、Chunk去重和
-同章节相邻片段合并形成稳定混合TopK；可注入Reranker现在会严格校验候选分数、按相关性稳定重排、拦截
-低相关片段，并在超时时显式回退原RRF顺序。检索结果现已保留规范名称、版本、章节、全部Chunk身份和原文，
-Web具备可展开引用卡片；内部`SpecificationSkill`可从`SPEC_QA`决策执行固定RAG图，在无结果、重排超时或
-生成引用异常时返回安全回答。50条RAG问题已标注预期文档和章节，统一评测器可比较纯向量、关键词、混合、
-混合加重排策略的Hit@5、MRR和无关片段占比，并输出不含问题正文的失败样本。动态Agent已具备结构化动作选择、
-确定性执行限制和多订单固定路径；Approval链已实现草稿、用户修改、确认前Java事实重校验、单次安全写回和可查询
-操作日志，并由十场景安全矩阵及真实跨服务E2E验收。Run现在还会冻结页面上下文与组件版本，保存可选Router结果、
-Token与Tool调用统计、总耗时和终止原因；九类Step共享脱敏和终态规则。后端SSE现可按用户隔离的流标识推送Run、
-路由、Agent动作、Tool、RAG、Approval和写回事件，并支持心跳、短期回放和断线清理。Web诊断抽屉会先建立事件流再发请求，
-严格校验并有限重连，实时展示Run、Tool等步骤的状态、失败码和耗时。具体模型供应商、统一路由HTTP、页面Approval生产接线、
-操作日志独立页面仍未实现；Run历史现在可按当前用户安全分页，并在详情中查看诊断结果、九类Step摘要、规范引用、Approval修改差异和错误定位。
+M7 运行观测、生产闭环集成与统一评测已完成；知识库管理完成至 KB-02.6，下一最小任务为 KB-02.7 资料、版本及任务只读管理接口。最新进度、实际验证和已知边界统一查看[当前状态](docs/STATUS.md)。
+
+目前页面支持订单状态查询、动态诊断、带版本引用的规范问答、复核与返工的独立人工确认，以及 Run/Step 历史和 SSE 步骤展示。知识管理已有授权、数据模型和上传解析应用，尚无管理 HTTP 接口、发布/停用或问答切源。真实模型与索引能力依赖配置和就绪状态，已有小样本验收不代表完整质量评测。
+
+## 文档入口
+
+从[文档总导航](docs/README.md)选择阅读路径：
+
+| 目的 | 入口 |
+|---|---|
+| 理解系统职责与完整调用链 | [系统全链路](docs/architecture/SYSTEM_FLOW.md) |
+| 启动后演示、查看固定场景和重置说明 | [演示链路](docs/demo/AGENT_DEMO_FLOW.md)、[演示数据](docs/demo/DEMO_DATA.md)、[重置手册](docs/demo/DEMO_RESET.md) |
+| 参与开发 | [开发规则](AGENTS.md)、[详细计划](docs/planning/detailed-plan.md) |
+| 了解知识库需求和管理边界 | [知识库导航](docs/knowledge/README.md) |
+| 准备面试或学习工程实现 | [面试准备](docs/interview/Agent-Question-Plan.md)、[Python 学习手册](docs/learning/pythonKnowledge.md) |
 
 ## 环境要求
 
-- Docker Engine 或 Docker Desktop（支持 `docker compose`）
-- GNU Make
-- Java 21、Maven 3.9（运行 Java 领域测试）
-- uv（自动安装和管理项目要求的 Python 3.12）
-- Node.js 22（运行前端本地测试和构建）
+- Docker Engine 或 Docker Desktop（支持 `docker compose`）、GNU Make。
+- 本机开发和测试：Java 21、Maven 3.9、uv（管理 Python 3.12）、Node.js 22。
 
 ## 快速开始
 
@@ -40,101 +31,46 @@ make config
 make dev
 ```
 
-复制 `.env.example` 后只需修改 `.env` 即可切换端口、数据库和模型配置，不需要修改源码。`.env` 已被 Git 忽略，不应提交真实密钥。
+在 `.env` 中设置端口、数据库和模型参数；不要提交真实密钥。服务启动不代表模型已配置或知识索引已就绪，模型及入库步骤见 [Agent 服务说明](agent-service/README.md)。
 
-服务默认地址：
-
-| 服务 | 地址 | 健康检查 |
-| --- | --- | --- |
-| Web 控制台 | <http://localhost:5173> | <http://localhost:5173/health> |
-| Python Agent | <http://localhost:8000> | <http://localhost:8000/health> |
-| Java 业务服务 | <http://localhost:8080> | <http://localhost:8080/health> |
+| 服务 | 默认地址 | 健康检查 |
+|---|---|---|
+| Web 控制台 | <http://localhost:5173> | `/health` |
+| Python Agent | <http://localhost:8000> | `/health` |
+| Java 业务服务 | <http://localhost:8080> | `/health` |
 | PostgreSQL | `localhost:5432` | `pg_isready` |
-
-停止服务：
-
-```bash
-make down
-```
 
 ## 常用命令
 
 ```bash
-make help             # 查看全部命令
-make config           # 展开并校验 Docker Compose 配置
-make dev              # 构建并启动全部服务
-make dev-business     # 只启动 Java 服务及其依赖
-make dev-agent        # 只启动 Python 服务及其依赖
-make dev-web          # 只启动 Web 服务及其依赖
-make test             # 运行基础检查、服务冒烟和 Java 领域集成测试
-make test-agent-foundation # 验证 M1.1 Python 工程基础
-make test-agent-client # 验证 M1.2 Java HTTP Client
-make test-agent-errors # 验证 M1.3 标准错误模型
-make test-agent-tool-protocol # 验证 M1.4 Tool 基础协议
-make test-tools        # 验证 M1.4～M1.8 Tool 协议、调用策略和开发调试 API
-make test-agent-persistence # 在隔离 PostgreSQL 上验证 M2.1～M2.5 运行记录持久化
-make test-run-lifecycle # 单独验证 M2.2 Run 生命周期与并发状态流转
-make test-step-lifecycle # 单独验证 M2.3 Step 记录、摘要和耗时
-make test-sse-events   # 验证 M7.3 SSE事件服务与发布链路
-make test-run-timeline # 验证 M7.4 前端事件流和实时步骤时间线
-make test-run-history  # 验证 M7.5 Run列表/详情/Step API、用户隔离与历史页面
-make test-workflow-schemas # 单独验证 M2.4 Workflow 状态与诊断 Schema
-make test-workflow-nodes # 单独验证 M2.5 固定节点、状态合并和失败中断
-make test-diagnosis-rules # 单独验证 M2.6 阻塞阶段规则、信息完整性和优先级
-make test-page-context # 验证 M3.1 页面上下文与事实重校验
-make test-session-context # 验证 M3.2 会话过期、清除和继承
-make test-intent-routing # 验证 M3.3 意图契约、Skill映射和UNKNOWN门禁
-make test-router-prompt # 验证 M3.4 Prompt、结构化解析、一次重试和UNKNOWN回退
-make test-knowledge-docs # 验证 M4.1 规范目录、元数据和版本关系
-make test-knowledge-models # 验证 M4.2 知识Schema、数据库模型和迁移
-make test-knowledge-loading # 验证 M4.3 文档加载、分块和重复检测
-make test-knowledge-embedding # 验证 M4.4 Embedding生成、重试和pgvector重新索引
-make test-knowledge-keyword # 验证 M4.5 中文关键词预处理、GIN检索和分数
-make test-knowledge-vector # 验证 M4.6 Query Embedding、余弦检索、TopK和阈值
-make test-knowledge-filters # 验证 M4.7 元数据、有效期、权限和误召回门禁
-make test-knowledge-hybrid # 验证 M4.8 RRF融合、去重、相邻片段和混合TopK
-make test-knowledge-rerank # 验证 M4.9 模型重排、超时降级和低相关片段拦截
-make test-knowledge-citations # 验证 M4.10 引用结构、引用原文和前端卡片
-make test-specification-qa # 验证 M4.11 规范问答Workflow、路由Skill和安全回答
-make eval-rag          # 验证 M4.12 固定RAG评测集、四策略和失败样本
-make quality          # 运行 Ruff 和 mypy 严格检查
-make agent-migrate    # 执行 Agent 自有数据库迁移
-make test-business-domain # 单独运行 Java 领域模型测试
-make test-business-data   # 单独验证固定数据和业务状态组合
-make test-java-contract   # 单独验证 8 个 Java 只读查询接口
-make reset-demo       # 删除本地数据卷并重建 PostgreSQL、Java 和固定数据
-make test-demo-reset  # 独立临时项目验证两次重置和页面恢复，不调用真实模型
-make logs             # 跟踪服务日志
-make ps               # 查看服务状态
+make help        # 全部命令及用途
+make config      # 展开并校验 Compose 配置
+make dev         # 构建并启动全部服务
+make validate    # 基础目录、文件和 Compose 检查
+make quality     # Python Ruff 与 mypy 检查
+make test-web    # 前端测试与构建
+make logs        # 跟踪服务日志
+make ps          # 查看服务状态
+make down        # 停止服务
 ```
 
-`make reset-demo`会删除本项目Compose管理的数据库卷，包括Agent历史、Approval和知识向量，仅用于本地演示重置。
-成功后输出固定数据校验和快照；完整恢复需重新执行Agent迁移、真实Embedding入库并启动页面，具体见
-[`docs/DEMO_RESET.md`](docs/DEMO_RESET.md)。固定ID及状态见[`docs/DEMO_DATA.md`](docs/DEMO_DATA.md)，
-查询路径和响应结构见[`docs/API_CONTRACT.md`](docs/API_CONTRACT.md)。
+领域测试和独立启动方式见 [Java](business-service/README.md)、[Python](agent-service/README.md)、[Web](web-console/README.md) 的模块说明。`make test` 的实际范围以 Makefile 依赖为准，不能代替所有后续领域验收入口。
 
-## 项目结构
+`make reset-demo` 会删除本项目 Compose 管理的数据库卷，清除 Agent 历史、Approval 和知识向量；执行前按[重置手册](docs/demo/DEMO_RESET.md)保存证据，完整恢复还需 Agent 迁移和知识入库。
+
+## 项目结构与开发约定
 
 ```text
 .
-├── agent-service/       # FastAPI Agent 服务、Agent 自有持久化和后续 Tool/Workflow
-├── business-service/    # Spring Boot 业务服务与领域模型
-├── web-console/         # Vue 前端目标目录（当前为静态启动骨架）
-├── knowledge-base/      # 固定演示规范、检索元数据和历史失效版本
-├── doc/                 # 原始需求、细化计划与开发记录
-├── docs/                # 路线图和当前状态
-├── scripts/             # 根级验证脚本
+├── agent-service/       # FastAPI、Tool、Workflow/Agent、RAG、Approval 和运行记录
+├── business-service/    # Java 业务事实、权限、一致性、幂等与最终写入
+├── web-console/         # Vue 订单全景、Agent 交互、人工确认和运行历史
+├── knowledge-base/      # 固定演示规范及 catalog，独立于管理说明
+├── docs/                # 项目文档、计划、演示、学习与面试资料的统一入口
+├── scripts/             # 根级检查、验收和演示辅助脚本
+├── AGENTS.md            # 开发规则与按需阅读顺序
 ├── docker-compose.yml
 └── Makefile
 ```
 
-## 开发约束
-
-开始开发前阅读根目录 `AGENTS.md`。每次开发必须：
-
-1. 只完成当前里程碑内的一个可测试任务；
-2. 保证固定数据和 `ORDER-003` 黄金链路稳定；
-3. 运行任务对应测试，并在 `docs/STATUS.md` 记录当前测试摘要、阻塞和下一任务；
-4. 首次开发阶段时，在 `doc/detailed-plan.md` 对应二级标题下补充 `### 解决的问题`；
-5. 实际功能开发按“核心解决的问题、实现的核心代码、实现的核心功能”三栏更新 `doc/record.md`；
-6. 评估本次开发的 Agent 面试价值，只有有价值时才按“解决的问题/对项目的价值、与 Agent 开发的关系、可能的面试问题”三栏更新 `doc/needCare.md`。
+开发前阅读 [AGENTS.md](AGENTS.md)，按当前任务最小范围阅读和验证。`ORDER-003` 黄金链路、Java 业务事实边界和人工确认规则必须保持。

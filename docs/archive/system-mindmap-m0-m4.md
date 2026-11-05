@@ -1,7 +1,7 @@
-# 当前系统情况与架构思维导图
+# M0～M4 系统情况与架构思维导图（历史快照）
 
-> 基线日期：2026-08-22。当前开发进度以 `docs/STATUS.md` 为准；本图只把已经实现的能力描述为现状，
-> M0～M4已完成；M5及后续内容均标记为待建设。
+> 基线日期：2026-08-22。本图保留当时M0～M4已完成、M5及后续待建设的历史表述，图中的“当前”均指该阶段，
+> 不代表目前实现。最新进度见[STATUS](../STATUS.md)，现有调用链见[系统全链路](../architecture/SYSTEM_FLOW.md)。
 
 ## 系统全景
 
@@ -367,9 +367,9 @@ mindmap
 
 ## 相关文档
 
-- [当前开发状态](STATUS.md)
-- [项目路线图](ROADMAP.md)
-- [接口契约](API_CONTRACT.md)
-- [领域模型](DOMAIN_MODEL.md)
-- [固定演示数据](DEMO_DATA.md)
-- [详细开发计划](../doc/detailed-plan.md)
+- [当前开发状态](../STATUS.md)
+- [项目路线图](../ROADMAP.md)
+- [接口契约](../api/API_CONTRACT.md)
+- [领域模型](../architecture/DOMAIN_MODEL.md)
+- [固定演示数据](../demo/DEMO_DATA.md)
+- [详细开发计划](../planning/detailed-plan.md)
