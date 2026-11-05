@@ -63,7 +63,7 @@ flowchart TD
 ```mermaid
 flowchart LR
     User["用户"]
-    Web["Web Console<br/>订单详情、Agent抽屉、确认卡片、运行历史"]
+    Web["Agent Frontend<br/>订单详情、Agent抽屉、确认卡片、运行历史"]
     Java["Java业务服务<br/>事实、权限、状态、幂等、审计及最终写入"]
     BusinessDB[("业务表<br/>订单、任务、步骤、问题、复核、返工、交付")]
     Agent["Python Agent服务<br/>上下文、路由、Workflow、RAG、Approval"]
@@ -443,8 +443,8 @@ flowchart LR
 | --- | --- |
 | [BusinessQueryService.java](../../business-service/src/main/java/com/productline/business/application/BusinessQueryService.java) | Java目录与详情事实聚合 |
 | [BusinessWriteService.java](../../business-service/src/main/java/com/productline/business/application/BusinessWriteService.java) | 最终权限、版本、幂等、复核及返工写入 |
-| [orderStore.ts](../../web-console/src/stores/orderStore.ts) | 订单加载与迟到响应隔离 |
-| [AgentWorkspaceDrawer.vue](../../web-console/src/components/AgentWorkspaceDrawer.vue) | 消息、切页、SSE和人工确认 |
+| [orderStore.ts](../../agent-frontend/src/stores/orderStore.ts) | 订单加载与迟到响应隔离 |
+| [AgentWorkspaceDrawer.vue](../../agent-frontend/src/components/AgentWorkspaceDrawer.vue) | 消息、切页、SSE和人工确认 |
 | [agent_messages.py](../../agent-service/app/services/agent_messages.py) | Session/Run、上下文路由、澄清与分发 |
 | [production_agent_skills.py](../../agent-service/app/services/production_agent_skills.py) | 四个Skill的生产装配 |
 | [order_status.py](../../agent-service/app/workflows/order_status.py) | 订单查询与任务跟踪 |

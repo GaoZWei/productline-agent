@@ -4,7 +4,7 @@ set -eu
 required_directories="
 agent-service
 business-service
-web-console
+agent-frontend
 docs
 "
 # Monorepo 必需配置和启动文件
@@ -24,8 +24,8 @@ business-service/src/main/resources/db/migration/V1__create_business_domain.sql
 docs/README.md
 docs/api/API_CONTRACT.md
 docs/architecture/DOMAIN_MODEL.md
-web-console/Dockerfile
-web-console/server.mjs
+agent-frontend/Dockerfile
+agent-frontend/server.mjs
 "
 
 for directory in $required_directories; do
@@ -51,7 +51,7 @@ for variable in \
     SPRING_DATASOURCE_USERNAME \
     SPRING_DATASOURCE_PASSWORD \
     AGENT_SERVICE_PORT \
-    WEB_CONSOLE_PORT \
+    AGENT_FRONTEND_PORT \
     MODEL_PROVIDER \
     MODEL_API_KEY; do
     grep -q "^${variable}=" .env.example || {

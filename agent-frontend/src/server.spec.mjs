@@ -44,7 +44,7 @@ describe("production web server", () => {
     const webUrl = await listen(web);
 
     const health = await fetch(`${webUrl}/health`);
-    expect(await health.json()).toEqual({ service: "web-console", status: "UP" });
+    expect(await health.json()).toEqual({ service: "agent-frontend", status: "UP" });
 
     const api = await fetch(`${webUrl}/business-api/api/orders/ORDER-003`);
     expect(api.status).toBe(200);

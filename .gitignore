@@ -35,8 +35,8 @@ business-service/out/
 node_modules/
 dist/
 coverage/
-web-console/node_modules/
-web-console/dist/
+agent-frontend/node_modules/
+agent-frontend/dist/
 
 # Test and evaluation artifacts
 .coverage

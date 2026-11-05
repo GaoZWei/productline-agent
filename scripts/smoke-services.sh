@@ -60,11 +60,11 @@ else
 fi
 
 if command -v node >/dev/null 2>&1; then
-    PORT=15173 node web-console/server.mjs >"$task_tmp_dir/web.log" 2>&1 &
+    PORT=15173 node agent-frontend/server.mjs >"$task_tmp_dir/web.log" 2>&1 &
     web_pid=$!
     wait_for_health http://127.0.0.1:15173/health
-    echo "web-console smoke test passed"
+    echo "agent-frontend smoke test passed"
 else
-    echo "Node.js is required for web-console smoke test" >&2
+    echo "Node.js is required for agent-frontend smoke test" >&2
     exit 1
 fi

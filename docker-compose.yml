@@ -92,16 +92,16 @@ services:
         condition: service_started
     init: true
     restart: unless-stopped
-  # web-console 服务
-  web-console:
+  # agent-frontend 服务
+  agent-frontend:
     build:
-      context: ./web-console
+      context: ./agent-frontend
     environment:
       PORT: 5173
       BUSINESS_API_URL: http://business-service:8080
       AGENT_API_URL: http://agent-service:8000
     ports:
-      - "${WEB_CONSOLE_PORT:-5173}:5173"
+      - "${AGENT_FRONTEND_PORT:-5173}:5173"
     depends_on:
       agent-service:
         condition: service_started

@@ -670,7 +670,7 @@ M4.11的`KnowledgeRetrievalPipeline`对关键词和向量通道复用同一`Know
 
 首次真实请求因原固定2秒重排预算取消而安全降级，修复为上述配置后正常路径通过。坐标样例耗时约34.7秒，
 对应Trace记录一次`EMBEDDING_TIMEOUT`及有限重试，随后成功；页面原20秒等待不足的问题已由统一消息独立300秒预算处理，
-并提示客户端超时后先查运行历史，说明见`web-console/README.md`。该适配不保证覆盖所有后端配置或动态路径。
+并提示客户端超时后先查运行历史，说明见`agent-frontend/README.md`。该适配不保证覆盖所有后端配置或动态路径。
 本次对照模型用量来自LLM Step，未包含查询Embedding用量或超时请求可能产生的费用。
 
 M4.12在`evaluation/rag_cases.jsonl`固定保存50条问题及其预期文档、完整章节路径和安全过滤条件。

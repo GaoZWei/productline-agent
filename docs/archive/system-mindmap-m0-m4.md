@@ -106,7 +106,7 @@ mindmap
         下一步 M5.1 Agent State扩展
       当前没有阻塞
     三层系统架构
-      Web Console
+      Agent Frontend
         技术栈
           Vue 3
           TypeScript

@@ -41,7 +41,7 @@ M2.8已实现诊断HTTP入口与请求级Run闭环；具体模型供应商适配
 ### 1.2 当前服务之间的边界
 
 ```text
-Web Console
+Agent Frontend
 采集页面上下文、展示业务事实和未来的 Agent 结果
         ↓
 Python Agent Service

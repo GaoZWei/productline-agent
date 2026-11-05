@@ -32,7 +32,7 @@
 
 - [Agent 服务](../agent-service/README.md)：模型配置、Tool、Workflow、知识库、Approval、观测与局部验收命令。
 - [Java 业务服务](../business-service/README.md)：业务查询与写入、授权、版本和幂等契约。
-- [Web 控制台](../web-console/README.md)：统一 Agent 页面、跨订单续接、SSE、人工确认与前端开发。
+- [Web 控制台](../agent-frontend/README.md)：统一 Agent 页面、跨订单续接、SSE、人工确认与前端开发。
 - [仓库首页](../README.md)：环境、启动方式与常用命令。
 
 ## 文档维护规则

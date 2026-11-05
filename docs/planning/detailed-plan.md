@@ -76,7 +76,7 @@
 
 | ID   | 任务                | 主要产物                                                    | 验证方式                    |   工时 |
 | ---- | ----------------- | ------------------------------------------------------- | ----------------------- | ---: |
-| T001 | 创建 Monorepo 目录    | `agent-service`、`business-service`、`web-console`、`docs` | 目录检查                    |   1h |
+| T001 | 创建 Monorepo 目录    | `agent-service`、`business-service`、`agent-frontend`、`docs` | 目录检查                    |   1h |
 | T002 | 初始化 Git 和基础忽略配置   | `.gitignore`、`.editorconfig`                            | Git 状态正常                | 0.5h |
 | T003 | 创建根目录 README      | 启动方式、项目结构、业务背景                                          | 文档检查                    |   1h |
 | T004 | 创建 `.env.example` | Java、Python、数据库、模型配置项                                   | 环境变量检查                  |   1h |

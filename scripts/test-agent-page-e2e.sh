@@ -14,7 +14,7 @@ export POSTGRES_PASSWORD="${e2e_password}"
 export POSTGRES_PORT=0
 export BUSINESS_SERVICE_PORT=0
 export AGENT_SERVICE_PORT=0
-export WEB_CONSOLE_PORT=0
+export AGENT_FRONTEND_PORT=0
 export MODEL_NAME=
 export MODEL_BASE_URL=
 export MODEL_API_KEY=
@@ -27,12 +27,12 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 docker compose up --build --detach business-service
-docker compose build agent-service web-console
+docker compose build agent-service agent-frontend
 docker compose run --rm --no-deps agent-service \
   /service/.venv/bin/alembic upgrade head
-docker compose up --detach agent-service web-console
+docker compose up --detach agent-service agent-frontend
 
-web_port="$(docker compose port web-console 5173 | sed -n 's/.*://p' | head -n 1)"
+web_port="$(docker compose port agent-frontend 5173 | sed -n 's/.*://p' | head -n 1)"
 if [ -z "${web_port}" ]; then
   echo "无法解析 M7.6-G Web 服务端口" >&2
   exit 1
@@ -43,8 +43,8 @@ attempt=0
 until curl --fail --silent "${web_url}/health" >"${e2e_temp}/web-health.json"; do
   attempt=$((attempt + 1))
   if [ "${attempt}" -ge 90 ]; then
-    echo "M7.6-G web-console 未在预期时间内就绪" >&2
-    docker compose logs web-console agent-service business-service >&2
+    echo "M7.6-G agent-frontend 未在预期时间内就绪" >&2
+    docker compose logs agent-frontend agent-service business-service >&2
     exit 1
   fi
   sleep 1

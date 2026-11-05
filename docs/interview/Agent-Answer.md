@@ -776,7 +776,7 @@ Agent最终保存的是“旧的质量问题状态＋新的复核状态”。每
 ### 现有基础与当前边界
 
 - [BusinessQueryService.getOrderOverview / toOverview](../../business-service/src/main/java/com/productline/business/application/BusinessQueryService.java)已经组装订单与任务相关事实，但当前类级只读事务未显式配置隔离级别，不能声称已有快照保障。
-- [OrderQueryController.getOrderOverview](../../business-service/src/main/java/com/productline/business/api/OrderQueryController.java)暴露已有聚合接口，[fetchOrderOverview](../../web-console/src/api/businessApi.ts)供页面调用。
+- [OrderQueryController.getOrderOverview](../../business-service/src/main/java/com/productline/business/api/OrderQueryController.java)暴露已有聚合接口，[fetchOrderOverview](../../agent-frontend/src/api/businessApi.ts)供页面调用。
 - [只读Tool](../../agent-service/app/tools/readonly.py)目前分别读取业务事实，[DynamicDiagnosisWorkflow._merge_business_fact](../../agent-service/app/workflows/dynamic_diagnosis.py)按动作将结果合并到诊断状态；最终统一取证和事实替换尚未接入。
 - 同一快照读取、诊断Tool接入和对应并发验证均待实现；本次只有面试文档，没有新增接口、事务配置、测试结果或性能指标，也不覆盖未来跨多个数据库或外部系统的一致性问题。
 - 本人识别风险的实际过程和主导工作仍需核实；下一最小任务是明确最终取证的必要字段与适用范围，再单独评估隔离配置和成本，不自动进入开发阶段，Q39/Q40继续暂缓。

@@ -21,7 +21,7 @@
 
 ### 实现的核心代码
 
-- `docker-compose.yml`：编排PostgreSQL、business-service、agent-service和web-console。
+- `docker-compose.yml`：编排PostgreSQL、business-service、agent-service和agent-frontend。
 - `Makefile`：提供配置、启动、测试、重置和服务管理入口。
 - `scripts/check-foundation.sh`、`scripts/smoke-services.sh`：基础结构与三服务健康检查。
 
@@ -167,10 +167,10 @@
 
 ### 实现的核心代码
 
-- `web-console/src/App.vue`：订单页面整体编排和异常展示。
-- `web-console/src/stores/orderStore.ts`：订单选择、并发加载和错误状态管理。
-- `web-console/src/api/businessClient.ts`、`businessApi.ts`：Java响应信封解析和业务查询封装。
-- `web-console/src/components/`：订单概览、任务、质检、交付和订单切换组件。
+- `agent-frontend/src/App.vue`：订单页面整体编排和异常展示。
+- `agent-frontend/src/stores/orderStore.ts`：订单选择、并发加载和错误状态管理。
+- `agent-frontend/src/api/businessClient.ts`、`businessApi.ts`：Java响应信封解析和业务查询封装。
+- `agent-frontend/src/components/`：订单概览、任务、质检、交付和订单切换组件。
 
 ### 实现的核心功能
 
@@ -515,10 +515,10 @@
 
 ### 实现的核心代码
 
-- `web-console/src/components/AgentDiagnosisDrawer.vue`：请求状态、诊断结果和结构化错误展示。
-- `web-console/src/api/agentClient.ts`：诊断契约校验、演示身份Header和错误归一化。
-- `web-console/server.mjs`：开发与生产环境的同源Agent API代理。
-- `web-console/src/components/AgentDiagnosisDrawer.spec.ts`：黄金诊断、加载状态和错误展示用例。
+- `agent-frontend/src/components/AgentDiagnosisDrawer.vue`：请求状态、诊断结果和结构化错误展示。
+- `agent-frontend/src/api/agentClient.ts`：诊断契约校验、演示身份Header和错误归一化。
+- `agent-frontend/server.mjs`：开发与生产环境的同源Agent API代理。
+- `agent-frontend/src/components/AgentDiagnosisDrawer.spec.ts`：黄金诊断、加载状态和错误展示用例。
 
 ### 实现的核心功能
 
@@ -557,7 +557,7 @@
 
 ### 实现的核心代码
 
-- `web-console/src/context/pageContext.ts`：订单、任务和质检页面Context Adapter。
+- `agent-frontend/src/context/pageContext.ts`：订单、任务和质检页面Context Adapter。
 - `agent-service/app/schemas/context.py`：页面类型及严格`PageContext`契约。
 - `agent-service/app/workflows/order_diagnosis.py`：请求一致性和Java事实归属重校验节点。
 - `agent-service/app/api/order_diagnosis.py`：诊断角色门禁及上下文身份一致性检查。
@@ -870,7 +870,7 @@
 
 - `agent-service/app/schemas/knowledge.py`、`app/knowledge/citations.py`：严格Citation及重排结果转换。
 - `agent-service/app/repositories/knowledge_search.py`：检索时透传规范标题和版本。
-- `web-console/src/components/KnowledgeCitationCard.vue`：引用身份、分数和原文展开卡片。
+- `agent-frontend/src/components/KnowledgeCitationCard.vue`：引用身份、分数和原文展开卡片。
 
 ### 实现的核心功能
 
@@ -1142,9 +1142,9 @@
 
 ### 实现的核心代码
 
-- `web-console/src/types/agent.ts`：与后端Approval、ReviewDraft和状态枚举对齐的前端契约。
-- `web-console/src/components/ReviewApprovalCard.vue`：草稿展示、编辑、引用、二次确认和事件边界。
-- `web-console/src/components/ReviewApprovalCard.spec.ts`：内容展示、编辑归一化、结论联动和防重复交互测试。
+- `agent-frontend/src/types/agent.ts`：与后端Approval、ReviewDraft和状态枚举对齐的前端契约。
+- `agent-frontend/src/components/ReviewApprovalCard.vue`：草稿展示、编辑、引用、二次确认和事件边界。
+- `agent-frontend/src/components/ReviewApprovalCard.spec.ts`：内容展示、编辑归一化、结论联动和防重复交互测试。
 
 ### 实现的核心功能
 
@@ -1188,7 +1188,7 @@
 - `agent-service/app/services/approval_confirmation.py`：确认快照、有效期、事实刷新、CAS执行锁和终态裁决。
 - `agent-service/app/api/approvals.py`、`app/schemas/approval_execution.py`：严格确认HTTP请求、成功结果和错误契约。
 - `agent-service/app/main.py`：应用生命周期注册独立写Tool注册表和Approval确认路由。
-- `web-console/src/api/agentClient.ts`：确认请求、写入结果校验及Approval错误映射。
+- `agent-frontend/src/api/agentClient.ts`：确认请求、写入结果校验及Approval错误映射。
 
 ### 实现的核心功能
 
@@ -1210,7 +1210,7 @@
 - `agent-service/app/models/operation_log.py`、`migrations/versions/0010_operation_logs.py`：隔离的Agent操作日志表和约束。
 - `agent-service/app/services/operation_log.py`、`app/schemas/operation_log.py`：受控摘要、字段差异构建和严格详情契约。
 - `agent-service/app/services/approval_confirmation.py`：日志创建与Approval终态的原子提交。
-- `agent-service/app/api/approvals.py`、`web-console/src/api/agentClient.ts`：按Approval读取日志及前端运行时校验。
+- `agent-service/app/api/approvals.py`、`agent-frontend/src/api/agentClient.ts`：按Approval读取日志及前端运行时校验。
 
 ### 实现的核心功能
 
@@ -1292,10 +1292,10 @@
 
 ### 实现的核心代码
 
-- `web-console/src/api/runEventClient.ts`、`src/types/runEvents.ts`：带身份的流连接、严格事件解析、有限重连和错误契约。
-- `web-console/src/observability/runEventTimeline.ts`、`src/components/AgentRunTimeline.vue`：纯事件归并、步骤状态、失败定位和耗时展示。
-- `web-console/src/components/AgentDiagnosisDrawer.vue`、`src/api/agentClient.ts`：先连接再诊断的流标识绑定及生命周期清理。
-- `web-console/server.mjs`：生产同源代理的SSE专用上游不可用响应。
+- `agent-frontend/src/api/runEventClient.ts`、`src/types/runEvents.ts`：带身份的流连接、严格事件解析、有限重连和错误契约。
+- `agent-frontend/src/observability/runEventTimeline.ts`、`src/components/AgentRunTimeline.vue`：纯事件归并、步骤状态、失败定位和耗时展示。
+- `agent-frontend/src/components/AgentDiagnosisDrawer.vue`、`src/api/agentClient.ts`：先连接再诊断的流标识绑定及生命周期清理。
+- `agent-frontend/server.mjs`：生产同源代理的SSE专用上游不可用响应。
 
 ### 实现的核心功能
 
@@ -1316,7 +1316,7 @@
 - `agent-service/app/schemas/run_history.py`、`app/services/run_history.py`：Run列表/详情、Step时间线、诊断结果和Approval历史的严格投影。
 - `agent-service/app/repositories/agent_runtime.py`、`app/repositories/approval.py`：Session所有者联表校验、稳定分页及Run关联记录查询。
 - `agent-service/app/api/runs.py`：Run列表、详情和Step只读HTTP入口及统一安全错误。
-- `web-console/src/api/runHistoryClient.ts`、`src/components/RunHistoryPage.vue`：运行时响应校验、列表/详情隔离加载和完整历史视图。
+- `agent-frontend/src/api/runHistoryClient.ts`、`src/components/RunHistoryPage.vue`：运行时响应校验、列表/详情隔离加载和完整历史视图。
 
 ### 实现的核心功能
 
@@ -1379,7 +1379,7 @@
 - `agent-service/app/clients/model.py`：Chat Completions请求、响应外壳、结构化输出、错误映射、有限重试和调用指标。
 - `agent-service/app/services/model_invocation.py`、`app/workflows/recording.py`：模型调用与LLM Step生命周期的观测接线。
 - `agent-service/app/models/agent_runtime.py`、`migrations/versions/0013_llm_step_observability.py`：LLM模型身份、Token和重试次数的独立持久化字段与约束。
-- `agent-service/app/schemas/run_history.py`、`web-console/src/components/RunHistoryPage.vue`：LLM Step指标的受控历史投影与展示。
+- `agent-service/app/schemas/run_history.py`、`agent-frontend/src/components/RunHistoryPage.vue`：LLM Step指标的受控历史投影与展示。
 
 ### 实现的核心功能
 
@@ -1504,8 +1504,8 @@
 
 ### 实现的核心代码
 
-- `web-console/src/api/agentClient.ts`、`src/types/agent.ts`：统一能力/消息Client、五类判别联合类型及运行时响应校验。
-- `web-console/src/components/AgentWorkspaceDrawer.vue`、`AgentResultView.vue`：Session/SSE编排、异步请求隔离、结果分派、澄清和Review/返工确认交互。
+- `agent-frontend/src/api/agentClient.ts`、`src/types/agent.ts`：统一能力/消息Client、五类判别联合类型及运行时响应校验。
+- `agent-frontend/src/components/AgentWorkspaceDrawer.vue`、`AgentResultView.vue`：Session/SSE编排、异步请求隔离、结果分派、澄清和Review/返工确认交互。
 - `agent-service/tests/test_agent_persistence.py`：真实PostgreSQL、Java HTTP边界、模型Stub和确定性Embedding下的四Skill统一入口集成。
 - `scripts/test-agent-page-e2e.sh`、`Makefile`：生产镜像、迁移、同源代理、固定诊断及模型失败语义的一键隔离验收。
 
@@ -1779,7 +1779,7 @@
 
 ### 实现的核心代码
 
-- `web-console/src/api/agentClient.ts`：`AGENT_MESSAGE_TIMEOUT_MS`、`requestAgentMessage`。
+- `agent-frontend/src/api/agentClient.ts`：`AGENT_MESSAGE_TIMEOUT_MS`、`requestAgentMessage`。
 - `Makefile`：`test-agent-page`纳入真实Axios计时器的受控慢响应回归。
 
 ### 实现的核心功能
@@ -1801,9 +1801,9 @@
 
 - `agent-service/app/routing/decision.py`：`require_matching_diagnosis_page`；`app/schemas/routing.py`：切换原因及候选校验。
 - `agent-service/app/services/agent_messages.py`：分发前门禁及待切换时保留原Session。
-- `web-console/src/stores/orderStore.ts`：`switchOrderForAgent`，目标加载成功后才提交页面切换。
-- `web-console/src/components/AgentWorkspaceDrawer.vue`：确认、取消、原问题续接及会话/SSE隔离；`src/App.vue`绑定目标加载。
-- `web-console/src/api/agentClient.ts`、`src/types/agent.ts`：切换契约校验；`AgentResultView.vue`：结果订单标识。
+- `agent-frontend/src/stores/orderStore.ts`：`switchOrderForAgent`，目标加载成功后才提交页面切换。
+- `agent-frontend/src/components/AgentWorkspaceDrawer.vue`：确认、取消、原问题续接及会话/SSE隔离；`src/App.vue`绑定目标加载。
+- `agent-frontend/src/api/agentClient.ts`、`src/types/agent.ts`：切换契约校验；`AgentResultView.vue`：结果订单标识。
 
 ### 实现的核心功能
 
@@ -1846,8 +1846,8 @@
 
 - `business-service/src/main/resources/db/migration/V4__expand_demo_scenarios.sql`：新增25个订单及固定关联数据。
 - `BusinessQueryService.getOrders/toOverview`、`OrderQueryController.getOrders`：排序列表与任务返工DTO聚合。
-- `web-console/src/stores/orderStore.ts`：`initialize`单次读取Java目录，保留详情请求序号隔离。
-- `web-console/src/components/OrderSwitcher.vue`、`TaskList.vue`：搜索分类、列表滚动、能力提示及已有返工展示。
+- `agent-frontend/src/stores/orderStore.ts`：`initialize`单次读取Java目录，保留详情请求序号隔离。
+- `agent-frontend/src/components/OrderSwitcher.vue`、`TaskList.vue`：搜索分类、列表滚动、能力提示及已有返工展示。
 - `scripts/reset-demo`：V4和30单基线校验，恢复预置返工。
 
 ### 实现的核心功能

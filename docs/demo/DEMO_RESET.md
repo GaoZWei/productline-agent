@@ -37,8 +37,8 @@ make reset-demo
 make knowledge-ingest
 
 # 3. 构建页面并恢复Agent和Web服务。
-docker compose build web-console
-docker compose up -d agent-service web-console
+docker compose build agent-frontend
+docker compose up -d agent-service agent-frontend
 ```
 
 每条成功后再执行下一条。`make knowledge-ingest`已包含`alembic upgrade head`，无需再单独运行迁移；它会调用真实Embedding Provider并消耗Token，不会调用对话模型或创建复核/返工任务。当前16份文档和80个Chunk需重新生成向量，不复用已删除数据卷中的向量。

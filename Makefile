@@ -54,20 +54,20 @@ test-sse-events: ## 验证 M7.3 SSE事件、回放、心跳及诊断/RAG/Approva
 	./scripts/test-agent-persistence.sh -k "publishes_ordered_sse_progress"
 
 test-run-timeline: ## 验证 M7.4 SSE客户端、重连、时间线和诊断抽屉联动
-	npm --prefix web-console test -- --run src/api/runEventClient.spec.ts src/observability/runEventTimeline.spec.ts src/components/AgentRunTimeline.spec.ts src/components/AgentDiagnosisDrawer.spec.ts src/api/agentClient.spec.ts src/server.spec.mjs
-	npm --prefix web-console run build
+	npm --prefix agent-frontend test -- --run src/api/runEventClient.spec.ts src/observability/runEventTimeline.spec.ts src/components/AgentRunTimeline.spec.ts src/components/AgentDiagnosisDrawer.spec.ts src/api/agentClient.spec.ts src/server.spec.mjs
+	npm --prefix agent-frontend run build
 
 test-run-history: ## 验证 M7.5 Run列表/详情/Step API、历史页面和用户隔离
 	cd agent-service && uv run --frozen pytest -q tests/test_run_history.py tests/test_run_history_api.py
 	./scripts/test-agent-persistence.sh -k run_history
-	npm --prefix web-console test -- --run src/api/runHistoryClient.spec.ts src/components/RunHistoryPage.spec.ts src/App.spec.ts
-	npm --prefix web-console run build
+	npm --prefix agent-frontend test -- --run src/api/runHistoryClient.spec.ts src/components/RunHistoryPage.spec.ts src/App.spec.ts
+	npm --prefix agent-frontend run build
 
 test-model-runtime: ## 验证 M7.6-A模型配置、结构化调用、稳定错误、重试和LLM Step观测
 	cd agent-service && uv run --frozen pytest -q tests/test_model_settings.py tests/test_model_capabilities.py tests/test_model_client.py tests/test_model_invocation.py tests/test_llm_step_observability.py tests/test_observability.py tests/test_run_history.py tests/test_run_history_api.py tests/test_alembic.py
 	./scripts/test-agent-persistence.sh -k "llm_step_observability or step_type_migration"
-	npm --prefix web-console test -- --run src/api/runHistoryClient.spec.ts src/components/RunHistoryPage.spec.ts
-	npm --prefix web-console run build
+	npm --prefix agent-frontend test -- --run src/api/runHistoryClient.spec.ts src/components/RunHistoryPage.spec.ts
+	npm --prefix agent-frontend run build
 
 test-model-adapters: ## 验证 M7.6-B五个模型Protocol适配器和既有确定性门禁
 	cd agent-service && uv run --frozen pytest -q tests/test_model_adapters.py tests/test_run_versioning.py tests/test_intent_router_prompt.py tests/test_action_decision.py tests/knowledge/test_reranking.py tests/knowledge/test_specification_qa_workflow.py tests/test_review_draft_generation.py
@@ -99,11 +99,11 @@ test-agent-read-skills: ## 验证 M7.6-E三个只读Skill生产分发、观测�
 test-agent-review: ## 验证 M7.6-F Review草稿、独立Approval、确认/取消和返工闭环
 	cd agent-service && uv run --frozen pytest -q tests/test_review_draft_generation.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_production_agent_skills.py
 	./scripts/test-agent-persistence.sh -k "review_draft_store or confirmation_store or rework_request"
-	cd web-console && npm test -- --run src/api/agentClient.spec.ts src/api/runHistoryClient.spec.ts src/components/ReviewApprovalCard.spec.ts
+	cd agent-frontend && npm test -- --run src/api/agentClient.spec.ts src/api/runHistoryClient.spec.ts src/components/ReviewApprovalCard.spec.ts
 
 test-agent-page: ## 验证 M7.6-G统一抽屉、五类结果、四Skill集成和Docker页面链路
-	cd web-console && npm test -- --run src/api/agentUnifiedClient.spec.ts src/api/agentMessageTimeout.spec.ts src/api/runEventClient.spec.ts src/components/AgentResultView.spec.ts src/components/AgentWorkspaceDrawer.spec.ts src/components/ReviewApprovalCard.spec.ts src/App.spec.ts src/server.spec.mjs
-	cd web-console && npm run build
+	cd agent-frontend && npm test -- --run src/api/agentUnifiedClient.spec.ts src/api/agentMessageTimeout.spec.ts src/api/runEventClient.spec.ts src/components/AgentResultView.spec.ts src/components/AgentWorkspaceDrawer.spec.ts src/components/ReviewApprovalCard.spec.ts src/App.spec.ts src/server.spec.mjs
+	cd agent-frontend && npm run build
 	./scripts/test-agent-persistence.sh -k agent_read_skills_execute_through_unified_http
 	./scripts/test-agent-page-e2e.sh
 
@@ -201,7 +201,7 @@ test-knowledge-rerank: ## 验证 M4.9 模型重排、超时降级和低相关片
 
 test-knowledge-citations: ## 验证 M4.10 引用身份、版本、原文和前端卡片
 	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_citations.py tests/knowledge/test_hybrid_search.py
-	cd web-console && npm test -- --run src/components/KnowledgeCitationCard.spec.ts
+	cd agent-frontend && npm test -- --run src/components/KnowledgeCitationCard.spec.ts
 
 test-specification-qa: ## 验证 M4.11 规范问答固定Workflow、路由Skill和安全回答
 	cd agent-service && uv run --frozen pytest -q tests/knowledge/test_specification_qa_workflow.py tests/knowledge/test_citations.py
@@ -212,7 +212,7 @@ eval-rag: ## 验证 RAG固定集、四策略、五项指标和失败样本
 test-approval: ## 验证 M6 Approval生命周期、确认执行、安全边界、操作日志和前端契约
 	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_review_draft_generation.py tests/test_write_tools.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_operation_log.py tests/test_operation_log_api.py
 	./scripts/test-agent-persistence.sh -k "approval or review_draft_store or execution or confirmation or operation_log"
-	cd web-console && npm test -- --run src/components/ReviewApprovalCard.spec.ts src/api/agentClient.spec.ts
+	cd agent-frontend && npm test -- --run src/components/ReviewApprovalCard.spec.ts src/api/agentClient.spec.ts
 
 test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证诊断、写Tool及M6.6确认执行
 	./scripts/test-agent-e2e.sh
@@ -255,11 +255,11 @@ test-java-faults: ## 验证 M0.7 只读故障模拟和默认关闭保护
 		test
 
 test-web: ## 验证业务页面、诊断侧边栏、实时步骤和生产代理
-	npm --prefix web-console test
-	npm --prefix web-console run build
+	npm --prefix agent-frontend test
+	npm --prefix agent-frontend run build
 
 build-web: ## 构建含诊断侧边栏和实时步骤的前端生产资源
-	npm --prefix web-console run build
+	npm --prefix agent-frontend run build
 
 dev: ## 构建并启动 PostgreSQL、Java、Python 和 Web
 	$(COMPOSE) up --build
@@ -271,7 +271,7 @@ dev-agent: ## 只启动 Python 服务及其依赖
 	$(COMPOSE) up --build agent-service
 
 dev-web: ## 只启动 Web 服务及其依赖
-	$(COMPOSE) up --build web-console
+	$(COMPOSE) up --build agent-frontend
 
 down: ## 停止本项目服务（保留数据卷）
 	$(COMPOSE) down --remove-orphans

@@ -12,7 +12,7 @@ export POSTGRES_PASSWORD=demo-reset-test-only
 export POSTGRES_PORT=0
 export BUSINESS_SERVICE_PORT=0
 export AGENT_SERVICE_PORT=0
-export WEB_CONSOLE_PORT=0
+export AGENT_FRONTEND_PORT=0
 export MODEL_NAME=
 export MODEL_API_KEY=
 export EMBEDDING_API_KEY=
@@ -89,7 +89,7 @@ test "$(run_sql "SELECT to_regclass('public.demo_reset_probe') IS NULL;")" = t
 
 # 补验当前Python迁移和页面恢复；关闭Provider，验证不发送真实模型请求。
 failure_log="$reset_temp/build.log"
-docker compose build --quiet agent-service web-console >"$reset_temp/build.log" 2>&1
+docker compose build --quiet agent-service agent-frontend >"$reset_temp/build.log" 2>&1
 failure_log="$reset_temp/migrate.log"
 docker compose run --rm --no-deps agent-service \
     /service/.venv/bin/alembic upgrade head >"$reset_temp/migrate.log" 2>&1
@@ -98,8 +98,8 @@ test "$(run_sql 'SELECT COUNT(*) FROM agent_runs;')" = 0
 test "$(run_sql 'SELECT COUNT(*) FROM approval_records;')" = 0
 test "$(run_sql 'SELECT COUNT(*) FROM knowledge_chunks;')" = 0
 failure_log="$reset_temp/up.log"
-docker compose up -d agent-service web-console >"$reset_temp/up.log" 2>&1
-web_port=$(docker compose port web-console 5173 | sed -n 's/.*://p' | head -n 1)
+docker compose up -d agent-service agent-frontend >"$reset_temp/up.log" 2>&1
+web_port=$(docker compose port agent-frontend 5173 | sed -n 's/.*://p' | head -n 1)
 web_url="http://127.0.0.1:$web_port"
 wait_health "$web_url/health"
 wait_health "$web_url/agent-api/health"

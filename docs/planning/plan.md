@@ -1280,7 +1280,7 @@ remote-sensing-agent/
 │   ├── tests/
 │   └── alembic/
 ├── business-service/
-├── web-console/
+├── agent-frontend/
 ├── knowledge-base/
 ├── evals/
 │   ├── router/

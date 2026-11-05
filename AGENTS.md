@@ -32,7 +32,7 @@
 
 ## 2. 核心架构与事实边界
 
-- `web-console`：页面展示、上下文采集、Agent 交互和人工确认；页面参数只能作为提示。
+- `agent-frontend`：页面展示、上下文采集、Agent 交互和人工确认；页面参数只能作为提示。
 - `agent-service`：Tool、Workflow/Agent、RAG、Approval、Run/Step 和 SSE；不得直接读写 Java 业务表。
 - `business-service`：业务事实、权限、状态、一致性、幂等、审计和最终写入。
 

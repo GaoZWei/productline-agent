@@ -778,4 +778,4 @@ Tool 能证明订单发生了什么，RAG 才能说明适用规范要求什么�
 <a id="e29"></a>
 - **E29｜Tool、Agent 与异常定位指标**：[agent-service/app/evaluation/tools.py](../../agent-service/app/evaluation/tools.py#L64)、[agent-service/app/evaluation/agents.py](../../agent-service/app/evaluation/agents.py#L90)、[agent-service/app/evaluation/observability.py](../../agent-service/app/evaluation/observability.py#L80)
 <a id="e30"></a>
-- **E30｜页面交互、确认卡片与请求隔离**：[web-console/src/components/AgentWorkspaceDrawer.vue](../../web-console/src/components/AgentWorkspaceDrawer.vue#L1)、[web-console/src/components/AgentWorkspaceDrawer.spec.ts](../../web-console/src/components/AgentWorkspaceDrawer.spec.ts#L1)、[web-console/src/components/ReviewApprovalCard.spec.ts](../../web-console/src/components/ReviewApprovalCard.spec.ts#L1)
+- **E30｜页面交互、确认卡片与请求隔离**：[agent-frontend/src/components/AgentWorkspaceDrawer.vue](../../agent-frontend/src/components/AgentWorkspaceDrawer.vue#L1)、[agent-frontend/src/components/AgentWorkspaceDrawer.spec.ts](../../agent-frontend/src/components/AgentWorkspaceDrawer.spec.ts#L1)、[agent-frontend/src/components/ReviewApprovalCard.spec.ts](../../agent-frontend/src/components/ReviewApprovalCard.spec.ts#L1)

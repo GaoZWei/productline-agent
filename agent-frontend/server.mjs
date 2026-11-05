@@ -14,14 +14,14 @@ export function createWebServer({
 } = {}) {
   return createServer(async (request, response) => {
     try {
-      const url = new URL(request.url ?? "/", "http://web-console.local");
+      const url = new URL(request.url ?? "/", "http://agent-frontend.local");
 
       if (url.pathname === "/health") {
         if (request.method !== "GET" && request.method !== "HEAD") {
           response.writeHead(405, { Allow: "GET, HEAD" }).end();
           return;
         }
-        sendJson(response, 200, { service: "web-console", status: "UP" }, request.method);
+        sendJson(response, 200, { service: "agent-frontend", status: "UP" }, request.method);
         return;
       }
 
@@ -71,7 +71,7 @@ async function serveFrontend(pathname, method, response, distDirectory) {
 }
 
 function proxyServiceRequest(clientRequest, clientResponse, serviceUrl, prefix, serviceLabel) {
-  const clientUrl = new URL(clientRequest.url ?? "/", "http://web-console.local");
+  const clientUrl = new URL(clientRequest.url ?? "/", "http://agent-frontend.local");
   const upstreamPath = clientUrl.pathname.slice(prefix.length) || "/";
   const upstreamUrl = new URL(`${upstreamPath}${clientUrl.search}`, serviceUrl);
   const requestUpstream = upstreamUrl.protocol === "https:" ? httpsRequest : httpRequest;
@@ -164,6 +164,6 @@ function contentType(path) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const port = Number.parseInt(process.env.PORT ?? "5173", 10);
   createWebServer().listen(port, "0.0.0.0", () => {
-    console.log(`web-console listening on 0.0.0.0:${port}`);
+    console.log(`agent-frontend listening on 0.0.0.0:${port}`);
   });
 }

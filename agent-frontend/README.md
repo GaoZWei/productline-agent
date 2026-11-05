@@ -1,4 +1,4 @@
-# Web Console
+# Agent Frontend
 
 项目文档入口见[文档总导航](../docs/README.md)，当前进度和实际验证见[STATUS](../docs/STATUS.md)。
 
@@ -51,7 +51,7 @@ M7.6-G 订单业务与统一Agent页面，使用 Vue 3、TypeScript、Vite、Pin
 ```bash
 make dev-business
 make dev-agent
-npm --prefix web-console run dev
+npm --prefix agent-frontend run dev
 ```
 
 浏览器业务请求走同源前缀 `/business-api`，诊断请求走 `/agent-api`。Vite 默认分别代理到
@@ -79,13 +79,16 @@ make build-web
 
 ## 生产运行
 
+Compose服务名为`agent-frontend`，对外端口使用`AGENT_FRONTEND_PORT`，默认5173；可用
+`docker compose up --build agent-frontend`启动前端及其依赖。直接运行Node服务时仍使用下面的`PORT`参数。
+
 Docker 镜像先构建 `dist`，再由轻量 Node 服务提供静态资源、SPA 回退和健康检查。
 运行时设置 `BUSINESS_API_URL` 和 `AGENT_API_URL`，Node 会把两个同源前缀转发到对应服务：
 
 ```bash
 BUSINESS_API_URL=http://localhost:8080 \
 AGENT_API_URL=http://localhost:8000 \
-PORT=5173 node web-console/server.mjs
+PORT=5173 node agent-frontend/server.mjs
 ```
 
 统一抽屉已完成四条生产路径；动态路径需要正确配置模型，规范问答和Review还要求知识索引状态为`READY`。

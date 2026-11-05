@@ -54,7 +54,7 @@ make ps          # 查看服务状态
 make down        # 停止服务
 ```
 
-领域测试和独立启动方式见 [Java](business-service/README.md)、[Python](agent-service/README.md)、[Web](web-console/README.md) 的模块说明。`make test` 的实际范围以 Makefile 依赖为准，不能代替所有后续领域验收入口。
+领域测试和独立启动方式见 [Java](business-service/README.md)、[Python](agent-service/README.md)、[Web](agent-frontend/README.md) 的模块说明。`make test` 的实际范围以 Makefile 依赖为准，不能代替所有后续领域验收入口。
 
 `make reset-demo` 会删除本项目 Compose 管理的数据库卷，清除 Agent 历史、Approval 和知识向量；执行前按[重置手册](docs/demo/DEMO_RESET.md)保存证据，完整恢复还需 Agent 迁移和知识入库。
 
@@ -64,7 +64,7 @@ make down        # 停止服务
 .
 ├── agent-service/       # FastAPI、Tool、Workflow/Agent、RAG、Approval 和运行记录
 ├── business-service/    # Java 业务事实、权限、一致性、幂等与最终写入
-├── web-console/         # Vue 订单全景、Agent 交互、人工确认和运行历史
+├── agent-frontend/      # Vue 订单全景、Agent 交互、人工确认和运行历史
 ├── knowledge-base/      # 固定演示规范及 catalog，独立于管理说明
 ├── docs/                # 项目文档、计划、演示、学习与面试资料的统一入口
 ├── scripts/             # 根级检查、验收和演示辅助脚本
