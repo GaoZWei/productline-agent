@@ -287,12 +287,12 @@ FastAPI lifespan只装配`knowledge_management_service`，不创建目录或访�
 显式`start()`或首次已授权管理调用激活单实例恢复：旧owner未完成任务标记中断，不自动重试模型或旧任务。
 启用管理调用前需显式执行已有迁移；缺少表会返回脱敏的持久化不可用错误，不影响普通应用启动。
 KB-02.7～02.10已接入管理、上传修订、正文预览和原件下载HTTP；后台索引执行、发布、停用及页面仍待实现。
-下一最小任务为KB-02管理底座收口验收，详见本文知识管理接口说明。
+KB-02管理底座已通过收口验收；下一最小任务为KB-03.1发布确认请求、快照与候选版本校验，尚未启动。
 
 验收入口：根目录`make test-knowledge-management`；已有专用测试PostgreSQL时设置
 `AGENT_PERSISTENCE_TEST_DATABASE_URL`，在agent-service执行
 `.venv/bin/pytest -q tests/knowledge/test_knowledge_management_persistence.py`。
-测试使用真实授权Client及模拟Java响应、真实临时数据库和目录，未做真实Java联调或容器重启验收。
+该局部入口使用真实授权Client及模拟Java响应、临时数据库和目录；真实Java联调与Agent进程重启已由下面的独立收口入口补齐。
 完整契约见[存储隔离设计](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md)。
 
 ## Tool 基础协议
@@ -853,7 +853,7 @@ curl -X POST http://localhost:8000/api/agent/knowledge/documents \
 
 没有已完成正文返回409/PREVIEW_NOT_READY，范围或归属不符返回404，正文/元数据校验或读取失败返回503安全结果；
 不触发解析、管理恢复、模型或索引写入，也不从原件或旧库补正文。原件缺失时，已校验正文仍可预览。
-本批没有新增依赖或迁移；原件下载见下一节，发布和页面仍待开发，真实Java HTTP联调和真实进程重启仍待后续验收。
+本批没有新增依赖或迁移；原件下载见下一节，发布和页面仍待开发，真实Java HTTP及Agent重启已由独立收口入口验证。
 详情见[存储设计第十四节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十四kb-029-正文与分块预览http接口)。
 
 ## 知识原始文件下载（KB-02.10）
@@ -868,7 +868,18 @@ curl -X POST http://localhost:8000/api/agent/knowledge/documents \
 资源不可见404/RESOURCE_NOT_FOUND，原件缺失404/ORIGINAL_NOT_FOUND，
 原件大小或哈希异常503/ORIGINAL_INTEGRITY_ERROR，其他数据或存储异常503安全结果；不会改发预览正文。
 原件异常不改写已存正文，预览仍独立校验；详情见[设计第十五节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十五kb-0210-原件读取http接口)。
-下一最小任务为KB-02收口验收，本批无新依赖、迁移或部署，不自动推进发布及页面。
+KB-02已通过隔离收口验收，本批无新依赖、迁移或运行环境部署，不自动推进发布及页面。
+
+## 知识管理真实服务收口验收
+
+根目录执行`make test-knowledge-management-e2e`。需要Docker、uv和项目开发依赖；入口创建独立Compose项目、
+PostgreSQL和原件卷，仅在环回动态端口提供服务，显式使用测试配置并关闭模型，结束清理全部测试资源。
+验收真实Java授权、11个管理入口、强制重建Agent容器/进程后的原件与版本保留，以及ORDER-003只读事实/固定诊断，不依赖本机.env。
+
+中断任务在测试知识表中预置为旧owner的RUNNING，再重建Agent容器；GET不触发恢复，首次已授权上传后状态变为INTERRUPTED，
+原UPLOAD成功记录保留，可上传新修订修正。此验收不冒充真实解析过程中被杀死或分布式接管，索引重试与发布尚未实现。
+直接运行该pytest文件且缺少专用参数会跳过，不能用它替代上述命令。
+完整范围见[KB-02收口说明](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十六kb-02-管理底座收口验收)。
 
 ## 数据边界
 

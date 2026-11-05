@@ -11,6 +11,7 @@
 | 3 | [语料与索引说明](KNOWLEDGE_BASE.md) | 查看语料目录、元数据、版本约定、入库与索引历史说明 |
 | 4 | [知识管理授权契约](KNOWLEDGE_AUTHORIZATION.md) | 查看KB-02.1 Java接口与KB-02.2 Python Client、动作权限及人工确认边界 |
 | 5 | [资料、版本与存储隔离设计](KNOWLEDGE_STORAGE_DESIGN.md) | 查看隔离八表、上传解析应用、KB-02.7～02.10管理/预览/原件HTTP及收口、发布边界 |
+| 6 | [KB-02收口验收入口及边界](KNOWLEDGE_STORAGE_DESIGN.md#十六kb-02-管理底座收口验收) | 复现真实Java授权、管理接口、实际Agent重启及黄金订单检查，区分后续未验范围 |
 
 ## 相关入口
 
