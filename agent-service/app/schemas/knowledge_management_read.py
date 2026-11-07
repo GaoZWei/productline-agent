@@ -76,7 +76,7 @@ class KnowledgeDocumentSummary(KnowledgeSchema):
 
 
 class KnowledgeTaskSummary(KnowledgeSchema):
-    """任务仅返回处理事实，重试接口尚未提供，不宣称已经可以执行重试。"""
+    """任务只返回处理事实，HTTP重试未接入，内部重试仍须单独授权和审查。"""
 
     document_id: ManagedIdentifier
     task_id: ManagedIdentifier
@@ -84,7 +84,7 @@ class KnowledgeTaskSummary(KnowledgeSchema):
     revision_no: PositiveRevision
     task_type: Literal["PARSE", "INDEX"]
     state: Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "INTERRUPTED", "STALE"]
-    attempt_no: PositiveRevision
+    attempt_no: Annotated[int, Field(ge=1, le=2**63 - 1)]
     is_current_revision: bool
     error_code: str | None
     error_message: str | None

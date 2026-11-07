@@ -49,4 +49,13 @@ AGENT_PERSISTENCE_TEST_DATABASE_URL="postgresql://${test_user}:${test_password}@
     tests/knowledge/test_knowledge_management_upload_persistence.py \
     tests/knowledge/test_knowledge_management_preview_persistence.py \
     tests/knowledge/test_knowledge_management_original_persistence.py \
+    tests/knowledge/test_knowledge_management_publication_persistence.py \
+    tests/knowledge/test_knowledge_management_publication_acceptance_persistence.py \
+    tests/knowledge/test_knowledge_management_index_build_persistence.py \
+    tests/knowledge/test_knowledge_management_publication_finalize_persistence.py \
+    tests/knowledge/test_knowledge_management_disable_persistence.py \
+    tests/knowledge/test_knowledge_management_index_retry_persistence.py \
+    tests/knowledge/test_knowledge_management_import_preflight_persistence.py \
+    tests/knowledge/test_knowledge_management_catalog_import_persistence.py \
+    tests/knowledge/test_knowledge_management_search_persistence.py \
     "$@"

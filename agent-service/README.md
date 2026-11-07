@@ -8,8 +8,8 @@ Python 3.12/FastAPI Agent 编排服务。Java HTTP Client 和七个只读业务 
 关键词/向量混合检索、重排和引用校验。OpenAI 兼容 Chat Client、Embedding Provider 和五类模型适配器已经接入
 生产装配，实际调用依赖配置、网络及索引就绪状态；固定诊断 API 继续使用独立的确定性 Workflow。
 
-知识库管理完成至 KB-02.6：已有 Java 授权、八表模型、独立原件存储及上传修订/解析预览应用，尚无管理 HTTP
-接口、后台索引执行、发布/停用或问答切源。当前进度与实际验证见[STATUS](../docs/STATUS.md)，完整阅读入口见
+知识库KB-02管理底座已验收，11个HTTP入口支持上传修订、管理查询、正文预览及原件下载；KB-03.1～03.6提供确认校验、
+幂等接收、候选构建及管理库发布/停用/人工重试应用，尚无对应HTTP、自动后台执行或问答切源。当前进度与实际验证见[STATUS](../docs/STATUS.md)，完整阅读入口见
 [文档导航](../docs/README.md)。历史验收不代表当前运行库状态，小样本模型验收不代替完整真实质量评测。
 
 ## 本地开发
@@ -287,7 +287,7 @@ FastAPI lifespan只装配`knowledge_management_service`，不创建目录或访�
 显式`start()`或首次已授权管理调用激活单实例恢复：旧owner未完成任务标记中断，不自动重试模型或旧任务。
 启用管理调用前需显式执行已有迁移；缺少表会返回脱敏的持久化不可用错误，不影响普通应用启动。
 KB-02.7～02.10已接入管理、上传修订、正文预览和原件下载HTTP；后台索引执行、发布、停用及页面仍待实现。
-KB-02管理底座已通过收口验收；下一最小任务为KB-03.1发布确认请求、快照与候选版本校验，尚未启动。
+KB-02管理底座已通过收口验收，KB-03.1～03.9确认校验、幂等接收、候选构建、管理库发布/停用/人工重试、纳管及管理库检索应用已完成；下一最小任务为KB-03.10管理库动态就绪检查。
 
 验收入口：根目录`make test-knowledge-management`；已有专用测试PostgreSQL时设置
 `AGENT_PERSISTENCE_TEST_DATABASE_URL`，在agent-service执行
@@ -880,6 +880,97 @@ PostgreSQL和原件卷，仅在环回动态端口提供服务，显式使用测�
 原UPLOAD成功记录保留，可上传新修订修正。此验收不冒充真实解析过程中被杀死或分布式接管，索引重试与发布尚未实现。
 直接运行该pytest文件且缺少专用参数会跳过，不能用它替代上述命令。
 完整范围见[KB-02收口说明](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十六kb-02-管理底座收口验收)。
+
+## 发布候选与确认校验（KB-03.1）
+
+`KnowledgePublicationService.prepare`在Java PUBLISH授权后读取当前草稿，返回正文、元数据、确定性分块和绑定实际用户的确认摘要。
+`validate_confirmation`接受严格`confirmed=true`、版本/修订/资料计数、摘要与幂等键，重新授权及读取事实后返回内部确认快照。
+未来生效、已过期、未成功解析、非当前修订、非草稿和不匹配摘要均拒绝；日期采用数据库UTC当天，包含生效/失效当天。
+
+KB-03.1提供Python前置校验，不增加发布HTTP或页面；幂等持久化和事务复核由KB-03.2的独立`accept`应用入口承接，`prepare/validate_confirmation`继续无写入副作用。
+摘要只用于确认内容绑定，不是授权凭证。运行`make test-knowledge-publication`验证局部行为，完整边界见[设计第十七节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十七kb-031-发布确认请求快照与候选版本校验)。
+
+## 发布接收与索引预留（KB-03.2）
+
+`KnowledgePublicationService.accept`接受明确确认命令，Java PUBLISH授权后在短事务中复查候选/摘要、保存CONFIRMED操作、绑定候选批次并预留资料row_version。
+服务端通过`KnowledgePublicationIndexIdentity.from_settings(settings)`沿用既有Embedding身份并注入；后续装配需共享管理服务owner_id，先在已授权管理激活中完成现有中断恢复。客户端不能自报索引身份。
+同actor/action/幂等键和相同输入重放返回原操作/任务，权限每次检查，失败或中断记录不自动重试；新键不能绕过资料上的未完成发布/索引操作。
+
+匹配READY批次可复用且任务为空，其他情况创建空BUILDING批次及QUEUED索引任务；没有执行模型、写Chunk或切换发布指针。
+接收结果只表示已预留，后续仍须验证索引完整性、权限及最终事务条件。未增加发布HTTP、前端、迁移或线上部署。
+验证入口为`make test-knowledge-publication`，详细事务与恢复边界见[设计第十八节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十八kb-032-发布接收事务幂等操作与候选索引任务预留)。
+
+## 候选索引构建（KB-03.3）
+
+`KnowledgeIndexBuildService.process(task_id, identity=...)`显式处理已确认的PUBLISH索引任务：领取前Java授权，短事务核对原确认人/owner/当前修订和预留计数，事务外分块并复用`EmbeddingBatchGenerator`生成全部向量，保存前再次授权和复查。
+全部Chunk及向量完整校验后一次保存，候选READY、任务SUCCEEDED，PUBLISH操作仍EXECUTING且版本DRAFT；未完成最终发布，知识查询源仍LEGACY。
+失败不保存半批Chunk；修订、恢复、取消或失去执行权后的迟到结果不能覆盖终态。SQL写入失败整批回滚，并尝试独立失败收尾；数据库完全不可用时仍需现有激活恢复。
+
+装配时复用管理owner、服务器索引身份、授权Client及现有生成器；构造不执行任务，不新增启动轮询、HTTP或重试入口。生成阶段预算默认120秒、最多600秒，Provider只沿用既有有限重试。
+`make test-knowledge-index-build`使用模型替身和隔离数据库验证，实际边界见[设计第十九节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#十九kb-033-按版本构建候选索引与失败隔离)。
+
+## 管理库最终发布（KB-03.4）
+
+`KnowledgePublicationFinalizeService.finalize(operation_id, identity=...)`只完成已明确确认的PUBLISH操作：首次授权后读取原确认人的READY证据，释放SQL连接后复核全部正文分块和向量，再次授权并在最终事务重读条件和证据摘要。
+成功时同事务替代旧版、封存新版、切换管理指针、递增资料/库计数并完成原操作；旧原件和Chunk/向量保留。失败完整回滚，证据或版本过期会结束未完成意图，SQL瞬时失败可对原operation_id显式重试。
+回执包含原发布时间及当前版本状态、计数和source_mode；成功重放仍授权，不重复切换，也不恢复被替代/停用版本。READY复用且无新任务的操作也必须通过完整校验。
+
+本阶段仅Python内部应用，不提供发布HTTP或页面、不调用模型、不改变LEGACY读源。因此管理库PUBLISHED不代表新资料已进入当前问答。运行`make test-knowledge-publication-finalize`复现隔离验收，完整边界见[设计第二十节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十kb-034-最终授权复查与发布切换事务)。
+
+## 管理库停用（KB-03.5）
+
+`KnowledgeDisableService.prepare/disable`分别接收指定发布版本及严格confirmed=true命令，每次先Java DISABLE授权；确认摘要绑定实际用户、封存身份、元数据和资料计数，提交事务重新读取后才清指针并保存审计。
+同键重放仍授权，只返回原停用时间及当前管理状态，不重复递增计数，也不误停后来发布的新版本。旧原件、发布时间及Chunk/向量保留，不恢复SUPERSEDED版本。
+停用会使同资料旧事实上的未完成PUBLISH/RETRY_INDEX操作及其活动索引任务失效，保留完成任务/READY候选；迟到构建不能撤销停用。正文/向量不参与停用读取，不依赖模型配置，允许撤回索引已损坏的当前依据。
+
+该入口仅操作管理库，无HTTP/页面、模型调用、重试执行或问答切源；LEGACY默认回答集合仍不变。运行`make test-knowledge-disable`复现隔离测试，完整边界见[设计第二十一节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十一kb-035-停用确认权限复查与停用事务)。
+
+## 受控索引重试（KB-03.6）
+
+`KnowledgeIndexRetryService.prepare/retry`仅接受当前草稿修订的失败/中断INDEX链尾，审查、明确确认和幂等重放各自检查Java RETRY_INDEX权限。新任务/批次与原失败分开，attempt_no由父任务+1，retry_of_task_id保留直接父节点，不允许从祖先重复分叉。
+以`KnowledgeIndexRetryRepository`装配同一`KnowledgeIndexBuildService`后，领取和保存只使用RETRY_INDEX权限，不能领取PUBLISH任务；成功标新操作/任务SUCCEEDED及候选READY，不自动发布或覆盖原失败。
+发布需新的PUBLISH确认，可复用匹配READY而不额外调用模型。修订、配置变化、停用或执行权丢失后不继续提交迟到结果；沿用管理owner、现有模型和生成预算，不增加调度平台。
+
+运行`make test-knowledge-index-retry`验证。当前仅Python内部应用，任务查询的HTTP `retry_available`仍为false；内部可重试性由专门授权审查裁决。只读任务attempt_no同步到既有数据库BIGINT范围，JSON字段与类型不变。
+无HTTP/页面、付费模型调用、自动重试或切源，详细边界见[设计第二十二节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十二kb-036-索引失败任务的受控重试)。
+
+## 首批纳管前置校验（KB-03.7）
+
+`KnowledgeImportPreflightService.check`先分别查询Java UPLOAD/PUBLISH，实际用户、动作、确认策略和范围均须匹配。
+服务端固定目录通过逐级NOFOLLOW只读打开，校验UTF-8、大小、目录元数据及14当前/2历史关系；复用现有规范化和稳定分块。
+Repository在REPEATABLE READ READ ONLY事务读取旧索引和目标库状态，事务内不授权、读文件或调用模型。
+随后逐一比对元数据、正文哈希、80个分块的身份/章节/内容/全文检索文本、完整1536维有限非零向量和配置身份。
+返回明确演示标识、实际检查人、16版本/14逻辑资料清单、原catalog哈希及完整源指纹，返回前再次读取原件检查变化。
+
+运行`make test-knowledge-import-preflight`复现离线与隔离数据库检查，向量仅为测试夹具，不代表真实模型质量或当前运行库已通过检查。
+检查允许无冲突的已有上传资料，但拒绝已纳管标记、目录身份冲突、旧索引缺失/损坏或配置不一致，不付费补齐或清理数据。
+报告是已读快照，不是授权票据或发布回执；尚无HTTP/CLI纳管入口、文件复制、管理库写入、启动自动执行或问答切源。
+后续实际纳管必须重新授权、人工确认及复查源指纹/目标计数；成功幂等重放需先查询既有操作，不能绕过首批冲突检查覆盖历史。
+详细边界见[设计第二十三节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十三kb-037-首批演示规范纳管前置校验)。
+
+## 首批规范受确认纳管（KB-03.8）
+
+`KnowledgeCatalogImportService.prepare/confirm`仅为内部应用：审查返回16项清单和绑定实际人/范围、完整源指纹、库计数及索引的摘要；确认Schema拒绝非明确布尔和自报正文、状态、权限或管理UUID。
+确认及成功重放均重新查询Java UPLOAD/PUBLISH；初次确认核对原件、旧索引和摘要，使用独立原件目录复制已审查字节，复制完成后再次授权。
+`KnowledgeCatalogImportRepository.commit`以旧两表SHARE锁阻止旧CLI并行写入，锁管理库后复查整个源快照和库计数，原子创建14资料、16版本/修订/READY批次、80块及32条UPLOAD/PUBLISH操作与32条已完成PARSE/INDEX任务。
+来源使用CATALOG_IMPORT/COPIED_LEGACY，14版PUBLISHED、2版HISTORICAL，保留原引用ID/稳定Chunk ID、元数据和替代关系；历史版不伪造旧发布时间，审计时间为实际纳管落库时间，不代表旧模型生成时间或阶段耗时。
+
+同一请求重试使用确定性新管理身份和原件key，按哈希复用、不覆盖原件；成功重放不依赖旧目录/模型仍未改变，也不恢复后来停用的版本。库计数只递增一次，source_mode仍LEGACY。
+运行`make test-knowledge-catalog-import`验证，源向量为隔离测试夹具，不调用真实Provider。未装配到启动流程，未新增HTTP/CLI或在运行库执行纳管。
+文件系统和SQL不共同回滚：复制或事务失败时管理记录保持全无，已经复制的未引用原件保留，同一请求可受控重试复用；本任务不自动清理这些文件，后续清理须核对引用并显式授权。
+详细约束见[设计第二十四节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十四kb-038-首批演示规范受确认纳管)。
+
+## 管理库已发布知识检索（KB-03.9）
+
+`ManagedKnowledgeSearchService.retrieve`每次先查询Java READ，核对实际人、动作/确认策略和过滤范围，再校验问题并生成查询向量；模型阶段不借用SQL连接。
+`ManagedKnowledgeSearchRepository.search`在同一REPEATABLE READ READ ONLY事务内读取库模式、release_revision、关键词及向量候选，按当前指针→PUBLISHED版本→封存修订→READY发布批次关联管理Chunk。
+权限、生效/失效日期、产品、卫星、处理级别、类型、规范版本和完整模型/分块索引身份都在TopK前过滤。草稿、历史、SUPERSEDED、DISABLED和非当前READY不能进入结果；两路索引空间一致，不回退或混查旧表。
+命中会校验封存元数据/正文哈希、批次输入身份、分块章节/内容/哈希、检索文本和向量；返回旧规范引用ID、版本及稳定Chunk，并附实际管理资料/版本/修订/批次定位。它不是整个发布集合的就绪或完整性检查。
+
+SQL连接释放后复用现有RRF融合，管理定位保留全部合并Chunk；不在本任务新增重排、回答模型、Run/Step字段或历史Run回填。
+新`ManagedKnowledgeSearchFilter`仅用于内部管理检索，增加可选processing_level，不改变旧过滤器或现有HTTP/Java/前端Schema。结果明确source=MANAGED及数据库configured_source_mode，当前后者仍LEGACY；这不是默认问答切源。
+运行`make test-knowledge-managed-search`验证，使用隔离数据库、真实纳管/上传/发布应用和假查询/文档向量；未调用真实Provider、启动服务或部署。
+下一步动态就绪检查仍需处理零发布和全量索引完整性。本任务无HTTP/CLI或Workflow装配入口，详细边界见[设计第二十五节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十五kb-039-管理库已发布知识检索读取)。
 
 ## 数据边界
 

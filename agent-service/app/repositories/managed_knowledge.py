@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 from dataclasses import dataclass
+from datetime import date
 from uuid import uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import Date, func, insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Database
+from app.knowledge.publication import (
+    publication_confirmation,
+    publication_digest,
+    publication_generation_hash,
+    publication_request_hash,
+)
 from app.models import (
     ManagedKnowledgeDocument as Document,
 )
@@ -33,6 +41,11 @@ from app.schemas.knowledge_management import (
     KnowledgeManagementError,
     KnowledgeUploadCommand,
     KnowledgeUploadResult,
+)
+from app.schemas.knowledge_publication import (
+    KnowledgePublicationAcceptance,
+    KnowledgePublicationConfirmCommand,
+    KnowledgePublicationIndexIdentity,
 )
 from app.schemas.managed_knowledge import ManagedKnowledgeRevisionSnapshot
 from app.schemas.managed_knowledge_processing import ManagedKnowledgeConfirmation
@@ -68,6 +81,17 @@ class RevisionRead:
     publication_state: str
     snapshot: ManagedKnowledgeRevisionSnapshot
     metadata_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationRead:
+    """一次SQL读取发布候选、原发布指针、解析状态和数据库UTC日期。"""
+
+    revision: RevisionRead
+    previous_version_id: str | None
+    specification_version: str
+    parse_succeeded: bool
+    today: date
 
 
 class ManagedKnowledgeRepository:
@@ -388,6 +412,287 @@ class ManagedKnowledgeRepository:
             if row is None:
                 raise KnowledgeManagementError("RESOURCE_NOT_FOUND")
             return self._read_record(*row)
+
+    async def read_publication_candidate(
+        self, document_id: str, version_id: str, revision_no: int, scope: str
+    ) -> PublicationRead:
+        """同一SQL快照核对归属及范围，不恢复任务、不预留执行权或改变发布指针。"""
+
+        async with self.database.session() as session:
+            return await self._publication_candidate(
+                session, document_id, version_id, revision_no, scope
+            )
+
+    async def _publication_candidate(
+        self, session: AsyncSession, document_id: str, version_id: str, revision_no: int, scope: str
+    ) -> PublicationRead:
+        """读候选和接收事务共用同一查询，日期取锁取得后该语句的数据库UTC时间。"""
+
+        parsed = (
+            select(Task.task_id)
+            .where(
+                Task.version_id == Version.version_id,
+                Task.revision_no == Revision.revision_no,
+                Task.task_type == "PARSE",
+                Task.state == "SUCCEEDED",
+            )
+            .correlate(Version, Revision)
+            .exists()
+        )
+        row = (
+            await session.execute(
+                select(
+                    Document,
+                    Version,
+                    Revision,
+                    parsed,
+                    func.timezone("UTC", func.statement_timestamp()).cast(Date),
+                )
+                .join(Version, Version.document_id == Document.document_id)
+                .join(Revision, Revision.version_id == Version.version_id)
+                .where(
+                    Document.document_id == document_id,
+                    Version.version_id == version_id,
+                    Revision.revision_no == revision_no,
+                    Revision.permission_scope == scope,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise KnowledgeManagementError("RESOURCE_NOT_FOUND")
+        document, version, revision, parse_succeeded, today = row
+        return PublicationRead(
+            self._read_record(document, version, revision),
+            document.current_version_id,
+            version.specification_version,
+            parse_succeeded,
+            today,
+        )
+
+    async def _publication_result(
+        self, session: AsyncSession, operation: Operation, scope: str, *, replayed: bool
+    ) -> KnowledgePublicationAcceptance:
+        """重放只看原操作的状态，仍按原目标修订范围控制可见性，不重新排队。"""
+
+        row = (
+            await session.execute(
+                select(Operation, Generation, Task, Version.document_id)
+                .select_from(Operation)
+                .join(
+                    Revision,
+                    (Revision.version_id == Operation.version_id)
+                    & (Revision.revision_no == Operation.revision_no),
+                )
+                .join(Version, Version.version_id == Operation.version_id)
+                .outerjoin(
+                    Generation,
+                    Generation.generation_id
+                    == Operation.confirmation_snapshot["generation_id"].astext,
+                )
+                .outerjoin(
+                    Task,
+                    (Task.operation_id == Operation.operation_id) & (Task.task_type == "INDEX"),
+                )
+                .where(
+                    Operation.operation_id == operation.operation_id,
+                    Revision.permission_scope == scope,
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).one_or_none()
+        if row is None:
+            raise KnowledgeManagementError("RESOURCE_NOT_FOUND")
+        operation, generation, task, document_id = row
+        try:
+            snapshot = ManagedKnowledgeConfirmation.model_validate(operation.confirmation_snapshot)
+            if (
+                snapshot.generation_id is None
+                or snapshot.action != "PUBLISH"
+                or snapshot.actor_id != operation.actor_id
+                or snapshot.version_id != operation.version_id
+                or snapshot.revision_no != operation.revision_no
+                or snapshot.document_id != document_id
+            ):
+                raise ValueError("publication must bind its reserved generation")
+            if (
+                generation is None
+                or (generation.version_id, generation.revision_no)
+                != (operation.version_id, operation.revision_no)
+                or (task is not None and task.generation_id != generation.generation_id)
+            ):
+                raise ValueError("publication reservation is inconsistent")
+            return KnowledgePublicationAcceptance.model_validate(
+                {
+                    "document_id": snapshot.document_id,
+                    "version_id": operation.version_id,
+                    "revision_no": operation.revision_no,
+                    "operation_id": operation.operation_id,
+                    "operation_state": operation.state,
+                    "generation_id": generation.generation_id,
+                    "generation_state": generation.state,
+                    "task_id": task.task_id if task else None,
+                    "task_state": task.state if task else None,
+                    "reserved_row_version": snapshot.expected_row_version + 1,
+                    "error_code": operation.error_code,
+                    "replayed": replayed,
+                }
+            )
+        except ValueError:
+            raise KnowledgeManagementError("KNOWLEDGE_DATA_INVALID") from None
+
+    async def accept_publication(
+        self,
+        command: KnowledgePublicationConfirmCommand,
+        *,
+        actor: str,
+        scope: str,
+        index: KnowledgePublicationIndexIdentity | None,
+        trace_id: str,
+        owner_id: str,
+    ) -> KnowledgePublicationAcceptance:
+        """授权后在短事务内串行化幂等键及资料修改，失败完整回滚，不执行外部调用。"""
+
+        input_hash = publication_request_hash(command)
+        async with self.database.session() as session, session.begin():
+            lock_hash = hashlib.sha256(
+                f"{actor}:PUBLISH:{command.idempotency_key}".encode()
+            ).digest()
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": int.from_bytes(lock_hash[:8], "big", signed=True)},
+            )
+            previous = await session.scalar(
+                select(Operation).where(
+                    Operation.actor_id == actor,
+                    Operation.action == "PUBLISH",
+                    Operation.idempotency_key == command.idempotency_key,
+                )
+            )
+            if previous is not None:
+                result = await self._publication_result(session, previous, scope, replayed=True)
+                if previous.input_hash != input_hash:
+                    raise KnowledgeManagementError("IDEMPOTENCY_CONFLICT")
+                return result
+            visible = (
+                select(Version.version_id)
+                .join(Revision, Revision.version_id == Version.version_id)
+                .where(
+                    Version.document_id == Document.document_id,
+                    Version.version_id == command.version_id,
+                    Revision.revision_no == command.expected_revision_no,
+                    Revision.permission_scope == scope,
+                )
+                .correlate(Document)
+                .exists()
+            )
+            document = await session.scalar(
+                select(Document)
+                .where(Document.document_id == command.document_id, visible)
+                .with_for_update()
+            )
+            if document is None:
+                raise KnowledgeManagementError("RESOURCE_NOT_FOUND")
+            record = await self._publication_candidate(
+                session,
+                command.document_id,
+                command.version_id,
+                command.expected_revision_no,
+                scope,
+            )
+            confirmation = publication_confirmation(record, command, actor)
+            if not hmac.compare_digest(
+                command.confirmation_digest, publication_digest(confirmation)
+            ):
+                raise KnowledgeManagementError("STALE_CONFIRMATION")
+            if document.row_version == 2**63 - 1:
+                raise KnowledgeManagementError("KNOWLEDGE_COUNTER_EXHAUSTED")
+            pending = await session.scalar(
+                select(Operation.operation_id)
+                .join(Version, Version.version_id == Operation.version_id)
+                .where(
+                    Version.document_id == command.document_id,
+                    Operation.action.in_(("PUBLISH", "RETRY_INDEX")),
+                    Operation.state.in_(("CONFIRMED", "EXECUTING")),
+                )
+                .limit(1)
+            )
+            if pending is not None:
+                raise KnowledgeManagementError("PUBLICATION_IN_PROGRESS")
+            if index is None:
+                raise KnowledgeManagementError("KNOWLEDGE_INDEX_NOT_CONFIGURED")
+            generation_hash = publication_generation_hash(
+                confirmation, record.revision.citation_document_id, index
+            )
+            ready = await session.scalar(
+                select(Generation)
+                .where(
+                    Generation.version_id == command.version_id,
+                    Generation.revision_no == command.expected_revision_no,
+                    Generation.state == "READY",
+                    Generation.input_hash == generation_hash,
+                    Generation.embedding_provider == index.provider,
+                    Generation.embedding_model == index.model,
+                    Generation.embedding_dimension == index.dimension,
+                    Generation.index_version == index.index_version,
+                    Generation.chunking_version == index.chunking_version,
+                )
+                .order_by(Generation.created_at, Generation.generation_id)
+                .limit(1)
+            )
+            generation_id = ready.generation_id if ready else managed_id("GEN")
+            operation_id = managed_id("OP")
+            stored = ManagedKnowledgeConfirmation.model_validate(
+                {**confirmation.model_dump(), "generation_id": generation_id}
+            )
+            await session.execute(
+                insert(Operation).values(
+                    operation_id=operation_id,
+                    actor_id=actor,
+                    action="PUBLISH",
+                    version_id=command.version_id,
+                    revision_no=command.expected_revision_no,
+                    target_id=command.version_id,
+                    idempotency_key=command.idempotency_key,
+                    input_hash=input_hash,
+                    confirmation_snapshot=stored.model_dump(mode="json"),
+                    state="CONFIRMED",
+                )
+            )
+            if ready is None:
+                await session.execute(
+                    insert(Generation).values(
+                        generation_id=generation_id,
+                        version_id=command.version_id,
+                        revision_no=command.expected_revision_no,
+                        embedding_provider=index.provider,
+                        embedding_model=index.model,
+                        embedding_dimension=index.dimension,
+                        index_version=index.index_version,
+                        chunking_version=index.chunking_version,
+                        input_hash=generation_hash,
+                        build_method="GENERATED",
+                        state="BUILDING",
+                    )
+                )
+                await session.execute(
+                    insert(Task).values(
+                        task_id=managed_id("TASK"),
+                        operation_id=operation_id,
+                        operation_action="PUBLISH",
+                        task_type="INDEX",
+                        version_id=command.version_id,
+                        revision_no=command.expected_revision_no,
+                        generation_id=generation_id,
+                        owner_id=owner_id,
+                        trace_id=trace_id,
+                        state="QUEUED",
+                    )
+                )
+            document.row_version += 1
+            await session.flush()
+            operation = await session.get(Operation, operation_id)
+            assert operation is not None
+            return await self._publication_result(session, operation, scope, replayed=False)
 
     async def _parse_rows(
         self, session: AsyncSession, task_id: str

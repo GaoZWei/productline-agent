@@ -12,6 +12,15 @@
 | 4 | [知识管理授权契约](KNOWLEDGE_AUTHORIZATION.md) | 查看KB-02.1 Java接口与KB-02.2 Python Client、动作权限及人工确认边界 |
 | 5 | [资料、版本与存储隔离设计](KNOWLEDGE_STORAGE_DESIGN.md) | 查看隔离八表、上传解析应用、KB-02.7～02.10管理/预览/原件HTTP及收口、发布边界 |
 | 6 | [KB-02收口验收入口及边界](KNOWLEDGE_STORAGE_DESIGN.md#十六kb-02-管理底座收口验收) | 复现真实Java授权、管理接口、实际Agent重启及黄金订单检查，区分后续未验范围 |
+| 7 | [KB-03.1发布候选与确认校验](KNOWLEDGE_STORAGE_DESIGN.md#十七kb-031-发布确认请求快照与候选版本校验) | 查看已实现的Python确认契约、内容绑定与候选规则，以及未接入的发布事务边界 |
+| 8 | [KB-03.2发布接收与索引预留](KNOWLEDGE_STORAGE_DESIGN.md#十八kb-032-发布接收事务幂等操作与候选索引任务预留) | 查看幂等接收、事务复查、READY复用、任务预留及尚未执行的索引/发布边界 |
+| 9 | [KB-03.3候选索引构建与失败隔离](KNOWLEDGE_STORAGE_DESIGN.md#十九kb-033-按版本构建候选索引与失败隔离) | 查看领取、事务外生成、完整保存、取消/迟到结果及最终发布前的边界 |
+| 10 | [KB-03.4最终发布复查与原子切换](KNOWLEDGE_STORAGE_DESIGN.md#二十kb-034-最终授权复查与发布切换事务) | 查看管理库发布、完整证据复核、幂等回执和仍未切换的问答读源 |
+| 11 | [KB-03.5停用确认与原子停用](KNOWLEDGE_STORAGE_DESIGN.md#二十一kb-035-停用确认权限复查与停用事务) | 查看独立DISABLE授权、旧意图失效、历史保留及旧键不误停新版 |
+| 12 | [KB-03.6索引失败任务受控重试](KNOWLEDGE_STORAGE_DESIGN.md#二十二kb-036-索引失败任务的受控重试) | 查看重试链、RETRY_INDEX权限隔离及READY后仍需新发布确认 |
+| 13 | [KB-03.7首批纳管前置校验](KNOWLEDGE_STORAGE_DESIGN.md#二十三kb-037-首批演示规范纳管前置校验) | 查看授权后的只读源快照、完整索引校验及尚未执行的实际纳管 |
+| 14 | [KB-03.8首批规范受确认纳管](KNOWLEDGE_STORAGE_DESIGN.md#二十四kb-038-首批演示规范受确认纳管) | 查看整批确认、原件复制、旧源锁内复查、原子纳管和成功重放 |
+| 15 | [KB-03.9管理库已发布知识检索](KNOWLEDGE_STORAGE_DESIGN.md#二十五kb-039-管理库已发布知识检索读取) | 查看发布指针/范围过滤、双路同一快照、原引用及管理证据定位 |
 
 ## 相关入口
 

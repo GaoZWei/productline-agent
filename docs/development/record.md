@@ -2043,3 +2043,179 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 附件采用固定MIME、安全UTF-8显示名及ASCII回退名，禁止缓存和内容嗅探，不接收客户端文件key或物理路径。
 - 文件缺失、大小/哈希不符或非法路径/显示名返回固定安全错误，不返回部分原件，也不替换为当前正文或仓库资料。
 - 下载不恢复或改变任务/操作，不解析或写索引；原件损坏不改写既有正文，既有预览与LEGACY问答源保持。
+
+## 2026-11-06 KB-03.1 发布确认请求、快照与候选版本校验
+
+### 核心解决的问题
+
+历史预览及早先授权不能作为当前发布依据。增加发布专用候选及确认校验，避免草稿变化、换人提交或权限撤销后沿用旧审查内容。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/knowledge_publication.py`：`KnowledgePublicationTarget`、`KnowledgePublicationCandidate`、`KnowledgePublicationConfirmCommand`。
+- `agent-service/app/repositories/managed_knowledge.py`：`PublicationRead`、`ManagedKnowledgeRepository.read_publication_candidate`。
+- `agent-service/app/services/knowledge_publication.py`：`KnowledgePublicationService.prepare`、`validate_confirmation`、`publication_digest`。
+
+### 实现的核心功能
+
+- 每次先Java PUBLISH授权，再按资料归属及权限范围读取一个一致的候选快照，校验当前草稿、成功解析、并发计数及数据库UTC有效日期。
+- 返回可审查的正文、元数据、分块及绑定实际用户/内容/原发布指针的摘要，明确确认时重新授权及重建事实，拒绝过期输入。
+- 仅返回应用层内部确认快照，不新增HTTP或确认记录，不预留执行权或执行发布；后续写事务仍须复核，摘要不能授予权限。
+
+## 2026-11-06 KB-03.2 发布接收事务、幂等操作与候选索引任务预留
+
+### 核心解决的问题
+
+确认校验到保存人工意图之间仍可能出现修订变化或并发请求。通过同一短事务复查知识事实和确认摘要、保护幂等身份并保存索引预留，阻止重复排队或旧确认取得执行权。
+
+### 实现的核心代码
+
+- `agent-service/app/services/knowledge_publication.py`：`KnowledgePublicationService.accept`。
+- `agent-service/app/repositories/managed_knowledge.py`：`accept_publication`、`_publication_candidate`、`_publication_result`。
+- `agent-service/app/knowledge/publication.py`：`publication_confirmation`及请求/批次/确认摘要函数。
+- `agent-service/app/schemas/knowledge_publication.py`：`KnowledgePublicationIndexIdentity.from_settings`、`KnowledgePublicationAcceptance`。
+
+### 实现的核心功能
+
+- 每次Java PUBLISH授权后，按actor/action/key串行化幂等、按资料锁复查当前修订、计数、状态、权限范围和确认摘要，同键返回原处理状态，新键不能绕过未完成操作。
+- 原子保存CONFIRMED操作、候选索引身份及必要的QUEUED任务，预留资料row_version，SQL失败完整回滚；旧发布指针、版本封存关系和原件不变。
+- 服务端沿用现有索引配置，匹配READY候选则复用且不新建任务，否则创建空BUILDING批次；不执行模型、写Chunk或发布，原任务中断后重放仍返回原失败记录。
+
+## 2026-11-06 KB-03.3 按版本构建候选索引与失败隔离
+
+### 核心解决的问题
+
+已确认资料需要完整索引才能继续发布，但批量模型调用可能超时、返回错误向量，或在草稿更新后才结束。增加执行权校验和完整候选保存，避免半批索引及迟到结果影响当前依据。
+
+### 实现的核心代码
+
+- `agent-service/app/services/knowledge_index_build.py`：`KnowledgeIndexBuildService.process`。
+- `agent-service/app/repositories/knowledge_index_build.py`：`IndexBuildClaim`、`claim_index`、`finish_index`、`fail_index`。
+- `agent-service/app/knowledge/index_build.py`：`parse_index_input`、`index_chunk_records`、`validate_index_records`。
+
+### 实现的核心功能
+
+- 领取前及完整保存前Java PUBLISH授权，短事务核对实际确认人、owner、当前修订、预留计数、确认快照和索引身份，事务外确定性分块及批量生成向量。
+- 验证完整Chunk集合、正文身份和1536维有限非零向量，完整清单同事务写入后才标READY/任务成功；内部tuple在pgvector写入边界转list。
+- 超时、异常响应、权限撤销、主动取消、草稿变化、恢复后迟到结果及SQL写入失败均有受控结果，整批回滚并保留旧发布指针；PUBLISH操作不标成功，无自动轮询、索引重试或最终发布。
+
+## 2026-11-06 KB-03.4 最终授权复查与发布切换事务
+
+### 核心解决的问题
+
+候选构建完成后仍可能发生权限撤销、修订或证据变化；分开替代旧版与切换指针也可能造成中间状态。通过完整证据复核和最终短事务完成管理库发布，使重复调用不能重复切换或恢复旧版。
+
+### 实现的核心代码
+
+- `agent-service/app/services/knowledge_publication_finalize.py`：`KnowledgePublicationFinalizeService.finalize`。
+- `agent-service/app/repositories/knowledge_publication_finalize.py`：`prepare_finalization`、`commit_finalization`、`reject_finalization`、`finalization_hash`。
+- `agent-service/app/schemas/knowledge_publication.py`：`KnowledgePublicationReceipt`。
+- `agent-service/app/knowledge/index_build.py`：`IndexEvidenceInput`复用构建与最终发布的完整清单校验。
+
+### 实现的核心功能
+
+- 准备前及最终提交前重新Java PUBLISH授权，仅原确认人可完成操作，事务外复核全部已存分块/向量，最终锁内核对确认、预留计数、日期、READY身份及完整证据摘要。
+- 库→资料→任务→操作→批次加锁，原子替代旧版、封存新版、切换指针、增加资料/库发布计数并完成原操作；任何写入失败完整回滚，旧原件与Chunk/向量保留。
+- 成功重放返回原发布时间及当前历史状态，不再次发布或恢复旧版；SQL瞬时失败可对原操作显式重试，READY复用路径无需新建任务也须完整复核。
+- 仅管理库内部发布，不新增HTTP或切换LEGACY问答源，不调用模型或自动完成停用/纳管。
+
+## 2026-11-07 KB-03.5 停用确认、权限复查与停用事务
+
+### 核心解决的问题
+
+当前依据需要安全退出发布集合，旧确认、重复请求或迟到索引不能误停新版或撤销停用。新增明确停用和事务内版本核对，保留旧引用并失效旧事实上的未完成意图。
+
+### 实现的核心代码
+
+- `agent-service/app/services/knowledge_disable.py`：`KnowledgeDisableService.prepare/disable`。
+- `agent-service/app/repositories/knowledge_disable.py`：`prepare_disable`、`disable`、`_invalidate_pending`。
+- `agent-service/app/schemas/knowledge_disable.py`：目标、审查、明确确认及停用回执Schema。
+- `agent-service/app/knowledge/disable.py`：独立停用确认摘要和请求哈希。
+
+### 实现的核心功能
+
+- 每次审查、提交和重放检查Java DISABLE权限，事务内核对指定当前发布版本、封存身份、元数据、资料计数及绑定实际用户的确认摘要，不用PUBLISH授权代替。
+- 同事务置DISABLED、清当前指针、递增资料/库计数、保存实际用户审计并失效同资料未完成的发布/索引意图；失败完整回滚，重放不误停后来发布的新版本。
+- 不恢复旧版、不删除原件/向量或新增任务，已完成任务和READY候选保留；审查不加载正文或向量，索引损坏也不妨碍撤回身份明确的当前依据。
+- 仅管理库内部应用，不提供停用HTTP、模型调用、索引重试或问答切源。
+
+## 2026-11-07 KB-03.6 索引失败任务的受控重试
+
+### 核心解决的问题
+
+失败任务直接重新排队会覆盖原审计，重复确认可能从同一节点分叉并误用旧发布权限。通过新人工意图和单一失败链保存每次尝试，重试成功也不自动发布。
+
+### 实现的核心代码
+
+- `agent-service/app/services/knowledge_index_retry.py`：`KnowledgeIndexRetryService.prepare/retry`。
+- `agent-service/app/repositories/knowledge_index_retry.py`：`prepare_retry`、`accept_retry`、`_source`、`_retry_result`。
+- `agent-service/app/repositories/knowledge_index_build.py`及`app/services/knowledge_index_build.py`：固定动作授权、父任务验证及重试READY完成逻辑。
+- `agent-service/app/schemas/knowledge_index_retry.py`、`app/knowledge/index_retry.py`：新重试目标/确认/回执及请求摘要。
+
+### 实现的核心功能
+
+- 审查、提交、重放及执行/保存前分别检查RETRY_INDEX权限，仅允许当前草稿修订的FAILED/INTERRUPTED INDEX链尾，不允许解析、成功、过期任务或隐式改变索引身份。
+- 按幂等键及资料锁原子创建新操作、批次和任务，尝试号由直接父节点+1，原失败及审计保留，不创建规范版本或修订，同键重放及不同键竞争不重复分叉。
+- 复用确定性构建器但按仓库动作隔离PUBLISH和RETRY_INDEX；重试成功仅READY及新重试操作成功，必须经新的PUBLISH确认才能复用候选发布，迟到结果不能撤销停用。
+- 任务查询的尝试号与既有BIGINT存储范围一致，HTTP重试仍未接入；不新增迁移、自动调度或问答切源。
+
+## 2026-11-07 KB-03.7 首批演示规范纳管前置校验
+
+### 核心解决的问题
+
+旧索引行数正确不代表原文、引用和向量仍匹配，直接纳管可能复制已经脱节的证据。新增只读源核对，将损坏、配置变化和身份占用在实际复制前明确拒绝。
+
+### 实现的核心代码
+
+- `agent-service/app/services/knowledge_import.py`：`KnowledgeImportPreflightService.check`。
+- `agent-service/app/repositories/knowledge_import.py`：`KnowledgeImportPreflightRepository.read_source`。
+- `agent-service/app/knowledge/import_preflight.py`：`capture_import_files`、`validate_import_source`、`file_fingerprint`。
+- `agent-service/app/schemas/knowledge_import.py`：`KnowledgeImportPreflight`、`KnowledgeImportVersionCheck`。
+
+### 实现的核心功能
+
+- 每次先分别查询Java UPLOAD/PUBLISH权限，再以NOFOLLOW只读捕获固定catalog/原件；复用正文规范化和稳定分块，按明确替代关系核对14逻辑资料/16版本及80块。
+- 旧索引和目标库状态在同一可重复读只读事务读取，完整比对目录元数据、正文哈希、分块内容/引用定位、检索文本、向量及配置身份；不隐式调用模型补齐。
+- 返回演示标识、实际检查人、清单、catalog哈希及完整源指纹，返回前重读原件；允许无关上传共存，拒绝已纳管标记或引用身份冲突，不分配管理UUID或虚构旧发布时间。
+- 仅内部只读应用，无HTTP/CLI纳管入口、原件复制、管理记录写入或问答切源；报告不是实际导入授权或发布回执。
+
+## 2026-11-07 KB-03.8 首批演示规范受确认纳管
+
+### 核心解决的问题
+
+纳管前置检查之后仍缺少人工确认、原件留存和整批版本建立，重复确认与旧CLI并行写入可能产生半批资料或引用脱节。新增整批原子纳管和成功重放，失败时旧库继续服务且不留下部分管理发布集合。
+
+### 实现的核心代码
+
+- `agent-service/app/services/catalog_import.py`：`KnowledgeCatalogImportService.prepare/confirm`。
+- `agent-service/app/repositories/catalog_import.py`：`KnowledgeCatalogImportRepository.commit/replay`。
+- `agent-service/app/knowledge/catalog_import.py`：`import_digest`、`import_request_hash`、`import_plan`。
+- `agent-service/app/schemas/knowledge_import.py`：候选、明确确认、版本结果及整批回执。
+- `agent-service/app/services/knowledge_import.py`及`app/repositories/knowledge_import.py`：复用已授权的源读取和锁内源快照检查。
+
+### 实现的核心功能
+
+- 审查、确认和成功重放分别检查Java UPLOAD/PUBLISH，确认摘要绑定实际用户、范围、源指纹、库计数及索引；复制完成后再次授权，拒绝自报状态、原文或管理身份。
+- 原件按已验证字节复制到独立目录，确认后的新管理身份和原件key可确定性复用；最终事务锁旧知识表及管理库，完整重查源后原子建立14资料、16版本/修订/READY批次、80块及对应UPLOAD/PUBLISH操作和PARSE/INDEX完成审计。
+- 版本来源CATALOG_IMPORT、索引COPIED_LEGACY，14版PUBLISHED、2版HISTORICAL，保留旧引用和替代关系，历史原发布时间未知仍为空；管理库发布计数只递增一次，LEGACY读源不变。
+- 同键成功重放不再复制或恢复后来停用的版本，不同键竞争不能覆盖已纳管关系；SQL故障整批回滚，已复制未引用原件保留供受控重试，不自动清理。
+- 仅内部应用，不新增表/迁移、HTTP/CLI、启动自动纳管、模型调用或问答切源。
+
+## 2026-11-07 KB-03.9 管理库已发布知识检索读取
+
+### 核心解决的问题
+
+管理库发布后仍缺少与当前指针绑定的检索读取，按READY批次直接取块会召回草稿或旧版本，跨事务双路检索也可能混用不同发布状态。新增发布关系过滤和同一只读快照，将当前证据及实际管理版本一起交付下游。
+
+### 实现的核心代码
+
+- `agent-service/app/services/managed_knowledge_search.py`：`ManagedKnowledgeSearchService.retrieve`、`ManagedKnowledgeRetrievalResult`。
+- `agent-service/app/repositories/managed_knowledge_search.py`：`ManagedKnowledgeSearchRepository.search`、双路SQL、`_validate_candidate`及`validate_managed_query`。
+- `agent-service/app/schemas/managed_knowledge_search.py`：管理过滤器、数量/阈值、读取上下文及证据定位。
+
+### 实现的核心功能
+
+- 每次Java READ后核对实际身份、只读策略及范围，完整问题先生成查询向量；SQL在模型完成后才开始，事务结束后复用既有RRF融合。
+- 沿当前资料指针、PUBLISHED版本、封存修订和READY发布批次查询，权限、日期、产品/卫星/级别、类型/版本及完整索引身份在TopK前过滤，两路和库计数共享可重复读只读快照。
+- 校验命中的封存元数据、正文、批次输入及稳定章节分块，保留规范引用ID、版本、原文和全部合并Chunk；附实际管理资料/版本/修订/批次定位，损坏命中及持久化错误明确失败，不回退旧表。
+- 内部显式读取管理库与默认configured_source_mode分开，空管理库返回空结果；不变更现有Workflow/HTTP/前端、重排/回答模型、旧Run或默认LEGACY源，不实现全量动态就绪。

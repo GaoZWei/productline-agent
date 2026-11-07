@@ -177,6 +177,46 @@ test-knowledge-management: ## 验证知识原件、上传修订及管理HTTP接�
 test-knowledge-management-e2e: ## KB-02隔离真实Java/Agent HTTP与进程重启验收
 	./scripts/test-knowledge-management-e2e.sh
 
+.PHONY: test-knowledge-publication
+test-knowledge-publication: ## 发布确认、幂等接收及隔离发布事务回归，不切换问答读源
+	cd agent-service && uv run --frozen pytest -q tests/test_knowledge_publication.py
+	./scripts/test-agent-persistence.sh -k knowledge_management_publication
+
+.PHONY: test-knowledge-index-build
+test-knowledge-index-build: ## KB-03.3候选索引构建与失败隔离，模型替身，不执行最终发布
+	cd agent-service && uv run --frozen pytest -q tests/test_knowledge_index_build.py
+	./scripts/test-agent-persistence.sh -k knowledge_management_index_build
+
+.PHONY: test-knowledge-publication-finalize
+test-knowledge-publication-finalize: ## KB-03.4最终发布授权、完整性和切换事务，不切换问答读源
+	cd agent-service && uv run --frozen pytest -q tests/test_knowledge_publication_finalize.py
+	./scripts/test-agent-persistence.sh -k knowledge_management_publication_finalize
+
+.PHONY: test-knowledge-disable
+test-knowledge-disable: ## KB-03.5停用确认、授权、幂等和原子事务，不切换问答读源
+	cd agent-service && uv run --frozen pytest -q tests/test_knowledge_disable.py
+	./scripts/test-agent-persistence.sh -k knowledge_management_disable
+
+.PHONY: test-knowledge-index-retry
+test-knowledge-index-retry: ## KB-03.6人工索引重试及共享构建回归，模型替身，不自动发布
+	cd agent-service && uv run --frozen pytest -q tests/test_knowledge_index_retry.py tests/test_knowledge_index_build.py
+	./scripts/test-agent-persistence.sh -k knowledge_management_index_retry
+
+.PHONY: test-knowledge-import-preflight
+test-knowledge-import-preflight: ## KB-03.7首批纳管只读前置检查，隔离假向量，不执行复制或切源
+	cd agent-service && uv run --frozen pytest -q tests/test_knowledge_import_preflight.py
+	./scripts/test-agent-persistence.sh -k knowledge_management_import_preflight
+
+.PHONY: test-knowledge-catalog-import
+test-knowledge-catalog-import: ## KB-03.8整批受确认纳管、原件与事务回滚，隔离假向量，不切源
+	cd agent-service && uv run --frozen pytest -q tests/test_catalog_import.py tests/test_knowledge_import_preflight.py
+	./scripts/test-agent-persistence.sh -k 'knowledge_management_catalog_import or knowledge_management_import_preflight'
+
+.PHONY: test-knowledge-managed-search
+test-knowledge-managed-search: ## KB-03.9管理库已发布知识双路检索、只读快照与过滤，不切换默认源
+	cd agent-service && uv run --frozen pytest -q tests/test_managed_knowledge_search.py
+	./scripts/test-agent-persistence.sh -k knowledge_management_search
+
 test-knowledge-loading: ## 验证 M4.3 文档加载、分块、稳定ID和重复检测
 	cd agent-service && uv run --frozen pytest -q tests/knowledge
 
