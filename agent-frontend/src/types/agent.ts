@@ -269,7 +269,7 @@ export interface AgentCapabilitiesResponse {
   message_api_enabled: true;
   result_kinds: AgentResultKind[];
   model: ModelCapabilities;
-  knowledge_index: KnowledgeIndexCapabilities;
+  knowledge_index: KnowledgeIndexCapabilities | import("./managedKnowledgeIndex").ManagedKnowledgeIndexCapabilities;
 }
 // 确认事件数据
 export interface ReviewApprovalDecision {

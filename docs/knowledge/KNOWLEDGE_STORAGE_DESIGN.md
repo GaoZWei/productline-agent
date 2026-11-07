@@ -1017,3 +1017,57 @@ HTTP入口尚未接入，现有任务查询`retry_available=false`继续表示�
 `make test-knowledge-managed-search`覆盖权限先行、模型前置、输入/向量严格校验、无降级回退、SQL范围过滤、当前指针/封存批次、原引用与管理定位、读取期间无DML、两路同一快照、损坏命中拒绝及新版草稿/READY不入选、最终发布后替换旧依据。
 隔离库通过真实KB-03.8纳管和上传/发布应用准备数据，查询与文档向量是明确假数据；并发测试用另一事务模拟停用提交，不冒充HTTP并发或真实问答质量评测。实际结果见[STATUS](../STATUS.md)。
 本任务停在内部管理检索，无运行环境纳管、部署或真实模型调用；下一最小任务为**KB-03.10：管理库动态就绪检查**。
+
+## 二十六、KB-03.10 管理库动态就绪检查
+
+### 解决的问题
+
+旧就绪检查固定比较16份catalog，无法反映新上传、停用或零发布集合；只检查TopK命中还会漏掉未召回的坏块。若将未解析成功的指针通过内连接排除，也可能把剩下的部分资料误判为全库可用。
+本任务对当前授权发布集合做完整确定性检查，让无发布、证据不完整和配置不匹配得到不同结果，同时保持既有LEGACY能力接口不变。
+
+### 核心作用
+
+内部服务先调用Java裁决READ，再从Python自有知识表取得同一发布快照，包括库模式/计数、发布声明/指针、封存修订/批次和全部块；不接受调用方指定权限范围或固定文档数。
+SQL连接释放后在线程中检查封存正文、元数据、完整批次身份、全部块及向量，输出四种就绪状态、动态计数和安全文案；检索与就绪复用相同证据校验规则。
+检查不调用模型、不修复数据、不读取原件，也不选择或切换默认源；READY只说明当前快照索引可用，问题适用范围仍由检索过滤裁决。
+
+### 26.1 发布集合及快照
+
+[Repository](../../agent-service/app/repositories/managed_knowledge_index.py)的`read_published_snapshot`在REPEATABLE READ READ ONLY内读取DEFAULT库和授权范围内PUBLISHED声明或当前指针。
+版本/修订/批次使用外连接，保留错误指针、未就绪批次或无法解析的发布关系，不能先按READY过滤再统计；修订缺失导致无法裁决权限时失败关闭。正常DRAFT/HISTORICAL、已停用且清指针的版本、非当前候选/失败批次均不进入集合。
+资料按document_id归组，同一资料出现互相冲突的发布声明和指针视为不完整；封存修订、完整批次及全部Chunk在同一数据库快照取出，转为只读映射/元组，不携带活ORM会话到后续线程。
+就绪不按查询日期或产品范围收窄；已发布但未来/过期的资料仍检查索引完整性，实际问答是否适用由KB-03.9的范围/日期过滤决定。
+
+### 26.2 全量证据与状态
+
+[共享证据校验](../../agent-service/app/knowledge/managed_index_evidence.py)提取自管理检索：先验证PUBLISHED版本、封存修订/批次归属、正文/元数据哈希及批次输入哈希，再检查每个块的正文、哈希、章节、token、检索文本及有限非零1536维向量。
+全量就绪额外核对声明数量与实际集合、稳定Chunk ID、连续顺序及缺失/重复/额外块；支持的heading-v1从封存正文重新确定性解析并逐项比较。未支持的分块规则只能报告身份不匹配，不能跳过解析后声称READY；仍检查其结构、输入绑定、块哈希和向量。
+批次输入哈希按**已存**完整身份复核，不拿当前配置替换原身份造成误报。`publication_generation_hash`仅扩展可接受的完整身份类型，原有生成/纳管哈希序列化不变。
+
+| 状态 | 条件 | 原因/中文文案 |
+|---|---|---|
+| NOT_INDEXED | 授权发布集合为空 | NO_PUBLISHED_DOCUMENTS / 无已发布资料 |
+| INCOMPLETE | 归属/指针/封存/批次/全量块存在缺陷 | PUBLISHED_INDEX_INCOMPLETE / 已发布索引不完整 |
+| INDEX_MISMATCH | 结构与证据检查完成，但完整身份与配置不一致或混合 | INDEX_IDENTITY_MISMATCH / 已发布索引与当前配置不匹配 |
+| READY | 非空集合完整且全部身份匹配 | PUBLISHED_INDEX_READY / 已发布索引可用 |
+
+缺陷优先于配置不匹配；不同旧模型标签若伴随过期输入哈希，属于证据损坏INCOMPLETE，合法旧索引与新配置不同才是INDEX_MISMATCH。全部停用后返回零发布，不去旧16/80补齐。
+
+### 26.3 契约、权限和失败
+
+[服务](../../agent-service/app/services/managed_knowledge_index.py)的`ManagedKnowledgeIndexCapabilityService.get`每次重新Java READ，核对实际用户、动作和只读策略；授权不持有SQL连接。完整检查在释放连接后运行，无模型、原件存储、启动恢复或自动重试依赖。
+[Schema](../../agent-service/app/schemas/managed_knowledge_index.py)覆写旧契约的正数预期为明确非负，新增MANAGED来源、当前configured_source_mode、release_revision和受控原因/中文文案，完整身份包括chunking_version。响应只含计数和安全身份，不输出正文、向量、文档ID、原件路径或校验异常细节。
+
+- expected_document_count：有发布声明/当前指针的资料数，错误声明也不能被静默漏计。
+- document_count：能唯一解析到当前PUBLISHED版、修订及批次的资料数，不等于已经通过全文/向量校验；两种资料数相同仍可能INCOMPLETE。
+- chunk_count：本次声明批次实际读取的去重批次分块数，不是固定80，也不是检索TopK。
+- stored_index：仅全部资料身份完整且一致时公开，否则为空；expected_index来自服务端现有配置。
+
+SQL失败返回脱敏KNOWLEDGE_PERSISTENCE_UNAVAILABLE，库状态或权限范围无法解析时失败关闭，不伪装NOT_INDEXED；普通封存/块缺陷通过INCOMPLETE返回，不保存原始异常。
+
+### 26.4 前端同步与停止线
+
+前端新增[对应类型](../../agent-frontend/src/types/managedKnowledgeIndex.ts)及[校验器](../../agent-frontend/src/api/managedKnowledgeIndex.ts)，能力Client只对显式MANAGED分支接受零计数并检查状态/原因/身份组合，未标记或LEGACY继续沿用旧正数预期；安全整数以外的计数/修订拒绝解析。
+服务端旧`/api/agent/capabilities`及`/knowledge-index`仍使用原LEGACY服务/Schema，本任务不把管理检查装配到HTTP、不改变现有启动行为或问答来源。前端契约准备不代表当前接口已返回新形态，也不增加KB-04页面或按钮。
+`make test-knowledge-managed-readiness`验证离线规则、真实隔离全量检查、全部停用、单份新发布、坏块/坏指针/混合身份、同一快照与SQL外计算，并回归共享规则后的管理检索和前端新旧契约；数据/向量均为隔离测试夹具，没有真实模型费用或运行库操作。实际结果见[STATUS](../STATUS.md)。
+本任务停在内部动态就绪及契约同步，不新增表/迁移/配置、HTTP/CLI或切源；下一最小任务为**KB-03.11：统一知识读源选择**。

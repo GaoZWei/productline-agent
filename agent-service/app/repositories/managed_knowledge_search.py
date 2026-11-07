@@ -10,12 +10,14 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.database import Database
 from app.knowledge.embeddings import EmbeddingIndexDescriptor, QueryEmbedding
-from app.knowledge.managed_parsing import ParsedKnowledgeRevision, parse_managed_revision
-from app.knowledge.publication import publication_generation_hash
+from app.knowledge.managed_index_evidence import (
+    PreparedManagedIndex,
+    prepare_managed_index,
+    validate_managed_chunk,
+)
 from app.knowledge.search import (
     KeywordSearchHit,
     VectorSearchHit,
-    build_search_document,
     preprocess_keyword_query,
 )
 from app.models.managed_knowledge import (
@@ -44,7 +46,6 @@ from app.schemas.managed_knowledge import (
 )
 from app.schemas.managed_knowledge_processing import (
     ManagedKnowledgeChunkRecord,
-    ManagedKnowledgeConfirmation,
     ManagedKnowledgeGenerationRecord,
 )
 from app.schemas.managed_knowledge_search import (
@@ -232,7 +233,7 @@ class ManagedKnowledgeSearchRepository:
                 )
                 keyword_rows = (await session.execute(keyword)).all()
                 vector_rows = (await session.execute(vector)).all()
-                cache: dict[tuple[str, int, str], ParsedKnowledgeRevision] = {}
+                cache: dict[tuple[str, int, str], PreparedManagedIndex] = {}
                 evidence: dict[str, ManagedKnowledgeEvidence] = {}
                 keywords: list[KeywordSearchHit] = []
                 vectors: list[VectorSearchHit] = []
@@ -270,79 +271,38 @@ class ManagedKnowledgeSearchRepository:
         version: Version,
         revision: Revision,
         generation: Generation,
-        cache: dict[tuple[str, int, str], ParsedKnowledgeRevision],
+        cache: dict[tuple[str, int, str], PreparedManagedIndex],
     ) -> ManagedKnowledgeEvidence:
-        """校验命中原文、封存元数据和稳定章节定位，不以相同块数代替证据完整性。"""
+        """命中校验与全量就绪共用规则，避免两套实现对同一封存证据结论不同。"""
 
         key = (version.version_id, revision.revision_no, generation.generation_id)
         if key not in cache:
-            ManagedKnowledgeVersionState.model_validate(
-                {name: getattr(version, name) for name in ManagedKnowledgeVersionState.model_fields}
-            )
-            snapshot = ManagedKnowledgeRevisionSnapshot.model_validate(
+            prepared = prepare_managed_index(
+                {
+                    name: getattr(version, name)
+                    for name in ManagedKnowledgeVersionState.model_fields
+                },
                 {
                     name: getattr(revision, name)
                     for name in ManagedKnowledgeRevisionSnapshot.model_fields
-                }
-            )
-            if snapshot.metadata_digest() != revision.metadata_hash or snapshot.body is None:
-                raise ValueError("sealed metadata or body mismatch")
-            ManagedKnowledgeGenerationRecord.model_validate(
+                },
                 {
                     name: getattr(generation, name)
                     for name in ManagedKnowledgeGenerationRecord.model_fields
-                }
+                },
+                revision.metadata_hash,
             )
-            confirmation = ManagedKnowledgeConfirmation(
-                actor_id=version.created_by,
-                action="PUBLISH",
-                document_id=version.document_id,
-                version_id=version.version_id,
-                revision_no=revision.revision_no,
-                raw_hash=snapshot.raw_hash,
-                normalized_hash=snapshot.normalized_hash,
-                metadata_hash=revision.metadata_hash,
-                expected_row_version=0,
-            )
-            if generation.input_hash != publication_generation_hash(
-                confirmation, version.citation_document_id, self.index
-            ):
-                raise ValueError("sealed generation identity mismatch")
-            parsed = parse_managed_revision(
-                snapshot.body.encode(),
-                citation_document_id=version.citation_document_id,
-                title=snapshot.title,
-                file_format=snapshot.file_format,
-            )
-            if generation.chunk_count != len(parsed.chunks):
-                raise ValueError("generation count does not match parsed body")
-            cache[key] = parsed
-        record = ManagedKnowledgeChunkRecord.model_validate(
+            if prepared.index.model_dump() != self.index.model_dump() or prepared.parsed is None:
+                raise ValueError("candidate index does not match configured identity")
+            cache[key] = prepared
+        validate_managed_chunk(
             {
                 **{name: getattr(chunk, name) for name in ManagedKnowledgeChunkRecord.model_fields},
                 "embedding": tuple(float(value) for value in chunk.embedding),
                 "section_path": tuple(chunk.section_path),
-            }
+            },
+            cache[key],
         )
-        expected = next(
-            (item for item in cache[key].chunks if item.chunk_id == record.chunk_id), None
-        )
-        if expected is None or (
-            record.chunk_index,
-            record.section_path,
-            record.content,
-            record.content_hash,
-            record.token_count,
-            record.search_document,
-        ) != (
-            expected.chunk_index,
-            expected.section_path,
-            expected.content,
-            expected.content_hash,
-            expected.token_count,
-            build_search_document(content=expected.content, section_path=expected.section_path),
-        ):
-            raise ValueError("chunk does not match sealed body")
         return ManagedKnowledgeEvidence(
             citation_document_id=version.citation_document_id,
             chunk_id=chunk.chunk_id,

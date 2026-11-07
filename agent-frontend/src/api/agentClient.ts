@@ -1,4 +1,5 @@
 import axios, { AxiosError } from "axios";
+import { isManagedKnowledgeIndexCapabilities } from "./managedKnowledgeIndex";
 
 import type {
   AgentCapabilitiesResponse,
@@ -313,6 +314,10 @@ function isAgentCapabilitiesResponse(value: unknown): value is AgentCapabilities
     ? value.model.provider === "openai_compatible" && isNonEmptyString(value.model.model_name)
     : value.model.provider === null && value.model.model_name === null;
   const knowledge = value.knowledge_index;
+  if (knowledge.source === "MANAGED") {
+    return modelValid && isManagedKnowledgeIndexCapabilities(knowledge);
+  }
+  if (knowledge.source !== undefined && knowledge.source !== "LEGACY") return false;
   const statusValid = ["NOT_INDEXED", "INCOMPLETE", "INDEX_MISMATCH", "READY"].includes(
     String(knowledge.status),
   );

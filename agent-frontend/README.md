@@ -44,6 +44,12 @@ M7.6-G 订单业务与统一Agent页面，使用 Vue 3、TypeScript、Vite、Pin
 `src/api/agentMessageTimeout.spec.ts`使用真实Axios Fetch适配器、模拟响应和虚拟时钟验证35秒响应、
 300秒超时和普通查询20秒超时，组件测试核对超时提示及重试按钮；这些测试不发送外部模型请求，也不代表真实模型性能。
 
+## 管理库就绪契约（KB-03.10）
+
+类型`ManagedKnowledgeIndexCapabilities`及校验器`isManagedKnowledgeIndexCapabilities`支持显式MANAGED结果，包含实际发布计数、完整分块索引身份、当前默认模式及发布修订；零发布为NOT_INDEXED并显示语义“无已发布资料”。
+现有能力Client按source区分：MANAGED使用新契约并校验状态/原因/计数/身份组合，旧未标记或LEGACY结果保留expected_document_count>0约束，不把未知来源当旧库。新计数/修订使用安全整数校验，无法精确表示的JSON数字失败关闭。
+本次只同步类型和响应校验及测试，没有新增知识库页面、请求入口或切源按钮；服务端新就绪服务尚未装配到现有HTTP，不能据此称页面已使用管理库。`npm test -- src/api/managedKnowledgeIndex.spec.ts src/api/agentUnifiedClient.spec.ts`验证新旧分支。
+
 ## 本地开发
 
 先启动 Java、Python 服务，再启动 Vite：

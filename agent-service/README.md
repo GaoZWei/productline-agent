@@ -287,7 +287,7 @@ FastAPI lifespan只装配`knowledge_management_service`，不创建目录或访�
 显式`start()`或首次已授权管理调用激活单实例恢复：旧owner未完成任务标记中断，不自动重试模型或旧任务。
 启用管理调用前需显式执行已有迁移；缺少表会返回脱敏的持久化不可用错误，不影响普通应用启动。
 KB-02.7～02.10已接入管理、上传修订、正文预览和原件下载HTTP；后台索引执行、发布、停用及页面仍待实现。
-KB-02管理底座已通过收口验收，KB-03.1～03.9确认校验、幂等接收、候选构建、管理库发布/停用/人工重试、纳管及管理库检索应用已完成；下一最小任务为KB-03.10管理库动态就绪检查。
+KB-02管理底座已通过收口验收，KB-03.1～03.10确认、构建、管理库发布/停用/重试、纳管、管理检索与动态就绪应用已完成；下一最小任务为KB-03.11统一知识读源选择。
 
 验收入口：根目录`make test-knowledge-management`；已有专用测试PostgreSQL时设置
 `AGENT_PERSISTENCE_TEST_DATABASE_URL`，在agent-service执行
@@ -970,7 +970,19 @@ Repository在REPEATABLE READ READ ONLY事务读取旧索引和目标库状态，
 SQL连接释放后复用现有RRF融合，管理定位保留全部合并Chunk；不在本任务新增重排、回答模型、Run/Step字段或历史Run回填。
 新`ManagedKnowledgeSearchFilter`仅用于内部管理检索，增加可选processing_level，不改变旧过滤器或现有HTTP/Java/前端Schema。结果明确source=MANAGED及数据库configured_source_mode，当前后者仍LEGACY；这不是默认问答切源。
 运行`make test-knowledge-managed-search`验证，使用隔离数据库、真实纳管/上传/发布应用和假查询/文档向量；未调用真实Provider、启动服务或部署。
-下一步动态就绪检查仍需处理零发布和全量索引完整性。本任务无HTTP/CLI或Workflow装配入口，详细边界见[设计第二十五节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十五kb-039-管理库已发布知识检索读取)。
+KB-03.9当时不提供全量就绪，该能力由KB-03.10补齐；检索仍无HTTP/CLI或Workflow装配入口，详细边界见[设计第二十五节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十五kb-039-管理库已发布知识检索读取)。
+
+## 管理库动态就绪检查（KB-03.10）
+
+`ManagedKnowledgeIndexCapabilityService.get`每次Java READ后，以同一REPEATABLE READ READ ONLY快照捕获实际发布声明、当前指针、封存修订、批次和全部Chunk，释放连接后在线程中确定性检查；不调用模型、读原件或回退旧库。
+目标集合既包含PUBLISHED声明也包含当前指针，错误指针不能被内连接静默漏掉；正常草稿、历史和未发布失败批次不参与统计。集合数量随发布/停用变化，不再比较固定catalog16份资料。
+结果复用四种状态：零发布NOT_INDEXED且明确“无已发布资料”，结构/封存/分块损坏INCOMPLETE，完整但配置身份不匹配INDEX_MISMATCH，完整匹配READY。缺陷优先于配置不匹配，不因问题无适用证据或文档已过期而误判索引不存在。
+`expected_document_count`是有发布声明或当前指针的资料数，`document_count`是能唯一解析到当前PUBLISHED版/修订/批次的资料数，后者不代表正文/向量已通过检查；`chunk_count`是声明批次中实际读取的块数。计数全部正常也可能INCOMPLETE，READY必须通过全部证据校验。
+
+`managed_index_evidence.py`与管理检索共享封存正文/元数据/批次输入及分块校验，就绪额外检查完整数量、集合和顺序，防止TopK未命中坏块而漏报。已存完整身份包含chunking_version；未知分块规则不能声称READY，混合完整身份以stored_index=null表示。
+新`ManagedKnowledgeIndexCapabilities`明确source=MANAGED、configured_source_mode、release_revision、reason及安全中文message，允许expected_document_count=0；Python与前端同步，新前端只对显式MANAGED分支接受零发布，保留旧LEGACY计数约束。当前HTTP仍返回旧LEGACY契约，新服务未装配到能力接口或Workflow。
+运行`make test-knowledge-managed-readiness`复现全量就绪、管理检索和前端契约检查。未新增表/迁移、HTTP/CLI、读源切换或真实模型调用，READY不等于真实问答质量，也不是原始文件下载完整性检查。
+详细边界见[设计第二十六节](../docs/knowledge/KNOWLEDGE_STORAGE_DESIGN.md#二十六kb-0310-管理库动态就绪检查)。
 
 ## 数据边界
 

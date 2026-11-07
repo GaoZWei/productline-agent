@@ -16,6 +16,7 @@ from app.schemas.managed_knowledge_processing import ManagedKnowledgeConfirmatio
 
 if TYPE_CHECKING:
     from app.repositories.managed_knowledge import PublicationRead
+    from app.schemas.managed_knowledge_index import ManagedKnowledgeIndexIdentity
 
 
 def _digest(payload: dict[str, object]) -> str:
@@ -42,7 +43,7 @@ def publication_request_hash(command: KnowledgePublicationConfirmCommand) -> str
 def publication_generation_hash(
     snapshot: ManagedKnowledgeConfirmation,
     citation_document_id: str,
-    index: KnowledgePublicationIndexIdentity,
+    index: KnowledgePublicationIndexIdentity | ManagedKnowledgeIndexIdentity,
 ) -> str:
     """候选索引绑定不可变输入和完整模型/分块身份，不依赖用户或幂等键。"""
 

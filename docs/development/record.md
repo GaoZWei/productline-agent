@@ -2219,3 +2219,24 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 沿当前资料指针、PUBLISHED版本、封存修订和READY发布批次查询，权限、日期、产品/卫星/级别、类型/版本及完整索引身份在TopK前过滤，两路和库计数共享可重复读只读快照。
 - 校验命中的封存元数据、正文、批次输入及稳定章节分块，保留规范引用ID、版本、原文和全部合并Chunk；附实际管理资料/版本/修订/批次定位，损坏命中及持久化错误明确失败，不回退旧表。
 - 内部显式读取管理库与默认configured_source_mode分开，空管理库返回空结果；不变更现有Workflow/HTTP/前端、重排/回答模型、旧Run或默认LEGACY源，不实现全量动态就绪。
+
+## 2026-11-07 KB-03.10 管理库动态就绪检查
+
+### 核心解决的问题
+
+固定catalog数量无法代表上传、发布或停用后的管理集合，TopK命中验证也可能漏掉未召回的坏块。按实际发布声明及当前指针读取完整快照，让零发布、证据不完整、配置不匹配和可用得到不同结果，避免漏统计后误报READY。
+
+### 实现的核心代码
+
+- `agent-service/app/services/managed_knowledge_index.py`：`ManagedKnowledgeIndexCapabilityService.get`、`evaluate_published_index`。
+- `agent-service/app/repositories/managed_knowledge_index.py`：`read_published_snapshot`及不可变发布快照。
+- `agent-service/app/knowledge/managed_index_evidence.py`：封存身份、单块与完整块集合校验，供管理检索和就绪共用。
+- `agent-service/app/schemas/managed_knowledge_index.py`及`agent-frontend/src/types/managedKnowledgeIndex.ts`：动态非负计数及完整身份契约。
+- `agent-frontend/src/api/managedKnowledgeIndex.ts`、`src/api/agentClient.ts`：带MANAGED标识的新旧能力分支校验。
+
+### 实现的核心功能
+
+- 每次Java READ后，以同一只读可重复读快照捕获实际发布声明、指针、封存修订/批次和全部块，释放连接后确定性检查；不调用模型、读原件或加载固定catalog。
+- 验证发布归属、封存正文/元数据、完整批次输入及完整分块数量/集合/顺序/哈希/检索文本/向量，结构缺陷优先于配置不匹配，异常不回退旧表。
+- 零发布明确NOT_INDEXED及“无已发布资料”，非空完整匹配才READY；正常草稿、历史及未发布失败批次不影响发布集合，错误指针不能被内连接漏掉。
+- Python与前端同步MANAGED专用非负计数、模式/修订、状态/原因/中文文案和chunking_version身份；既有LEGACY服务和正数预期约束保留，无HTTP装配、默认切源、新迁移或页面。

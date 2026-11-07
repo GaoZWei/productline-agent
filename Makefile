@@ -217,6 +217,12 @@ test-knowledge-managed-search: ## KB-03.9管理库已发布知识双路检索、
 	cd agent-service && uv run --frozen pytest -q tests/test_managed_knowledge_search.py
 	./scripts/test-agent-persistence.sh -k knowledge_management_search
 
+.PHONY: test-knowledge-managed-readiness
+test-knowledge-managed-readiness: ## KB-03.10实际发布集合的全量就绪检查，零发布不回退旧库
+	cd agent-service && uv run --frozen pytest -q tests/test_managed_knowledge_index.py tests/test_managed_knowledge_search.py
+	./scripts/test-agent-persistence.sh -k 'knowledge_management_index_capabilities or knowledge_management_search'
+	cd agent-frontend && npm test -- src/api/managedKnowledgeIndex.spec.ts src/api/agentUnifiedClient.spec.ts
+
 test-knowledge-loading: ## 验证 M4.3 文档加载、分块、稳定ID和重复检测
 	cd agent-service && uv run --frozen pytest -q tests/knowledge
 
