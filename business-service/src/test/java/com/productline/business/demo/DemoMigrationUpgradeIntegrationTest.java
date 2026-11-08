@@ -30,7 +30,7 @@ class DemoMigrationUpgradeIntegrationTest extends PostgresIntegrationTestSupport
                 statement.executeUpdate("INSERT INTO operation_logs (operation_id,operation_type,target_type,target_id,actor_user_id,idempotency_key_hash,before_state,after_state) VALUES ('OP-PRESERVE','CREATE_REWORK','TASK','TASK-003','demo','hash','before','after')");
                 Map<String, List<String>> before = snapshot(statement);
                 assertThat(Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-                        .schemas(schema).defaultSchema(schema).load().migrate().migrationsExecuted).isEqualTo(1);
+                        .schemas(schema).defaultSchema(schema).target("4").load().migrate().migrationsExecuted).isEqualTo(1);
                 Map<String, List<String>> after = snapshot(statement);
                 before.forEach((table, rows) -> assertThat(after.get(table)).containsAll(rows));
                 assertThat(after.get("production_orders")).hasSize(30);
@@ -40,7 +40,7 @@ class DemoMigrationUpgradeIntegrationTest extends PostgresIntegrationTestSupport
                 assertThat(after.get("operation_logs")).hasSize(1);
                 assertThat(after.get("idempotency_records")).hasSize(1);
                 assertThat(Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-                        .schemas(schema).defaultSchema(schema).load().migrate().migrationsExecuted).isZero();
+                        .schemas(schema).defaultSchema(schema).target("4").load().migrate().migrationsExecuted).isZero();
             }
         }
     }

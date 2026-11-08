@@ -2240,3 +2240,26 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 验证发布归属、封存正文/元数据、完整批次输入及完整分块数量/集合/顺序/哈希/检索文本/向量，结构缺陷优先于配置不匹配，异常不回退旧表。
 - 零发布明确NOT_INDEXED及“无已发布资料”，非空完整匹配才READY；正常草稿、历史及未发布失败批次不影响发布集合，错误指针不能被内连接漏掉。
 - Python与前端同步MANAGED专用非负计数、模式/修订、状态/原因/中文文案和chunking_version身份；既有LEGACY服务和正数预期约束保留，无HTTP装配、默认切源、新迁移或页面。
+
+## 2026-11-08 T801～T805 M8.1 返工领域、契约与SQL存储
+
+### 核心解决的问题
+
+返工创建后只有状态和原因，无法绑定修复成果、检查与多轮处理证据，也没有存储边界防止跨问题复用材料或改写成功回执。
+建立Java领域模型、受约束的状态变更提议和增量存储，为后续人工返工闭环提供可追溯基础，存量记录不补造证据。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/domain/model/ReworkArtifact.java`、`ReworkProcessingEvidence.java`、`ReworkProcessingSnapshot.java`：成果版本、不可变材料和资源绑定。
+- `business-service/src/main/java/com/productline/business/domain/model/ReworkRound.java`、`ReworkInspectionItem.java`、`ReworkInspection.java`：轮次、人工检查及材料适用性。
+- `business-service/src/main/java/com/productline/business/domain/validation/ReworkTransitionPolicy.java`：状态与通过检查约束、不可变变更提议。
+- `business-service/src/main/resources/db/migration/V5__add_rework_lifecycle_storage.sql`：五表、复合外键、材料校验、历史及回执不可覆盖约束。
+- `docs/api/REWORK_CONTRACT.md`：后续查询/动作、独立确认、新旧兼容和SQL存储边界。
+
+### 实现的核心功能
+
+- 显式区分未登记材料与完整材料，绑定返工/任务/来源问题、轮次和成果版本，不补造历史轮次、检查或人员。
+- 开始、异常、恢复、完成及复核先校验Java事实；完成和复核必须有适用的通过检查，输出提议并保持原实体不变。
+- SQL持久化成果修订、人工检查、独立M8复核及原始回执，约束同源连续前驱、唯一后继、修订关联和PASSED检查绑定。
+- 材料/检查/复核/回执追加后不可改写或删除，生命周期创建身份不可改且开始元数据只登记一次；旧迁移及业务行保持原样。
+- 契约冻结与存储不等同于HTTP或业务闭环，未装配新Controller、应用Repository、Python Tool或前端，也不自动执行生产、确认或交付。

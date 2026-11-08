@@ -276,12 +276,12 @@ agent-migrate: ## 执行 Agent 自有 SQLAlchemy 元数据的 Alembic 迁移
 
 test-business-domain: ## 在 PostgreSQL Testcontainers 上验证领域模型
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessStatusEnumTest,DomainModelValidationTest,DomainRepositoryIntegrationTest \
+		-Dtest=BusinessStatusEnumTest,DomainModelValidationTest,ReworkProcessingModelTest,ReworkInspectionModelTest,ReworkTransitionPolicyTest,DomainRepositoryIntegrationTest \
 		test
 
 test-business-data: ## 验证 M0.3 固定数据映射和业务状态组合
 	mvn --file business-service/pom.xml \
-		-Dtest=DemoDataIntegrityIntegrationTest,DemoMigrationUpgradeIntegrationTest,BusinessStateConsistencyValidatorTest \
+		-Dtest=DemoDataIntegrityIntegrationTest,DemoMigrationUpgradeIntegrationTest,ReworkPersistenceIntegrationTest,BusinessStateConsistencyValidatorTest \
 		test
 
 test-java-contract: ## 验证 M0.4 Java 只读查询接口契约
