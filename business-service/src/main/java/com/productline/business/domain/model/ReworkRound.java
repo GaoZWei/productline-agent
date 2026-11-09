@@ -3,7 +3,7 @@ package com.productline.business.domain.model;
 import java.util.Optional;
 
 /** 用明确提供的轮次和业务身份定位一次返工，不根据历史记录或随机ID推断轮次。 */
-public record ReworkRound(String reworkTaskId, String taskId, String sourceIssueId, int roundNumber) {
+public record ReworkRound(String reworkTaskId, String taskId, String sourceIssueId, long roundNumber) {
 
     public ReworkRound {
         requireText(reworkTaskId, "reworkTaskId");
@@ -12,9 +12,12 @@ public record ReworkRound(String reworkTaskId, String taskId, String sourceIssue
         if (roundNumber <= 0) {
             throw new IllegalArgumentException("roundNumber must be greater than zero");
         }
+        if (roundNumber > 9007199254740991L) {
+            throw new IllegalArgumentException("roundNumber must be a positive safe integer");
+        }
     }
 
-    public static ReworkRound from(ReworkTask rework, int roundNumber) {
+    public static ReworkRound from(ReworkTask rework, long roundNumber) {
         ReworkProcessingSnapshot target = ReworkProcessingSnapshot.unrecorded(rework);
         String issueId = target.getSourceIssueId().orElseThrow(
                 () -> new IllegalStateException("rework round requires a source issue"));

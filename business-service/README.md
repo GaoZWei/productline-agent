@@ -64,15 +64,15 @@ V4增量新增ORDER-006～030，不修改V2/V3及既有记录。只读`GET /api/
 提议不是执行回执或授权凭证，不能直接据此绕过人工确认；后续写入须刷新事实并校验权限、版本、幂等，再在同一事务落库。
 
 上述对象本身没有JPA映射；T805以V5提供独立SQL存储，完整登记材料不等于成果存在、实际检查通过或返工完成。
-当前没有新增HTTP、业务状态写服务或页面，既有实体/DTO不变；权限、并发版本、人工确认和证据原件校验仍需后续应用实现。
+T806已新增只读详情HTTP，T807已新增Java开始写入；M8 Python独立确认与页面尚未接入，既有实体/DTO不变，原件校验和后续处理仍待实现。
 领域记录中的人员与时间仅为待校验材料，不代表已通过认证；真实写服务须从实际身份和服务端时间取值。
 详细边界见[详细计划M8.1](../docs/planning/detailed-plan.md#m81-返工领域与契约)。
 
 T804冻结[返工生命周期契约v1](../docs/api/REWORK_CONTRACT.md)：列明新查询/动作、三端字段映射、角色与Tool权限、
 独立人工确认、任务共享版本、原始幂等回执、当前检查/复核选择及存量只读边界。
 检查通过与完成返工合并为一次明确确认的原子写入，不另设complete接口；下一轮必须独立确认创建。
-新增路径目前仅在契约文档中，未增加Controller/DTO/Client或前端类型，不能把旧接口回归当作新HTTP已实现。
-T805已完成V5增量存储和隔离升级验证，M8.1在此验收停止；下一最小任务T806返工详情查询，本轮不进入M8.2。
+除T806的GET详情和T807的POST开始外，新增路径仍为契约要求；未装配Python Client/Tool或前端类型，不能把旧接口回归当作其他新HTTP已实现。
+T805已完成V5增量存储和隔离升级验证；当前M8.2已接入详情与Java开始，下一最小任务T808登记阻塞或失败。
 
 V5由Flyway在未来Java启动时执行，本轮只在隔离测试库应用；不改V1～V4、种子或运行库，不自动生成历史轮次/证据。
 
@@ -91,7 +91,38 @@ SQL函数只校验材料格式、Java空白/UTF-16边界及人工结果汇总，
 后续Java应用仍须在同一事务内校验当前事实并递增任务版本；M8新幂等resource_id绑定返工ID，写回执前应flush匹配的幂等完成及审计，
 或在同一事务显式延后这两个可延迟外键，不能提前提交部分结果。旧幂等资源含义不变，不伪造旧成功回执。
 
-局部验证（无需数据库）：
+### T806 返工详情查询
+
+`GET /api/tasks/{taskId}/reworks/{reworkTaskId}`要求`X-User-Id`及精确`X-User-Role: REVIEWER`，沿用六字段响应信封。
+身份与ID检查后，`ReworkQueryService`在只读可重复读事务中核对父任务、返工归属及当前材料，返回真实轮次、前驱、共享任务版本和允许动作。
+处理修订、检查和有效复核按序号及绑定读取，不跳过最新失败检查；缺少生命周期的存量字段保持null，allowedActions为空。
+允许动作只表示当前事实前提，不证明对应写接口可用，也不代替人工确认。查询不改状态、任务版本、材料或日志；旧overview不变。
+详细字段和失败边界见[契约第十节](../docs/api/REWORK_CONTRACT.md#10-t806详情读取实现边界)。`make test-java-contract`包含真实HTTP及数据库集成测试。
+
+### T807 Java开始返工
+
+`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`要求REVIEWER身份和安全`Idempotency-Key`，JSON只接受整数`expectedVersion`。
+拒绝重复键、尾随内容、浮点/字符串/布尔、未知字段和自报确认/状态/人员/时间；此局部严格解析不改变旧请求DTO行为。
+Java锁父任务并重新读取事实，仅受控轮次、未开始/无后继、原生产COMPLETED及返工PENDING/问题OPEN可执行。
+同一事务写RUNNING/PROCESSING、实际请求人及服务端UTC开始时间，任务版本只加一，原生产任务仍COMPLETED；不执行自动修正程序。
+幂等完成、审计与固定12字段成功回执同事务保存，失败整笔回滚；同请求重放原回执，后来状态变化不重新写入，也不重建旧结果。
+存量无轮次返回409，不自动纳管；Python独立确认/写Tool和页面接线留待后续，Header不能作为人工确认凭证。
+详见[契约第十一节](../docs/api/REWORK_CONTRACT.md#11-t807开始返工实现边界)。`make test-java-write`包含开始操作的真实HTTP、并发及回滚测试。
+ReworkRound内部轮次由int对齐为long并限制正安全整数，与既有JSON契约及V5范围一致；原非正数校验保留，不改旧迁移或固定数据。
+
+本机无Docker时，Java集成测试支持显式指定已准备好的隔离PostgreSQL，例如：
+
+```bash
+mvn --file business-service/pom.xml \
+  -Dbusiness.test.jdbc-url=jdbc:postgresql://127.0.0.1:15433/business_service_test_t806 \
+  -Dtest=ReworkQueryApiIntegrationTest test
+```
+
+该选项仅供测试，要求显式环回端口、`business_service_test_`前缀库名、无URL凭据/参数，固定测试用户及密码为`test`。
+调用方须单独创建可丢弃测试库，测试会迁移和写入夹具；不会读取`.env`或自动选择开发/运行库。不传此选项仍使用原Testcontainers。
+旧迁移/存储用例只改为共用连接获取函数，原断言保持；此测试入口不改变服务运行配置。
+
+局部领域验证（无需数据库）：
 
 ```bash
 mvn -q -o --file business-service/pom.xml -Dtest=ReworkTransitionPolicyTest,ReworkInspectionModelTest,ReworkProcessingModelTest,DomainModelValidationTest,BusinessStatusEnumTest,BusinessStateConsistencyValidatorTest test

@@ -2263,3 +2263,47 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - SQL持久化成果修订、人工检查、独立M8复核及原始回执，约束同源连续前驱、唯一后继、修订关联和PASSED检查绑定。
 - 材料/检查/复核/回执追加后不可改写或删除，生命周期创建身份不可改且开始元数据只登记一次；旧迁移及业务行保持原样。
 - 契约冻结与存储不等同于HTTP或业务闭环，未装配新Controller、应用Repository、Python Tool或前端，也不自动执行生产、确认或交付。
+
+## 2026-11-09 T806 M8.2 返工详情查询
+
+### 核心解决的问题
+
+旧订单概览只有返工摘要，无法确认真实轮次、当前成果和有效检查，也不能区分无历史材料与已完成检查。
+通过独立只读接口返回同一数据库快照内的归属、共享任务版本和当前材料，避免新失败检查被旧通过结果掩盖或存量被补造轮次。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkQueryController.java`：详情GET及演示身份入口。
+- `business-service/src/main/java/com/productline/business/application/ReworkQueryService.java`：`getDetail`授权、参数、父任务和归属校验及可重复读事务，`allowedActions`确定性动作前提。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkReadRepository.java`：`findDetail`按当前修订、检查及有效复核绑定读取V5事实。
+- `business-service/src/main/java/com/productline/business/domain/dto/ReworkLifecycleSnapshot.java`、`business-service/src/main/java/com/productline/business/api/dto/ReworkDetailResponse.java`：当前材料快照与新详情响应，不改变旧DTO。
+
+### 实现的核心功能
+
+- 详情读取要求REVIEWER身份，父任务或返工不存在返回404、跨任务归属返回409且不返回材料，旧查询及响应信封保持。
+- 在同一只读可重复读快照中返回真实轮次、前驱、任务版本及当前处理/检查/复核；新修订或新检查不沿用失效的旧结论。
+- 最新失败检查保留FAILED及检查项，不跳过取旧PASSED；当前无材料显式为null，存量缺少生命周期时允许动作为空。
+- 动作列表只表达状态和当前材料前提，不作为写入授权，不改状态、版本、材料或日志，也不执行成果修正、人工确认或业务写入。
+
+## 2026-11-09 T807 M8.2 Java开始返工
+
+### 核心解决的问题
+
+只有返工详情时，无法登记谁开始处理，也无法保证状态、版本与执行结果同步提交。
+以重新读取的Java事实裁决开始操作，并保存首次成功回执，避免重复请求二次写入或用后来状态改写原结果。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkStartController.java`、`api/dto/ReworkStartRequest.java`：开始POST、局部严格请求解析。
+- `business-service/src/main/java/com/productline/business/application/ReworkStartService.java`：`start`身份/版本/状态重校验、独立事务与原回执重放。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkStartRepository.java`：幂等预留、父任务锁、版本/状态条件更新及开始元数据、审计和回执写入。
+- `business-service/src/main/java/com/productline/business/api/dto/ReworkWriteReceipt.java`：固定成功JSON及显式null绑定字段。
+- `business-service/src/main/java/com/productline/business/domain/model/ReworkRound.java`：轮次对齐为long及正安全整数范围，不改变SQL或既有非正数校验。
+
+### 实现的核心功能
+
+- 开始仅接收安全整数expectedVersion，拒绝未知字段、自报确认/状态/人员/时间、重复键及尾随内容；旧请求解析行为保持。
+- 原生产任务COMPLETED、受控轮次未开始/无后继且返工PENDING/问题OPEN才可开始；Java记录实际请求人和UTC时间，返工改RUNNING、问题改PROCESSING。
+- 共享任务版本只递增一次，状态、元数据、幂等完成、审计和原成功回执同事务提交；失败回滚，不补造历史生命周期。
+- 同用户/键/operation/目标/完整请求重放返回第一次结果，后来的状态和版本不重建旧回执；不自动换键重试或修改原生产状态。
+- 仅完成Java写底座，M8独立Approval、写Tool、页面及自动成果修正均未接入。

@@ -284,14 +284,14 @@ test-business-data: ## 验证 M0.3 固定数据映射和业务状态组合
 		-Dtest=DemoDataIntegrityIntegrationTest,DemoMigrationUpgradeIntegrationTest,ReworkPersistenceIntegrationTest,BusinessStateConsistencyValidatorTest \
 		test
 
-test-java-contract: ## 验证 M0.4 Java 只读查询接口契约
+test-java-contract: ## 验证Java只读查询及M8返工详情接口契约
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessQueryApiIntegrationTest \
+		-Dtest=BusinessQueryApiIntegrationTest,ReworkQueryApiIntegrationTest \
 		test
 
-test-java-write: ## 验证 M0.5 Java 写接口、权限、幂等、并发与操作日志
+test-java-write: ## 验证Java写接口及M8开始返工的权限、幂等、并发与操作日志
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessWriteApiIntegrationTest \
+		-Dtest=BusinessWriteApiIntegrationTest,ReworkStartApiIntegrationTest \
 		test
 
 test-java-errors: ## 验证 M0.6 统一响应、错误映射和 Trace ID

@@ -325,13 +325,13 @@ class ReworkPersistenceIntegrationTest extends PostgresIntegrationTestSupport {
     }
 
     private static Connection open(String schema) throws Exception {
-        Connection opened = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Connection opened = DriverManager.getConnection(databaseUrl(), databaseUsername(), databasePassword());
         opened.setSchema(schema);
         return opened;
     }
 
     private static Flyway flyway(String schema, String target) {
-        var config = Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+        var config = Flyway.configure().dataSource(databaseUrl(), databaseUsername(), databasePassword())
                 .schemas(schema).defaultSchema(schema);
         if (target != null) config.target(target);
         return config.load();

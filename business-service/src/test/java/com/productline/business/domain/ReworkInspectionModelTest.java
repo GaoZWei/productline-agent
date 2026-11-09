@@ -83,6 +83,21 @@ class ReworkInspectionModelTest {
     }
 
     @ParameterizedTest
+    @ValueSource(longs = {2147483648L, 9007199254740991L})
+    void preservesSafeRoundNumbersBeyondIntRange(long roundNumber) {
+        ReworkRound round = ReworkRound.from(rework("REWORK-A", "TASK-A", "ISSUE-A"), roundNumber);
+        assertThat(round.roundNumber()).isEqualTo(roundNumber);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {9007199254740992L, Long.MAX_VALUE})
+    void rejectsRoundNumbersBeyondSafeRange(long roundNumber) {
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> ReworkRound.from(rework("REWORK-A", "TASK-A", "ISSUE-A"), roundNumber))
+                .withMessage("roundNumber must be a positive safe integer");
+    }
+
+    @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = " ")
     void rejectsMissingRoundResourceIdentities(String value) {

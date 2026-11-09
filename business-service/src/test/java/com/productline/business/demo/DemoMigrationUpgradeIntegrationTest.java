@@ -17,10 +17,10 @@ class DemoMigrationUpgradeIntegrationTest extends PostgresIntegrationTestSupport
     @Test
     void upgradesDirtyV3WithoutChangingExistingFactsOrWriteHistory() throws Exception {
         String schema = "demo_upgrade_v4";
-        Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+        Flyway.configure().dataSource(databaseUrl(), databaseUsername(), databasePassword())
                 .schemas(schema).defaultSchema(schema).target("3").load().migrate();
         try (Connection connection = DriverManager.getConnection(
-                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+                databaseUrl(), databaseUsername(), databasePassword())) {
             connection.setSchema(schema);
             try (Statement statement = connection.createStatement()) {
                 statement.executeUpdate("UPDATE production_tasks SET version = 2 WHERE task_id = 'TASK-003'");
@@ -29,7 +29,7 @@ class DemoMigrationUpgradeIntegrationTest extends PostgresIntegrationTestSupport
                 statement.executeUpdate("INSERT INTO idempotency_records (idempotency_key,operation_type,request_hash,actor_user_id,resource_id,task_version_after) VALUES ('preserve','CREATE_REWORK','hash','demo','REWORK-WRITE-PRESERVE',2)");
                 statement.executeUpdate("INSERT INTO operation_logs (operation_id,operation_type,target_type,target_id,actor_user_id,idempotency_key_hash,before_state,after_state) VALUES ('OP-PRESERVE','CREATE_REWORK','TASK','TASK-003','demo','hash','before','after')");
                 Map<String, List<String>> before = snapshot(statement);
-                assertThat(Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                assertThat(Flyway.configure().dataSource(databaseUrl(), databaseUsername(), databasePassword())
                         .schemas(schema).defaultSchema(schema).target("4").load().migrate().migrationsExecuted).isEqualTo(1);
                 Map<String, List<String>> after = snapshot(statement);
                 before.forEach((table, rows) -> assertThat(after.get(table)).containsAll(rows));
@@ -39,7 +39,7 @@ class DemoMigrationUpgradeIntegrationTest extends PostgresIntegrationTestSupport
                 assertThat(after.get("rework_tasks")).hasSize(4);
                 assertThat(after.get("operation_logs")).hasSize(1);
                 assertThat(after.get("idempotency_records")).hasSize(1);
-                assertThat(Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                assertThat(Flyway.configure().dataSource(databaseUrl(), databaseUsername(), databasePassword())
                         .schemas(schema).defaultSchema(schema).target("4").load().migrate().migrationsExecuted).isZero();
             }
         }

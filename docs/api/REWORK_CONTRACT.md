@@ -1,10 +1,10 @@
-# M8返工生命周期契约 v1（T804冻结，HTTP尚未实现）
+# M8返工生命周期契约 v1（T804冻结，T806/T807已实现详情与开始）
 
 ## 1. 适用范围与实现边界
 
 本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
-当前仅T801～T803领域对象和流转提议可运行；本文新增路径、字段、权限映射及校验均为后续实现要求，不能据此调用或宣称HTTP已可用。
-本轮不增加Controller、DTO、数据库迁移、Python Client/Tool、Approval类型或前端类型；按Java接口可验证后再接下游的顺序实现。
+T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start的Java校验与原子写入。
+其余新增路径仍待实现；Python Client/Tool、独立Approval及前端新类型尚未接线，不能将Java写接口描述为完整人工确认闭环。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
 约束范围为人工修正成果、登记处理证据、人工检查、再次复核及下一轮返工；不执行自动生产重跑或自动成果检查，不推进订单或交付状态。
@@ -28,7 +28,7 @@ Java JSON使用camelCase；Python内部使用snake_case并显式绑定别名，�
 | 人员与时间 | 写入人从实际请求身份确定，写入时间由Java生成UTC ISO-8601字符串；请求不得提交inspectorId、reviewedBy或登记时间 |
 | Header | 新端点要求非空白且最多128位、无CR/LF的X-User-Id和精确REVIEWER角色；写入还要求1～128位`^[A-Za-z0-9._:-]+$`的Idempotency-Key |
 
-以下均为待接线的确定性权限映射；新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
+以下为确定性权限映射，T806已落实READ_REWORK，T807已落实Java START_REWORK角色校验，其独立Approval仍待接线；新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
 
 | operation | Python权限 | 独立人工确认 |
 | --- | --- | --- |
@@ -49,12 +49,12 @@ Java Header或请求中的approval_id不是人工确认的证明；新Java业务
 
 ## 3. 读取接口与缺失历史
 
-下表路径均待实现；`B=/api/tasks/{taskId}/reworks`，`R=B/{reworkTaskId}`。查询只返回Java事实，每次响应内部使用一致读取快照。
+下表仅GET R已由T806实现，其余路径仍待实现；`B=/api/tasks/{taskId}/reworks`，`R=B/{reworkTaskId}`。查询只返回Java事实，每次响应内部使用一致读取快照。
 
 | 方法与路径 | data内容 | 对应后续实现 |
 | --- | --- | --- |
 | GET B | taskId、taskVersion、reworkTasks摘要数组、nextCursor | M8.2查询 |
-| GET R | ReworkDetail | M8.2查询，后续阶段补齐成果/检查/复核 |
+| GET R | ReworkDetail | T806已实现，当前材料从V5读取；材料写入仍待后续阶段 |
 | GET R/results | taskId、reworkTaskId、records处理修订数组、nextCursor | M8.3 |
 | GET R/inspections | taskId、reworkTaskId、records检查数组、nextCursor | M8.3 |
 | GET R/reviews | taskId、reworkTaskId、records复核数组、nextCursor | M8.4 |
@@ -92,7 +92,7 @@ expectedVersion必须来自最新Java事实。所有写入仅在生产任务COMP
 | 方法与路径 | 请求字段 | operation及业务前提 |
 | --- | --- | --- |
 | POST B | sourceIssueId、expectedVersion、reason | CREATE_LIFECYCLE_REWORK；问题OPEN、无受控前驱及活动返工，创建受控PENDING首轮；Java部分随M8.4/T819首轮/后继创建实现 |
-| POST R/start | expectedVersion | START_REWORK；PENDING/OPEN → RUNNING/PROCESSING |
+| POST R/start | expectedVersion | T807已实现Java START_REWORK；PENDING/OPEN → RUNNING/PROCESSING，独立确认接线待后续 |
 | POST R/block | expectedVersion、reason | BLOCK_REWORK；RUNNING/PROCESSING → BLOCKED/PROCESSING |
 | POST R/fail | expectedVersion、reason | FAIL_REWORK；RUNNING/PROCESSING → FAILED/PROCESSING |
 | POST R/resume | expectedVersion、reason | RESUME_REWORK；BLOCKED或FAILED/PROCESSING → RUNNING/PROCESSING |
@@ -228,8 +228,8 @@ Agent首版仍仅沿用坐标系返工语义，新增HTTP及领域类型不代�
 最新检查失败但旧检查通过；旧成果通过不能放行新轮；通过检查的原子完成与回滚；退回后独立下一轮；
 缺证据/轮次的历史只读；旧路径/DTO及ORDER-003初始黄金链路不变；写入超时核对不冒充未执行。
 
-T804只冻结本文和三端字段映射，示例仅做文档语法/一致性核对；新HTTP的正常、异常与跨服务验收留在M8.2～M8.8。
-T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1已验收停止，不自动进入M8.2。
+T804只冻结本文和三端字段映射，示例不是实际操作记录；T806交付GET R，T807交付POST R/start，其余新HTTP及三端确认验收留在后续任务。
+T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1已验收，M8.2已接入详情和Java开始写入。
 
 ## 9. T805存储实现边界
 
@@ -242,5 +242,24 @@ V5新增rework_lifecycles、rework_processing_revisions、rework_inspections、r
 材料/检查/复核/回执追加后不可修改或删除；生命周期创建身份、归属与前驱不可修改，开始人员/时间成对且只记录一次。
 新复核独立存入rework_reviews，不改写、复制或补造旧review_records；有效复核查询仍按第5节新旧分支实现。
 数据库函数与约束不证明原件真实、操作者身份可信或检查当前有效，不自动流转业务状态、不应用Approval、不替代任务版本并发校验。
-本轮只以JDBC隔离夹具验证存储，不提供新应用Repository、HTTP或业务写入；后续查询/事务服务再映射这些表。
+T805当时只以JDBC隔离夹具验证存储；T806新增只读Repository、应用服务与详情HTTP，业务写入仍待后续任务。
 V5在未来Java启动时随Flyway应用，本次未部署或查询运行库；旧V1～V4迁移和ORDER-003固定事实保持原样。
+
+## 10. T806详情读取实现边界
+
+`GET /api/tasks/{taskId}/reworks/{reworkTaskId}`每次先校验请求身份和业务ID，再以REPEATABLE READ READ ONLY事务依次读取父任务、归属与当前材料。
+父任务或返工不存在返回404，返工属于其他任务返回409且不返回材料；六字段信封和旧接口保持不变。
+当前成果取最大processingRevision，检查只取该修订最大inspectionSequence，复核只取当前PASSED检查绑定下最大reviewSequence。
+新修订、新检查或最新失败使旧检查/复核不再作为当前结论，历史数据不被删除；未登记字段显式为null。
+allowedActions表达当前状态及材料前提，包含后续计划动作也不表示对应写接口已装配，不代替独立人工确认或执行时重校验。
+详情不调用模型、不验证外部证据原件、不写状态/轮次/版本或操作记录，不纳管存量，也不实现列表、历史分页、操作回执查询及写HTTP。
+
+## 11. T807开始返工实现边界
+
+`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`只接受application/json及唯一expectedVersion安全整数；拒绝重复键、尾随JSON、未知字段、类型强转和自报确认/状态/人员/时间。
+Java重验REVIEWER身份、业务ID和安全幂等键。新请求先预留幂等绑定、锁父任务，再核对共享版本、生产COMPLETED、受控轮次、未登记开始信息、无后继及返工PENDING/问题OPEN。
+同一事务将返工改为RUNNING、问题改为PROCESSING，按实际请求身份和服务端UTC时间写一次开始元数据，任务版本仅加一且原生产状态不变。
+幂等完成、受控前后状态审计和固定12字段成功JSON回执同事务保存；任一步失败整笔回滚，不自动补轮次或迁移旧记录。
+同用户、键、operation、目标和完整请求重放只返回首次回执；版本、用户、目标或操作不同返回409。后续状态变化不重写原回执或再次改变业务。
+开始只登记人工处理流程，不调用成果修正程序。Header不是人工确认凭证，Java不访问Agent表；Python确认/写Tool、页面及独立回执查询HTTP仍在后续阶段。
+本轮只对齐ReworkRound为long及正安全整数范围，不改变轮次分配、连续性、旧实体/DTO、V1～V5或固定数据；已有SQL范围保持。
