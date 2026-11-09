@@ -110,18 +110,20 @@ public class ReworkStartRepository {
                 """, reworkId, nextVersion, key);
     }
 
-    public void audit(String operationId, String operation, String taskId, String actor,
+    /** SQL未报错也可能被触发器跳过；调用方必须校验实际插入一行才允许提交业务变化。 */
+    public int audit(String operationId, String operation, String taskId, String actor,
             String keyHash, String before, String after) {
-        jdbc.update("""
+        return jdbc.update("""
                 INSERT INTO operation_logs(operation_id,operation_type,target_type,target_id,actor_user_id,
                     idempotency_key_hash,before_state,after_state)
                 VALUES (?,?,'PRODUCTION_TASK',?,?,?,?,?)
                 """, operationId, operation, taskId, actor, keyHash, before, after);
     }
 
-    public void saveReceipt(String key, String operationId, String operation, String requestHash,
+    /** 返回实际写入数，不能把没有保存原回执的业务变化报告为成功。 */
+    public int saveReceipt(String key, String operationId, String operation, String requestHash,
             String actor, String taskId, String reworkId, long round, long nextVersion, String keyHash, String json) {
-        jdbc.update("""
+        return jdbc.update("""
                 INSERT INTO rework_operation_receipts(idempotency_key,operation_id,operation_type,request_hash,
                     actor_user_id,task_id,rework_task_id,round_number,task_version_after,idempotency_key_hash,response_data)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?::jsonb)

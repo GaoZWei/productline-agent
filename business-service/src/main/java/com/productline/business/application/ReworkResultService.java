@@ -105,11 +105,11 @@ public class ReworkResultService {
                 current.previousReworkTaskId(), revision, null, null);
         updated(writes.completeReservation(key, reworkId, nextVersion));
         String keyHash = hash(key);
-        writes.audit(operationId, OPERATION, taskId, actor, keyHash,
+        updated(writes.audit(operationId, OPERATION, taskId, actor, keyHash,
                 json(auditState(taskId, reworkId, request.expectedVersion(), latest == 0 ? null : latest)),
-                json(auditState(taskId, reworkId, nextVersion, revision)));
-        writes.saveReceipt(key, operationId, OPERATION, requestHash, actor, taskId, reworkId,
-                current.roundNumber(), nextVersion, keyHash, json(receipt));
+                json(auditState(taskId, reworkId, nextVersion, revision))));
+        updated(writes.saveReceipt(key, operationId, OPERATION, requestHash, actor, taskId, reworkId,
+                current.roundNumber(), nextVersion, keyHash, json(receipt)));
         return receipt;
     }
 

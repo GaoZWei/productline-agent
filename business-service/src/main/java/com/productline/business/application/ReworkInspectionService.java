@@ -132,13 +132,13 @@ public class ReworkInspectionService {
                 request.processingRevision(), inspectionId, null);
         updated(writes.completeReservation(key, reworkId, nextVersion));
         String keyHash = hash(key);
-        writes.audit(operationId, OPERATION, taskId, actor, keyHash,
+        updated(writes.audit(operationId, OPERATION, taskId, actor, keyHash,
                 json(auditState(reworkId, request.expectedVersion(), request.processingRevision(),
                         current.inspection() == null ? null : current.inspection().inspectionId(),
                         ProductionTaskStatus.RUNNING, QualityIssueStatus.PROCESSING)),
-                json(auditState(reworkId, nextVersion, request.processingRevision(), inspectionId, reworkStatus, issueStatus)));
-        writes.saveReceipt(key, operationId, OPERATION, requestHash, actor, taskId, reworkId,
-                current.roundNumber(), nextVersion, keyHash, json(receipt));
+                json(auditState(reworkId, nextVersion, request.processingRevision(), inspectionId, reworkStatus, issueStatus))));
+        updated(writes.saveReceipt(key, operationId, OPERATION, requestHash, actor, taskId, reworkId,
+                current.roundNumber(), nextVersion, keyHash, json(receipt)));
         return receipt;
     }
 

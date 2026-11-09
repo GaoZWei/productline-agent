@@ -2390,3 +2390,23 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 任一项失败则保留RUNNING/PROCESSING并追加失败历史；全部通过复用既有领域COMPLETE约束，原子保存检查、本轮COMPLETED及问题RESOLVED，原生产不变。
 - 为保持冻结契约的原子边界，通过分支的最小写入与检查入口一起接通；不单独提交通过记录，不另设complete接口，不关闭问题或推进订单/交付。
 - 检查、共享版本、幂等完成、审计和原成功回执同事务提交或回滚；重放返回首次结果，旧检查、材料及回执均保留，Python独立确认与页面尚未接入。
+
+## 2026-11-09 T814 M8.3 检查通过原子性与有效写入防护
+
+### 核心解决的问题
+
+同一事务不代表每条SQL都实际写入；回执INSERT被静默跳过时，检查通过原先仍可能提交并返回成功，留下无法按原回执重放的业务变化。
+明确审计和回执必须实际插入一行，任何零行写入或提交失败均回滚，防止向后续写Tool报告不完整的成功事实。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkStartRepository.java`：`audit`、`saveReceipt`返回实际INSERT影响行数。
+- `business-service/src/main/java/com/productline/business/application/ReworkInspectionService.java`：`registerInTransaction`通过`updated`校验审计和回执写入，纳入检查通过的原子写集。
+- `business-service/src/main/java/com/productline/business/application/ReworkStartService.java`、`ReworkInterruptionService.java`、`ReworkResultService.java`：共用仓储的其他调用方同步校验实际写入，不忽略返回值。
+
+### 实现的核心功能
+
+- 审计或原始回执未实际写入一行即返回业务冲突，版本、材料/检查、状态、幂等及已有写入全部回滚。
+- 开始、阻塞/失败、恢复、成果及检查登记统一执行共用写入约束，正常成功响应和幂等回执字段保持原契约。
+- 检查通过只将本轮置COMPLETED、问题置RESOLVED；事务提交失败不返回成功，事务外读取只看到提交前或提交后的完整事实。
+- 失败后没有自动重试或改键，旧成功请求仍只重放原回执；没有新增HTTP、迁移、三端确认或关闭问题能力。

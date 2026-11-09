@@ -72,7 +72,7 @@ T804冻结[返工生命周期契约v1](../docs/api/REWORK_CONTRACT.md)：列明�
 独立人工确认、任务共享版本、原始幂等回执、当前检查/复核选择及存量只读边界。
 检查通过与完成返工合并为一次明确确认的原子写入，不另设complete接口；下一轮必须独立确认创建。
 除T806的GET详情及T807～T809的POST开始/阻塞/失败/恢复外，新增路径仍为契约要求；未装配Python Client/Tool或前端类型，不能把旧接口回归当作其他新HTTP已实现。
-T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3已接通T811成果与T812人工检查登记，T813完成失败后成果更新和过期参数拒绝验收，下一最小任务T814检查通过原子性专项收口。
+T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3完成T811～T814登记、更新及检查通过原子性专项收口，下一最小任务T815历史查询与阶段收口。
 
 V5由Flyway在未来Java启动时执行，本轮只在隔离测试库应用；不改V1～V4、种子或运行库，不自动生成历史轮次/证据。
 
@@ -154,7 +154,7 @@ ReworkRound内部轮次由int对齐为long并限制正安全整数，与既有JS
 `POST /api/tasks/{taskId}/reworks/{reworkTaskId}/inspections`严格接收expectedVersion、processingRevision和非空items；每项包含checkItem、PASSED/FAILED、comment和证据引用，逐项校验UTF-16长度及无损存储规则。
 `ReworkInspectionService.register`重验身份、归属、受控轮次无后继、共享版本、原生产COMPLETED及RUNNING/PROCESSING，只能检查当前成果修订；检查人和UTC时间取服务端，不接受自报总体结论、人员、时间或确认。
 `ReworkInspection.recorded`汇总各项结果，任一FAILED则总体失败、返工仍RUNNING且问题PROCESSING；全部PASSED调用既有领域COMPLETE约束，将检查、本轮COMPLETED与问题RESOLVED一起提交。
-为遵守冻结契约，通过分支的最小原子写入随T812一并接通，T814专项验收仍待完成；没有独立complete接口，不关闭问题或推进订单/交付。
+为遵守冻结契约，通过分支的最小原子写入随T812一并接通，T814已完成专项验收；没有独立complete接口，不关闭问题或推进订单/交付。
 检查序号在本返工所有成果修订间连续递增，材料与失败记录只追加；新检查、任务版本、幂等完成、审计及原始回执同事务保存或回滚，旧请求重放不覆盖最新事实。
 `make test-java-write`包含真实HTTP登记、成果变更绑定、并发和故障回滚；详见[契约第十六节](../docs/api/REWORK_CONTRACT.md#16-t812人工检查登记实现边界)。
 独立Approval/写Tool、确认快照失效处理、历史分页和页面仍待后续；Header不是人工确认凭证，系统不执行自动成果检查。
@@ -168,6 +168,15 @@ ReworkRound内部轮次由int对齐为long并限制正安全整数，与既有JS
 更新的审计/回执故障保留旧FAILED检查为当前结论，移除故障后显式用原未提交键重提才切换新修订；产品没有新增自动重试。
 本任务只补跨接口验收和Make入口，不改运行实现或接口；Java拒绝过期参数不代表已实现Python Approval的STALE状态或前端确认失效处理。
 详见[契约第十七节](../docs/api/REWORK_CONTRACT.md#17-t813失败检查与成果更新验收边界)，`make test-java-write`纳入本组回归，独立确认与历史分页仍待后续。
+
+### T814 检查通过原子性专项收口
+
+`ReworkCompletionAtomicityIntegrationTest`经真实HTTP验证检查通过的全部写入点：版本、检查、本轮完成、问题解决、幂等完成、审计与原回执，任一步异常都回滚原材料、失败历史及业务事实。
+审计或回执INSERT被触发器静默跳过也必须拒绝；共用`ReworkStartRepository.audit/saveReceipt`返回影响行数，所有M8开始、异常/恢复、成果及检查写服务统一检查一行写入，零行返回409并整体回滚。
+延迟约束触发器在提交时失败，接口返回500且不遗留半次成功；三处写入边界暂停事务时，独立详情GET及SQL观察只能读到提交前完整事实。
+旧成功请求只重放原回执，新键或新版本不能重复完成已完成轮次；没有检查项、空检查项或独立complete路径均不能完成返工。
+成功只能到本轮COMPLETED、问题RESOLVED，原生产仍COMPLETED，订单及交付不推进；客户端错误不触发自动重试，Java接口也不证明已有独立人工确认。
+`make test-java-write`包含本组验收及共用仓储全部调用方的零行回归；详见[契约第十八节](../docs/api/REWORK_CONTRACT.md#18-t814检查通过原子性验收与零行写入防护)。
 
 本机无Docker时，Java集成测试支持显式指定已准备好的隔离PostgreSQL，例如：
 

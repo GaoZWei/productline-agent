@@ -147,15 +147,15 @@ public class ReworkInterruptionService {
                 current.review() == null ? null : current.review().reviewId());
         updated(writes.completeReservation(key, reworkId, nextVersion));
         String keyHash = hash(key);
-        writes.audit(operationId, operation, taskId, actor, keyHash,
+        updated(writes.audit(operationId, operation, taskId, actor, keyHash,
                 json(Map.of("taskVersion", request.expectedVersion(), "reworkTaskId", reworkId,
                         "status", proposal.getBefore().reworkStatus(), "issueStatus", proposal.getBefore().issueStatus())),
                 json(Map.of("taskVersion", nextVersion, "reworkTaskId", reworkId,
                         "status", proposal.getAfter().reworkStatus(), "issueStatus", proposal.getAfter().issueStatus(),
-                        "reason", proposal.getReason().orElseThrow())));
+                        "reason", proposal.getReason().orElseThrow()))));
         // 幂等完成和审计先落入同一事务，满足V5立即检查的组合外键，再保存不可变成功JSON。
-        writes.saveReceipt(key, operationId, operation, requestHash, actor, taskId, reworkId,
-                lifecycle.roundNumber(), nextVersion, keyHash, json(receipt));
+        updated(writes.saveReceipt(key, operationId, operation, requestHash, actor, taskId, reworkId,
+                lifecycle.roundNumber(), nextVersion, keyHash, json(receipt)));
         return receipt;
     }
 
