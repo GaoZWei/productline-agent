@@ -289,9 +289,9 @@ test-java-contract: ## 验证Java只读查询及M8返工详情接口契约
 		-Dtest=BusinessQueryApiIntegrationTest,ReworkQueryApiIntegrationTest \
 		test
 
-test-java-write: ## 验证Java写接口及M8开始/异常的权限、幂等、并发与操作日志
+test-java-write: ## 验证Java写接口及M8开始/异常/恢复的权限、幂等、并发与操作日志
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessWriteApiIntegrationTest,ReworkStartApiIntegrationTest,ReworkInterruptionApiIntegrationTest \
+		-Dtest=BusinessWriteApiIntegrationTest,ReworkStartApiIntegrationTest,ReworkInterruptionApiIntegrationTest,ReworkResumeApiIntegrationTest \
 		test
 
 test-java-errors: ## 验证 M0.6 统一响应、错误映射和 Trace ID

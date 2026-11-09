@@ -2328,3 +2328,23 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 成果修订、检查、复核及当前材料指针保持，不能用旧修订或旧通过复核代替当前事实，不补造存量生命周期。
 - 操作、完整请求幂等、审计及原成功回执同事务提交或回滚；同请求重放不再次改状态，不同动作或原因不能借用同一键。
 - 仅交付Java异常写底座，技术错误不自动认定业务失败，不实现恢复、模型处理、Python独立确认或页面。
+
+## 2026-11-09 T809 M8.2 Java受控恢复
+
+### 核心解决的问题
+
+人工返工被阻塞或失败后，需要在确认可继续时显式恢复，并能保留原异常原因和已经登记的材料。
+恢复不能变成自动重跑；旧恢复请求重放也不能再次改变后来已经失败的事实。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkInterruptionController.java`：`resume`显式HTTP入口，复用严格版本与说明解析。
+- `business-service/src/main/java/com/productline/business/application/ReworkInterruptionService.java`：`resume`与`transitionInTransaction`复用领域RESUME约束、事实复查及幂等/审计/原回执事务。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkStartRepository.java`：`markResumed`绑定重新读取的原状态，仅条件恢复RUNNING。
+
+### 实现的核心功能
+
+- 仅受控轮次无后继、原生产COMPLETED及BLOCKED或FAILED/PROCESSING允许恢复；问题仍PROCESSING，共享任务版本递增一次。
+- 恢复说明原样写入新RESUME_REWORK审计，旧异常原因、创建原因、原开始信息及全部处理/检查/复核材料保持。
+- 状态、版本、完整请求幂等、新审计及原成功JSON同事务保存或回滚；同请求只返回首次结果，后来再次失败不被旧恢复重放改变。
+- 不自动重跑生产或修正成果，不新增迁移、独立原因查询、Python确认/写Tool或页面接线。

@@ -7,7 +7,7 @@ import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** 开始与异常操作共用的SQL写集，必须由应用服务同一事务调用，不补造存量生命周期。 */
+/** 开始、异常及恢复共用的SQL写集，必须由应用服务同一事务调用，不补造存量生命周期。 */
 @Repository
 public class ReworkStartRepository {
     private final JdbcTemplate jdbc;
@@ -80,6 +80,15 @@ public class ReworkStartRepository {
         // 创建原因、开始信息及历史材料均不覆盖；异常原因另写本次操作审计。
         return jdbc.update("UPDATE rework_tasks SET status=? WHERE task_id=? AND rework_task_id=? AND status='RUNNING'",
                 status.name(), taskId, reworkId);
+    }
+
+    public int markResumed(String taskId, String reworkId, ProductionTaskStatus previousStatus) {
+        if (previousStatus != ProductionTaskStatus.BLOCKED && previousStatus != ProductionTaskStatus.FAILED) {
+            throw new IllegalArgumentException("resume source must be BLOCKED or FAILED");
+        }
+        // 只恢复状态；原始原因、开始信息和历史证据均不重写。
+        return jdbc.update("UPDATE rework_tasks SET status='RUNNING' WHERE task_id=? AND rework_task_id=? AND status=?",
+                taskId, reworkId, previousStatus.name());
     }
 
     public int markProcessing(String taskId, String issueId) {

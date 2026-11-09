@@ -44,6 +44,16 @@ public class ReworkInterruptionController {
         return service.fail(taskId, reworkTaskId, actor, role, key, parse(body, contentType));
     }
 
+    @PostMapping("/resume")
+    public ReworkWriteReceipt resume(@PathVariable String taskId, @PathVariable String reworkTaskId,
+            @RequestHeader(value = "X-User-Id", required = false) String actor,
+            @RequestHeader(value = "X-User-Role", required = false) String role,
+            @RequestHeader(value = "Idempotency-Key", required = false) String key,
+            @RequestHeader(value = "Content-Type", required = false) String contentType,
+            @RequestBody(required = false) String body) {
+        return service.resume(taskId, reworkTaskId, actor, role, key, parse(body, contentType));
+    }
+
     private ReworkInterruptionRequest parse(String body, String contentType) {
         try {
             if (contentType == null || !MediaType.APPLICATION_JSON.includes(MediaType.parseMediaType(contentType))) {

@@ -33,7 +33,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class ReworkInterruptionService {
     private enum Mode {
-        BLOCK("BLOCK_REWORK"), FAIL("FAIL_REWORK");
+        BLOCK("BLOCK_REWORK"), FAIL("FAIL_REWORK"), RESUME("RESUME_REWORK");
         final String operation;
         Mode(String operation) { this.operation = operation; }
     }
@@ -60,24 +60,29 @@ public class ReworkInterruptionService {
 
     public ReworkWriteReceipt block(String taskId, String reworkId, String actor, String role,
             String key, ReworkInterruptionRequest request) {
-        return interrupt(taskId, reworkId, actor, role, key, request, Mode.BLOCK);
+        return transition(taskId, reworkId, actor, role, key, request, Mode.BLOCK);
     }
 
     public ReworkWriteReceipt fail(String taskId, String reworkId, String actor, String role,
             String key, ReworkInterruptionRequest request) {
-        return interrupt(taskId, reworkId, actor, role, key, request, Mode.FAIL);
+        return transition(taskId, reworkId, actor, role, key, request, Mode.FAIL);
     }
 
-    private ReworkWriteReceipt interrupt(String taskId, String reworkId, String actor, String role,
+    public ReworkWriteReceipt resume(String taskId, String reworkId, String actor, String role,
+            String key, ReworkInterruptionRequest request) {
+        return transition(taskId, reworkId, actor, role, key, request, Mode.RESUME);
+    }
+
+    private ReworkWriteReceipt transition(String taskId, String reworkId, String actor, String role,
             String key, ReworkInterruptionRequest request, Mode mode) {
         validate(taskId, reworkId, actor, role, key);
         Objects.requireNonNull(request, "request");
         String requestHash = hash(json(List.of(mode.operation, taskId, reworkId, request.expectedVersion(), request.reason())));
         return Objects.requireNonNull(transaction.execute(status ->
-                interruptInTransaction(taskId, reworkId, actor, key, request, requestHash, mode)));
+                transitionInTransaction(taskId, reworkId, actor, key, request, requestHash, mode)));
     }
 
-    private ReworkWriteReceipt interruptInTransaction(String taskId, String reworkId, String actor,
+    private ReworkWriteReceipt transitionInTransaction(String taskId, String reworkId, String actor,
             String key, ReworkInterruptionRequest request, String requestHash, Mode mode) {
         String operation = mode.operation;
         int inserted = writes.reserve(key, operation, requestHash, actor);
@@ -114,9 +119,12 @@ public class ReworkInterruptionService {
         }
         ReworkTransitionPolicy.Transition proposal;
         try {
-            proposal = mode == Mode.BLOCK
-                    ? policy.block(rework, ReworkRound.from(rework, lifecycle.roundNumber()), request.reason())
-                    : policy.fail(rework, ReworkRound.from(rework, lifecycle.roundNumber()), request.reason());
+            ReworkRound round = ReworkRound.from(rework, lifecycle.roundNumber());
+            proposal = switch (mode) {
+                case BLOCK -> policy.block(rework, round, request.reason());
+                case FAIL -> policy.fail(rework, round, request.reason());
+                case RESUME -> policy.resume(rework, round, request.reason());
+            };
         } catch (IllegalArgumentException | IllegalStateException exception) {
             throw new BusinessConflictException("current task, rework or issue state does not allow interruption");
         }
@@ -125,7 +133,10 @@ public class ReworkInterruptionService {
         if (!writes.lockProcessingIssue(taskId, issueId)) {
             throw new BusinessConflictException("source issue was modified concurrently");
         }
-        updated(writes.markInterrupted(taskId, reworkId, proposal.getAfter().reworkStatus()));
+        // 恢复须仍匹配刚复查的BLOCKED/FAILED，不能把一次旧恢复意图作用到别的状态。
+        updated(mode == Mode.RESUME
+                ? writes.markResumed(taskId, reworkId, proposal.getBefore().reworkStatus())
+                : writes.markInterrupted(taskId, reworkId, proposal.getAfter().reworkStatus()));
         var current = reads.findDetail(taskId, reworkId)
                 .orElseThrow(() -> new IllegalStateException("interrupted rework snapshot is unavailable"));
         String operationId = "OPERATION-" + UUID.randomUUID().toString().toUpperCase(Locale.ROOT);

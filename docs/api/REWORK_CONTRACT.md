@@ -1,9 +1,9 @@
-# M8返工生命周期契约 v1（T804冻结，T806～T808已实现详情、开始与异常）
+# M8返工生命周期契约 v1（T804冻结，T806～T809已实现详情、开始、异常与恢复）
 
 ## 1. 适用范围与实现边界
 
 本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
-T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail的Java校验与原子写入。
+T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入。
 其余新增路径仍待实现；Python Client/Tool、独立Approval及前端新类型尚未接线，不能将Java写接口描述为完整人工确认闭环。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
@@ -28,7 +28,7 @@ Java JSON使用camelCase；Python内部使用snake_case并显式绑定别名，�
 | 人员与时间 | 写入人从实际请求身份确定，写入时间由Java生成UTC ISO-8601字符串；请求不得提交inspectorId、reviewedBy或登记时间 |
 | Header | 新端点要求非空白且最多128位、无CR/LF的X-User-Id和精确REVIEWER角色；写入还要求1～128位`^[A-Za-z0-9._:-]+$`的Idempotency-Key |
 
-以下为确定性权限映射，T806已落实READ_REWORK，T807/T808已落实Java START_REWORK/BLOCK_REWORK/FAIL_REWORK角色校验，独立Approval仍待接线；新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
+以下为确定性权限映射，T806已落实READ_REWORK，T807～T809已落实Java START_REWORK/BLOCK_REWORK/FAIL_REWORK/RESUME_REWORK角色校验，独立Approval仍待接线；新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
 
 | operation | Python权限 | 独立人工确认 |
 | --- | --- | --- |
@@ -95,7 +95,7 @@ expectedVersion必须来自最新Java事实。所有写入仅在生产任务COMP
 | POST R/start | expectedVersion | T807已实现Java START_REWORK；PENDING/OPEN → RUNNING/PROCESSING，独立确认接线待后续 |
 | POST R/block | expectedVersion、reason | T808已实现Java BLOCK_REWORK；RUNNING/PROCESSING → BLOCKED/PROCESSING |
 | POST R/fail | expectedVersion、reason | T808已实现Java FAIL_REWORK；RUNNING/PROCESSING → FAILED/PROCESSING |
-| POST R/resume | expectedVersion、reason | RESUME_REWORK；BLOCKED或FAILED/PROCESSING → RUNNING/PROCESSING |
+| POST R/resume | expectedVersion、reason | T809已实现Java RESUME_REWORK；BLOCKED或FAILED/PROCESSING → RUNNING/PROCESSING |
 | POST R/results | expectedVersion、artifact、processingComment、evidenceReferences | REGISTER_REWORK_RESULT；仅RUNNING/PROCESSING，生成新的processingRevision，旧修订保留 |
 | POST R/inspections | expectedVersion、processingRevision、items | REGISTER_REWORK_INSPECTION；仅RUNNING/PROCESSING，检查须绑定当前处理修订 |
 | POST R/review | expectedVersion、processingRevision、inspectionId、status、reviewComment | SUBMIT_REWORK_REVIEW；仅COMPLETED/RESOLVED，status为APPROVED/REJECTED/REWORK_REQUIRED |
@@ -228,8 +228,8 @@ Agent首版仍仅沿用坐标系返工语义，新增HTTP及领域类型不代�
 最新检查失败但旧检查通过；旧成果通过不能放行新轮；通过检查的原子完成与回滚；退回后独立下一轮；
 缺证据/轮次的历史只读；旧路径/DTO及ORDER-003初始黄金链路不变；写入超时核对不冒充未执行。
 
-T804只冻结本文和三端字段映射，示例不是实际操作记录；T806交付GET R，T807交付POST R/start，T808交付POST R/block及R/fail，其余新HTTP及三端确认验收留在后续任务。
-T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1已验收，M8.2已接入详情及Java开始/异常写入。
+T804只冻结本文和三端字段映射，示例不是实际操作记录；T806交付GET R，T807交付POST R/start，T808交付POST R/block及R/fail，T809交付POST R/resume，其余新HTTP及三端确认验收留在后续任务。
+T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1已验收，M8.2已接入详情及Java开始/异常/恢复写入。
 
 ## 9. T805存储实现边界
 
@@ -273,4 +273,14 @@ Java重新校验REVIEWER身份、归属、受控轮次、无后继、共享版�
 异常原因记录在本次operation_logs.after_state.reason，不覆盖reworkTask.reason的原始创建原因；开始人员/时间、成果修订、检查、复核和历史记录均不变。
 状态、版本、完整请求幂等绑定、审计和固定12字段成功回执同事务提交，审计或回执失败全部回滚。请求摘要包含具体operation及原因原值，同键换动作、用户、目标、版本或原因均409；同请求只重放首次回执。
 返回本次提交后的状态和当前材料指针，不沿用旧修订或旧通过复核。HTTP超时或500不能自动推断业务FAILED，也不允许自动换键重试。
-未新增迁移、异常原因独立查询字段或历史分页；独立Approval/写Tool、页面、受控恢复及自动处理均未接入，恢复仍按T809单独实现。
+T808未新增迁移、异常原因独立查询字段或历史分页；独立Approval/写Tool、页面及自动处理均未接入，受控恢复由T809单独实现，见下一节。
+
+## 13. T809受控恢复实现边界
+
+`POST R/resume`要求REVIEWER身份及安全Idempotency-Key，请求严格且仅含expectedVersion、reason，沿用第12节原样文本、UTF-16长度及无损UTF-8规则；不接受自报确认、身份、当前状态或时间。
+复用T803 RESUME约束，锁父任务后重验归属、受控轮次、无后继、共享版本及原生产COMPLETED；仅返工BLOCKED或FAILED且来源问题PROCESSING可恢复，原状态条件更新为RUNNING，问题仍PROCESSING，版本只加一。
+恢复说明保存于新操作RESUME_REWORK的operation_logs.after_state.reason，操作者和时间取实际请求身份及服务端审计时间；不重写原开始人员/时间、创建原因、旧异常原因或任何成果/检查/复核历史。
+状态、版本、完整请求幂等绑定、新审计和固定12字段成功回执在同一事务提交或回滚。请求摘要包含operation、目标、原expectedVersion和reason原值，换用户/目标/版本/原因/动作不能复用同一键。
+同请求重放只返回首次成功JSON；若后来再次阻塞或失败，旧恢复回执仍为首次RUNNING及原版本，不执行新恢复，当前事实通过详情另读。只恢复人工处理流程，不触发生产重跑、外部修正、自动检查或自动写入重试。
+返回材料指针仍按当前修订和检查绑定，不把旧通过或旧复核作为最新结论；无轮次的存量拒绝恢复，不补造生命周期。
+无新迁移、恢复说明独立查询、列表分页、Python独立Approval/写Tool或页面接线；Header不能证明已人工确认。下一最小任务T810本组收口，尚不能登记成果、完成返工或关闭问题。
