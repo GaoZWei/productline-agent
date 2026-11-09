@@ -1,9 +1,9 @@
-# M8返工生命周期契约 v1（T804冻结，T806/T807已实现详情与开始）
+# M8返工生命周期契约 v1（T804冻结，T806～T808已实现详情、开始与异常）
 
 ## 1. 适用范围与实现边界
 
 本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
-T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start的Java校验与原子写入。
+T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail的Java校验与原子写入。
 其余新增路径仍待实现；Python Client/Tool、独立Approval及前端新类型尚未接线，不能将Java写接口描述为完整人工确认闭环。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
@@ -28,7 +28,7 @@ Java JSON使用camelCase；Python内部使用snake_case并显式绑定别名，�
 | 人员与时间 | 写入人从实际请求身份确定，写入时间由Java生成UTC ISO-8601字符串；请求不得提交inspectorId、reviewedBy或登记时间 |
 | Header | 新端点要求非空白且最多128位、无CR/LF的X-User-Id和精确REVIEWER角色；写入还要求1～128位`^[A-Za-z0-9._:-]+$`的Idempotency-Key |
 
-以下为确定性权限映射，T806已落实READ_REWORK，T807已落实Java START_REWORK角色校验，其独立Approval仍待接线；新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
+以下为确定性权限映射，T806已落实READ_REWORK，T807/T808已落实Java START_REWORK/BLOCK_REWORK/FAIL_REWORK角色校验，独立Approval仍待接线；新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
 
 | operation | Python权限 | 独立人工确认 |
 | --- | --- | --- |
@@ -93,8 +93,8 @@ expectedVersion必须来自最新Java事实。所有写入仅在生产任务COMP
 | --- | --- | --- |
 | POST B | sourceIssueId、expectedVersion、reason | CREATE_LIFECYCLE_REWORK；问题OPEN、无受控前驱及活动返工，创建受控PENDING首轮；Java部分随M8.4/T819首轮/后继创建实现 |
 | POST R/start | expectedVersion | T807已实现Java START_REWORK；PENDING/OPEN → RUNNING/PROCESSING，独立确认接线待后续 |
-| POST R/block | expectedVersion、reason | BLOCK_REWORK；RUNNING/PROCESSING → BLOCKED/PROCESSING |
-| POST R/fail | expectedVersion、reason | FAIL_REWORK；RUNNING/PROCESSING → FAILED/PROCESSING |
+| POST R/block | expectedVersion、reason | T808已实现Java BLOCK_REWORK；RUNNING/PROCESSING → BLOCKED/PROCESSING |
+| POST R/fail | expectedVersion、reason | T808已实现Java FAIL_REWORK；RUNNING/PROCESSING → FAILED/PROCESSING |
 | POST R/resume | expectedVersion、reason | RESUME_REWORK；BLOCKED或FAILED/PROCESSING → RUNNING/PROCESSING |
 | POST R/results | expectedVersion、artifact、processingComment、evidenceReferences | REGISTER_REWORK_RESULT；仅RUNNING/PROCESSING，生成新的processingRevision，旧修订保留 |
 | POST R/inspections | expectedVersion、processingRevision、items | REGISTER_REWORK_INSPECTION；仅RUNNING/PROCESSING，检查须绑定当前处理修订 |
@@ -228,8 +228,8 @@ Agent首版仍仅沿用坐标系返工语义，新增HTTP及领域类型不代�
 最新检查失败但旧检查通过；旧成果通过不能放行新轮；通过检查的原子完成与回滚；退回后独立下一轮；
 缺证据/轮次的历史只读；旧路径/DTO及ORDER-003初始黄金链路不变；写入超时核对不冒充未执行。
 
-T804只冻结本文和三端字段映射，示例不是实际操作记录；T806交付GET R，T807交付POST R/start，其余新HTTP及三端确认验收留在后续任务。
-T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1已验收，M8.2已接入详情和Java开始写入。
+T804只冻结本文和三端字段映射，示例不是实际操作记录；T806交付GET R，T807交付POST R/start，T808交付POST R/block及R/fail，其余新HTTP及三端确认验收留在后续任务。
+T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1已验收，M8.2已接入详情及Java开始/异常写入。
 
 ## 9. T805存储实现边界
 
@@ -263,3 +263,14 @@ Java重验REVIEWER身份、业务ID和安全幂等键。新请求先预留幂等
 同用户、键、operation、目标和完整请求重放只返回首次回执；版本、用户、目标或操作不同返回409。后续状态变化不重写原回执或再次改变业务。
 开始只登记人工处理流程，不调用成果修正程序。Header不是人工确认凭证，Java不访问Agent表；Python确认/写Tool、页面及独立回执查询HTTP仍在后续阶段。
 本轮只对齐ReworkRound为long及正安全整数范围，不改变轮次分配、连续性、旧实体/DTO、V1～V5或固定数据；已有SQL范围保持。
+
+## 12. T808阻塞与失败登记实现边界
+
+`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/block`及`/fail`只接受application/json中的expectedVersion和reason。
+版本须为安全整数；原因须为非空白字符串、最多1000个UTF-16单元，原样保存空白和合法非BMP字符。拒绝类型强转、未知字段、重复键、尾随JSON，以及无法无损写入UTF-8文本的NUL或未配对代理项。
+Java重新校验REVIEWER身份、归属、受控轮次、无后继、共享版本及原生产COMPLETED；仅返工RUNNING且问题PROCESSING允许登记，PENDING/BLOCKED/FAILED/COMPLETED均不能由本接口覆盖。
+预留幂等绑定并锁父任务，按版本条件递增一次任务版本；锁定并保留问题PROCESSING，将返工条件更新为BLOCKED或FAILED。
+异常原因记录在本次operation_logs.after_state.reason，不覆盖reworkTask.reason的原始创建原因；开始人员/时间、成果修订、检查、复核和历史记录均不变。
+状态、版本、完整请求幂等绑定、审计和固定12字段成功回执同事务提交，审计或回执失败全部回滚。请求摘要包含具体operation及原因原值，同键换动作、用户、目标、版本或原因均409；同请求只重放首次回执。
+返回本次提交后的状态和当前材料指针，不沿用旧修订或旧通过复核。HTTP超时或500不能自动推断业务FAILED，也不允许自动换键重试。
+未新增迁移、异常原因独立查询字段或历史分页；独立Approval/写Tool、页面、受控恢复及自动处理均未接入，恢复仍按T809单独实现。

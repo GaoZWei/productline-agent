@@ -2307,3 +2307,24 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 共享任务版本只递增一次，状态、元数据、幂等完成、审计和原成功回执同事务提交；失败回滚，不补造历史生命周期。
 - 同用户/键/operation/目标/完整请求重放返回第一次结果，后来的状态和版本不重建旧回执；不自动换键重试或修改原生产状态。
 - 仅完成Java写底座，M8独立Approval、写Tool、页面及自动成果修正均未接入。
+
+## 2026-11-09 T808 M8.2 Java阻塞与失败登记
+
+### 核心解决的问题
+
+返工开始后若无法登记阻塞或失败，就只能保留RUNNING，既不能解释停滞原因，也容易把技术请求失败误当成业务失败。
+提供显式异常登记并原样保存原因，状态变化不覆盖创建原因、开始信息或历史材料，为后续受控恢复保留事实。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkInterruptionController.java`、`api/dto/ReworkInterruptionRequest.java`：两个显式POST入口和严格版本/原因解析。
+- `business-service/src/main/java/com/productline/business/application/ReworkInterruptionService.java`：`block`、`fail`复用领域约束，在独立事务内完成授权、版本、状态、幂等及原回执校验。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkStartRepository.java`：`lockProcessingIssue`、`markInterrupted`及共用幂等/审计/回执写集。
+
+### 实现的核心功能
+
+- 仅RUNNING/PROCESSING、原生产COMPLETED且受控轮次无后继允许登记；状态改BLOCKED或FAILED，问题仍PROCESSING，任务版本只加一。
+- 原因须非空白且符合UTF-16长度及无损UTF-8存储规则，原样写入本次审计，原始创建原因和开始元数据保持。
+- 成果修订、检查、复核及当前材料指针保持，不能用旧修订或旧通过复核代替当前事实，不补造存量生命周期。
+- 操作、完整请求幂等、审计及原成功回执同事务提交或回滚；同请求重放不再次改状态，不同动作或原因不能借用同一键。
+- 仅交付Java异常写底座，技术错误不自动认定业务失败，不实现恢复、模型处理、Python独立确认或页面。

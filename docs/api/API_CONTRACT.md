@@ -6,7 +6,7 @@
 状态字符串。当前已实现9个只读端点（含V4扩充后的订单列表），M0.5已实现提交复核和创建返工两个写端点，
 M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
 KB-02.1新增无写入的知识管理授权查询`POST /api/knowledge/authorize`，详见[知识管理授权契约](../knowledge/KNOWLEDGE_AUTHORIZATION.md)。
-M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`；其他新增路径及三端确认仍待开发。
+M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807/T808已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`及`/fail`；其他新增路径及三端确认仍待开发。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -565,3 +565,4 @@ T804当时仅冻结文档，不增加运行行为；当前新接口可用性以S
 T805另已完成[V5 SQL存储及隔离升级验证](REWORK_CONTRACT.md#9-t805存储实现边界)，旧DTO保持不变；M8.1已验收。
 T806新增[详情读取](REWORK_CONTRACT.md#10-t806详情读取实现边界)，要求REVIEWER身份，返回归属、真实轮次、任务版本、当前材料和允许动作；不提供M8写入。
 T807新增[开始返工](REWORK_CONTRACT.md#11-t807开始返工实现边界)，独立校验身份/版本/状态/幂等，在同一Java事务保存开始元数据、状态、版本、审计及原成功回执；Python/页面确认尚未接入。
+T808新增[阻塞与失败登记](REWORK_CONTRACT.md#12-t808阻塞与失败登记实现边界)，只允许RUNNING/PROCESSING，异常原因写入本次审计且保留创建原因和全部材料；原始回执、幂等、状态及版本原子提交，受控恢复仍未实现。

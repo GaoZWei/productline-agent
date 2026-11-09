@@ -1,12 +1,13 @@
 package com.productline.business.domain.repository;
 
+import com.productline.business.domain.enums.ProductionTaskStatus;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** 开始操作的SQL写集，必须由应用服务的同一事务调用，不补造存量生命周期。 */
+/** 开始与异常操作共用的SQL写集，必须由应用服务同一事务调用，不补造存量生命周期。 */
 @Repository
 public class ReworkStartRepository {
     private final JdbcTemplate jdbc;
@@ -64,6 +65,21 @@ public class ReworkStartRepository {
     public int markRunning(String taskId, String reworkId) {
         return jdbc.update("UPDATE rework_tasks SET status='RUNNING' WHERE task_id=? AND rework_task_id=? AND status='PENDING'",
                 taskId, reworkId);
+    }
+
+    public boolean lockProcessingIssue(String taskId, String issueId) {
+        // 保持PROCESSING事实至提交；NO KEY UPDATE仍允许旧复核插入所需的外键KEY SHARE。
+        return !jdbc.query("SELECT issue_id FROM quality_issues WHERE task_id=? AND issue_id=? AND status='PROCESSING' FOR NO KEY UPDATE",
+                (rs, row) -> rs.getString(1), taskId, issueId).isEmpty();
+    }
+
+    public int markInterrupted(String taskId, String reworkId, ProductionTaskStatus status) {
+        if (status != ProductionTaskStatus.BLOCKED && status != ProductionTaskStatus.FAILED) {
+            throw new IllegalArgumentException("interruption target must be BLOCKED or FAILED");
+        }
+        // 创建原因、开始信息及历史材料均不覆盖；异常原因另写本次操作审计。
+        return jdbc.update("UPDATE rework_tasks SET status=? WHERE task_id=? AND rework_task_id=? AND status='RUNNING'",
+                status.name(), taskId, reworkId);
     }
 
     public int markProcessing(String taskId, String issueId) {
