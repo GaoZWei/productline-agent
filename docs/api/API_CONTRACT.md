@@ -6,7 +6,7 @@
 状态字符串。当前已实现9个只读端点（含V4扩充后的订单列表），M0.5已实现提交复核和创建返工两个写端点，
 M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
 KB-02.1新增无写入的知识管理授权查询`POST /api/knowledge/authorize`，详见[知识管理授权契约](../knowledge/KNOWLEDGE_AUTHORIZATION.md)。
-M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`及`/resume`；其他新增路径及三端确认仍待开发。
+M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809及T811/T812已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`、`/resume`、`/results`及`/inspections`；其他新增路径及三端确认仍待开发。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -567,3 +567,7 @@ T806新增[详情读取](REWORK_CONTRACT.md#10-t806详情读取实现边界)，�
 T807新增[开始返工](REWORK_CONTRACT.md#11-t807开始返工实现边界)，独立校验身份/版本/状态/幂等，在同一Java事务保存开始元数据、状态、版本、审计及原成功回执；Python/页面确认尚未接入。
 T808新增[阻塞与失败登记](REWORK_CONTRACT.md#12-t808阻塞与失败登记实现边界)，只允许RUNNING/PROCESSING，异常原因写入本次审计且保留创建原因和全部材料；原始回执、幂等、状态及版本原子提交。
 T809新增[受控恢复](REWORK_CONTRACT.md#13-t809受控恢复实现边界)，仅BLOCKED或FAILED/PROCESSING可转RUNNING，说明写新审计，旧原因、开始信息及全部材料不改；后续再失败时重放旧恢复请求只返回原回执，不再次恢复。三端确认仍待接线，不执行自动重跑。
+T810完成[跨操作一致性验收](REWORK_CONTRACT.md#14-t810跨操作一致性验收边界)，覆盖全局同键竞争、与旧复核共享版本、幂等完成/审计/回执故障回滚及全组旧回执重放；M8.2已验收，不新增HTTP或修改请求/响应。
+T811新增[成果登记](REWORK_CONTRACT.md#15-t811成果登记实现边界)，仅RUNNING/PROCESSING可追加不可变处理修订，Java登记操作者/时间；材料、共享版本、幂等、审计及原回执同事务保存。登记不等于检查通过，不改变返工、问题或交付状态。
+T812新增[人工检查登记](REWORK_CONTRACT.md#16-t812人工检查登记实现边界)，绑定明确当前修订，Java记录人员/时间并汇总检查项；FAILED保留运行状态，PASSED原子完成本轮并将问题置为RESOLVED，仍待再次复核，不关闭问题或解除交付阻塞。
+T813完成[失败检查与成果更新验收](REWORK_CONTRACT.md#17-t813失败检查与成果更新验收边界)，覆盖完整HTTP链路、过期版本/修订拒绝、历史与原回执保留、实际锁竞争及更新回滚；不新增接口或修改运行实现，Python确认快照STALE仍待后续。

@@ -1,9 +1,9 @@
-# M8返工生命周期契约 v1（T804冻结，T806～T809已实现详情、开始、异常与恢复）
+# M8返工生命周期契约 v1（T804冻结，M8.2已验收，T811/T812成果与检查登记已接通）
 
 ## 1. 适用范围与实现边界
 
 本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
-T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入。
+T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入；T810完成本组跨操作一致性验收，T811/T812接通POST R/results成果及R/inspections人工检查登记，T813完成失败后更新材料的跨接口验收。
 其余新增路径仍待实现；Python Client/Tool、独立Approval及前端新类型尚未接线，不能将Java写接口描述为完整人工确认闭环。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
@@ -96,8 +96,8 @@ expectedVersion必须来自最新Java事实。所有写入仅在生产任务COMP
 | POST R/block | expectedVersion、reason | T808已实现Java BLOCK_REWORK；RUNNING/PROCESSING → BLOCKED/PROCESSING |
 | POST R/fail | expectedVersion、reason | T808已实现Java FAIL_REWORK；RUNNING/PROCESSING → FAILED/PROCESSING |
 | POST R/resume | expectedVersion、reason | T809已实现Java RESUME_REWORK；BLOCKED或FAILED/PROCESSING → RUNNING/PROCESSING |
-| POST R/results | expectedVersion、artifact、processingComment、evidenceReferences | REGISTER_REWORK_RESULT；仅RUNNING/PROCESSING，生成新的processingRevision，旧修订保留 |
-| POST R/inspections | expectedVersion、processingRevision、items | REGISTER_REWORK_INSPECTION；仅RUNNING/PROCESSING，检查须绑定当前处理修订 |
+| POST R/results | expectedVersion、artifact、processingComment、evidenceReferences | T811已实现Java REGISTER_REWORK_RESULT；仅RUNNING/PROCESSING，生成新的processingRevision，旧修订保留 |
+| POST R/inspections | expectedVersion、processingRevision、items | T812已实现Java REGISTER_REWORK_INSPECTION；仅RUNNING/PROCESSING，检查须绑定当前处理修订，通过分支原子完成本轮并将问题置为RESOLVED |
 | POST R/review | expectedVersion、processingRevision、inspectionId、status、reviewComment | SUBMIT_REWORK_REVIEW；仅COMPLETED/RESOLVED，status为APPROVED/REJECTED/REWORK_REQUIRED |
 | POST R/next-round | expectedVersion、reason | CREATE_NEXT_REWORK；当前轮COMPLETED/OPEN且有效复核为REJECTED或REWORK_REQUIRED，无活动返工；生成后继PENDING轮次 |
 
@@ -283,4 +283,48 @@ T808未新增迁移、异常原因独立查询字段或历史分页；独立Appr
 状态、版本、完整请求幂等绑定、新审计和固定12字段成功回执在同一事务提交或回滚。请求摘要包含operation、目标、原expectedVersion和reason原值，换用户/目标/版本/原因/动作不能复用同一键。
 同请求重放只返回首次成功JSON；若后来再次阻塞或失败，旧恢复回执仍为首次RUNNING及原版本，不执行新恢复，当前事实通过详情另读。只恢复人工处理流程，不触发生产重跑、外部修正、自动检查或自动写入重试。
 返回材料指针仍按当前修订和检查绑定，不把旧通过或旧复核作为最新结论；无轮次的存量拒绝恢复，不补造生命周期。
-无新迁移、恢复说明独立查询、列表分页、Python独立Approval/写Tool或页面接线；Header不能证明已人工确认。下一最小任务T810本组收口，尚不能登记成果、完成返工或关闭问题。
+无新迁移、恢复说明独立查询、列表分页、Python独立Approval/写Tool或页面接线；Header不能证明已人工确认。T809交付时下一任务为T810，本组收口结果见下一节，尚不能登记成果、完成返工或关闭问题。
+
+## 14. T810跨操作一致性验收边界
+
+M8.2已完成详情、开始、阻塞/失败及恢复的Java验收；T810仅补充跨操作测试和Make入口，没有新增端点或变更运行实现、Schema、请求/响应及固定事实。
+真实HTTP在独立schema中验证四种动作的全局同键竞争：不同操作或目标不能共用键提交，同键异内容不能接管结果，已提交的未完成预留返回409且保持原样。
+四种动作分别与旧SUBMIT_REVIEW争同一任务版本，只允许一个提交，失败方不留下业务记录、幂等或审计；不代表已实现M8再次复核。
+分别在幂等完成UPDATE、审计INSERT和回执INSERT注入数据库故障，要求状态、版本、开始元数据及操作记录整体回滚；移除故障后原键可重提，不在产品中增加自动重试。
+开始→阻塞→恢复→失败后逆序重放所有旧请求，只返回各自原成功JSON及原版本，当前仍为FAILED/PROCESSING；ORDER-003固定关联事实逐行保持。
+M8.2在停止线收口，当时下一最小任务T811成果登记现已接通，见下一节；人工检查已由T812接通，问题关闭、独立Approval和三端入口仍待开发，本组验收不扩大现有接口权限或宣称完整返工闭环。
+
+## 15. T811成果登记实现边界
+
+`POST R/results`要求REVIEWER身份和安全Idempotency-Key，严格且仅接受第4节四个请求字段，artifact也仅含artifactId/artifactVersion。
+版本须为安全整数，材料遵守第2节UTF-16长度、原值和空白规则；拒绝未知/重复字段、类型强转、尾随JSON、NUL或未配对代理项，不接受自报修订、人员、时间、结论或确认。
+Java预留完整请求幂等绑定，锁父任务后重新核对归属、受控轮次、无后继、共享版本及原生产COMPLETED；仅RUNNING/PROCESSING可登记，无生命周期的存量返回409且不自动纳管。
+锁定本轮及来源状态，按本返工最大修订连续加一；修订或任务版本达到安全整数上限拒绝，不生成不安全数字。
+在同一事务追加原样artifact、说明、证据引用与实际请求人/服务端UTC时间，任务版本加一，保存审计、幂等完成及固定12字段原成功回执；任一步失败全部回滚。
+材料和回执不可覆盖，同键绑定operation、目标、原预期版本及完整材料（含引用顺序和说明空白）与用户；同请求重放只返回首次回执，不因后来阻塞或新修订重建结果。
+成果版本文本相同也新增修订；原材料/检查/复核历史保留，当前详情按新修订绑定，inspectionId/reviewId为空，不把旧通过用于新材料。
+成果登记后返工仍RUNNING、问题仍PROCESSING、原生产仍COMPLETED，不访问或执行引用、不验证原件、不生成检查结论或解除交付阻塞；人工检查已由T812接通，T814专项收口及T815历史分页仍待完成。
+本任务仅交付Java登记底座，不改变旧DTO、迁移、固定数据或Python/前端契约实现；Header不是确认凭证，独立Approval/写Tool、确认失效处理与页面仍待后续。
+
+## 16. T812人工检查登记实现边界
+
+`POST R/inspections`要求REVIEWER身份及安全Idempotency-Key，严格且仅接收expectedVersion、processingRevision和items；每项严格包含checkItem、result、comment和evidenceReferences，按第2节格式原样校验。
+不接受总体result、检查人/时间/序号、状态或确认字段；Java依据非空检查项确定总体结论，实际请求人和服务端UTC时间作为检查记录的人员与时间，不访问外部成果或证据。
+预留完整请求幂等绑定并锁父任务后，重验归属、受控轮次无后继、共享版本、原生产COMPLETED、RUNNING/PROCESSING和明确的当前processingRevision；缺材料、旧修订、跨资源或非法状态拒绝且无副作用。
+检查序号按本返工所有修订的最大inspectionSequence连续加一，正安全整数上限拒绝递增；旧检查及材料不可覆盖。
+任一检查项FAILED则保存总体FAILED，返工仍RUNNING且问题PROCESSING；全部PASSED经既有领域COMPLETE约束，检查记录与返工COMPLETED、问题RESOLVED原子保存，原生产保持COMPLETED。
+为避免公开“已通过但未完成”的中间状态，最小通过分支与T812一并接通，T814仍保留专项原子性收口；不另设complete接口、不关闭问题、不推进订单或交付。
+检查、共享版本递增一次、幂等完成、审计和固定12字段原回执同事务提交或回滚；回执包含当前修订及本次inspectionId，reviewId为null。
+同用户/键/操作/目标/原版本/修订/完整检查项重放只读首次回执；改变任一绑定或项/引用顺序冲突，后来的通过不能改写旧失败回执或再次执行旧操作，当前事实通过详情查询另读。
+本任务没有新增迁移或变更旧接口；独立Approval/写Tool、确认快照失效处理、历史分页、再次复核及页面仍待后续，Header不能证明人工确认，T812交付不代表M8.3整体验收。
+
+## 17. T813失败检查与成果更新验收边界
+
+T813只增加真实HTTP跨接口验收和Make入口，不新增端点或改变运行实现、Schema、固定事实及既有请求/响应。
+成果标识、版本、说明或证据变化，以及相同材料再次登记，都会新增修订；旧检查与修订保留，当前inspection/review为空，未通过检查不完成返工或解决问题。
+新检查必须同时满足最新expectedVersion与当前processingRevision，Java对旧版本、旧修订或二者都旧返回409且无副作用；同修订重复检查也必须使用最新版本。
+旧登记及失败检查的成功请求可重放原回执，后来通过或更新材料不能重建旧结果、重复写入或使旧FAILED重新成为当前结论；已完成轮次不能再追加材料。
+并发测试先持有父任务锁，确认两个HTTP写事务均实际等待锁后再放行，验证检查与更新、两次不同更新争同版本时只一方提交，失败方不留幂等、审计或额外记录。
+更新事务在审计或回执写入失败时全部回滚，旧失败检查继续作为当前结论；移除故障并显式重新提交成功后，新修订才使旧检查不再适用，产品不自动重试或改键。
+这里验收的是Java拒绝过期业务参数；Python Approval快照STALE、独立确认、写Tool和页面仍待M8.5～M8.7，不将后续能力描述为已实现，也不证明跨服务全局只执行一次。
+T814检查通过的原子性专项收口、T815历史分页及M8.3整体验收仍待完成；下一最小任务T814，不进入再次复核或关闭问题。

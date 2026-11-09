@@ -2348,3 +2348,45 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 恢复说明原样写入新RESUME_REWORK审计，旧异常原因、创建原因、原开始信息及全部处理/检查/复核材料保持。
 - 状态、版本、完整请求幂等、新审计及原成功JSON同事务保存或回滚；同请求只返回首次结果，后来再次失败不被旧恢复重放改变。
 - 不自动重跑生产或修正成果，不新增迁移、独立原因查询、Python确认/写Tool或页面接线。
+
+## 2026-11-09 T811 M8.3 Java成果登记
+
+### 核心解决的问题
+
+人工修正后缺少实际成果版本与处理证据登记，系统无法区分已经处理的材料和等待检查的材料。
+将成果、说明及引用按不可变修订保存，使后续检查只能绑定当前材料，登记本身不能产生质量通过或问题已解决的事实。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkResultController.java`、`api/dto/ReworkResultRequest.java`：`register`与`parse`接收成果POST并按冻结契约严格解析原样材料。
+- `business-service/src/main/java/com/productline/business/application/ReworkResultService.java`：`registerInTransaction`重新校验身份、归属、轮次、状态及版本，原子追加修订并保存幂等、审计与原始成功回执。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkResultRepository.java`：`lockRunning`、`latestRevision`和`append`在父任务锁保护下核对本轮状态、分配修订并只追加材料。
+
+### 实现的核心功能
+
+- 仅受控轮次无后继、原生产COMPLETED、返工RUNNING且问题PROCESSING可登记；缺轮次的存量保持只读，不补造历史。
+- 成果标识、版本、处理说明与证据引用按UTF-16长度及无损UTF-8规则校验并原样保存，登记人来自实际请求身份，时间由Java生成。
+- 每次新登记分配连续修订并递增一次共享任务版本，相同成果版本文本也不覆盖旧说明、证据或历史结论。
+- 材料、幂等完成、审计及原成功JSON回执同事务保存；失败全部回滚，同请求只重放原回执，不按后来的状态或材料重建。
+- 新修订的当前检查和复核为空，旧记录保留；仅登记材料，不访问引用、不检查成果、不完成返工、不关闭问题，Python独立确认与页面尚未接入。
+
+## 2026-11-09 T812 M8.3 Java人工检查登记
+
+### 核心解决的问题
+
+仅保存处理说明与成果版本，无法记录人工检查的实际结论，也无法保证检查针对当前成果。
+将逐项结论和证据绑定明确修订，并把通过检查与本轮完成放在同一事务，避免旧材料结论误用或只保存部分成功事实。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkInspectionController.java`、`api/dto/ReworkInspectionRequest.java`：`register`与`parse`接收检查POST，严格校验预期版本、当前修订和逐项材料。
+- `business-service/src/main/java/com/productline/business/application/ReworkInspectionService.java`：`registerInTransaction`复查Java事实、构建既有检查领域对象、汇总结果并保存完整原子写集与原始回执。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkInspectionRepository.java`：`latestSequence`、`append`、`complete`和`resolve`分配连续检查序号、追加记录并条件更新本轮与问题状态。
+
+### 实现的核心功能
+
+- 仅受控轮次无后继、原生产COMPLETED、返工RUNNING且问题PROCESSING时可检查明确的当前修订，不接受旧修订或缺失材料。
+- 逐项保存检查名、PASSED/FAILED、说明和证据，人员及UTC时间由Java记录，总体结论由检查项汇总，不接收自报总体结论或确认凭证。
+- 任一项失败则保留RUNNING/PROCESSING并追加失败历史；全部通过复用既有领域COMPLETE约束，原子保存检查、本轮COMPLETED及问题RESOLVED，原生产不变。
+- 为保持冻结契约的原子边界，通过分支的最小写入与检查入口一起接通；不单独提交通过记录，不另设complete接口，不关闭问题或推进订单/交付。
+- 检查、共享版本、幂等完成、审计和原成功回执同事务提交或回滚；重放返回首次结果，旧检查、材料及回执均保留，Python独立确认与页面尚未接入。

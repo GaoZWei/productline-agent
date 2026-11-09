@@ -64,7 +64,7 @@ V4增量新增ORDER-006～030，不修改V2/V3及既有记录。只读`GET /api/
 提议不是执行回执或授权凭证，不能直接据此绕过人工确认；后续写入须刷新事实并校验权限、版本、幂等，再在同一事务落库。
 
 上述对象本身没有JPA映射；T805以V5提供独立SQL存储，完整登记材料不等于成果存在、实际检查通过或返工完成。
-T806已新增只读详情HTTP，T807～T809已新增Java开始、阻塞、失败和恢复写入；M8 Python独立确认与页面尚未接入，既有实体/DTO不变，原件校验和后续处理仍待实现。
+T806已新增只读详情HTTP，T807～T809已新增Java开始、阻塞、失败和恢复写入，T811/T812接通成果与人工检查登记；M8 Python独立确认与页面尚未接入，既有实体/DTO不变，原件校验和后续复核仍待实现。
 领域记录中的人员与时间仅为待校验材料，不代表已通过认证；真实写服务须从实际身份和服务端时间取值。
 详细边界见[详细计划M8.1](../docs/planning/detailed-plan.md#m81-返工领域与契约)。
 
@@ -72,7 +72,7 @@ T804冻结[返工生命周期契约v1](../docs/api/REWORK_CONTRACT.md)：列明�
 独立人工确认、任务共享版本、原始幂等回执、当前检查/复核选择及存量只读边界。
 检查通过与完成返工合并为一次明确确认的原子写入，不另设complete接口；下一轮必须独立确认创建。
 除T806的GET详情及T807～T809的POST开始/阻塞/失败/恢复外，新增路径仍为契约要求；未装配Python Client/Tool或前端类型，不能把旧接口回归当作其他新HTTP已实现。
-T805已完成V5增量存储和隔离升级验证；当前M8.2已接入详情、Java开始、异常及受控恢复，下一最小任务T810本组幂等、并发和原子性收口。
+T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3已接通T811成果与T812人工检查登记，T813完成失败后成果更新和过期参数拒绝验收，下一最小任务T814检查通过原子性专项收口。
 
 V5由Flyway在未来Java启动时执行，本轮只在隔离测试库应用；不改V1～V4、种子或运行库，不自动生成历史轮次/证据。
 
@@ -129,6 +129,45 @@ ReworkRound内部轮次由int对齐为long并限制正安全整数，与既有JS
 复用异常操作的同一事务与原始成功回执机制；同请求只返回原结果，即使后来再次失败也不执行第二次恢复。
 只恢复人工流程状态，不自动重跑、自动检查或执行成果修正；恢复说明没有新增独立查询页面或字段。
 详见[契约第十三节](../docs/api/REWORK_CONTRACT.md#13-t809受控恢复实现边界)，`make test-java-write`包含真实HTTP恢复、材料保留、并发和回滚用例。
+
+### T810 M8.2跨操作一致性验收
+
+`ReworkWriteConsistencyIntegrationTest`使用独立schema，经真实HTTP验证四种动作共用全局幂等键、完整请求绑定及原始回执。
+不同动作/目标争同键只能提交一次；与旧复核接口争同一任务版本时只能有一个成功，失败方不留下幂等、审计或业务记录。
+分别在幂等完成、审计写入及回执写入时注入数据库故障，核对状态、版本和开始元数据全部回滚，移除故障后原键可重新提交。
+开始→阻塞→恢复→失败后，逆序重放各旧请求只返回原回执，不改变当前事实；固定ORDER-003关联记录逐行保持。
+`make test-java-write`纳入本组测试；验收范围与后续边界见[契约第十四节](../docs/api/REWORK_CONTRACT.md#14-t810跨操作一致性验收边界)。
+本任务不增加业务接口或改写运行实现，M8.2收口不表示三端人工确认、成果登记、检查或问题关闭已完成。
+
+### T811 Java成果登记
+
+`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/results`只接受expectedVersion、artifact、processingComment及evidenceReferences。
+局部严格解析拒绝缺字段、未知/重复字段、类型强转、尾随JSON、非法UTF-16和无法无损存储的NUL；标识、版本及证据引用禁止首尾空白，所有文本按契约限制UTF-16长度并原样保存。
+`ReworkResultService.register`重验REVIEWER身份、归属、受控轮次无后继、共享版本、原生产COMPLETED和返工RUNNING/问题PROCESSING。
+持有父任务锁时分配连续processingRevision，锁定本轮与来源问题状态，在同一事务追加材料、记录实际请求人和UTC时间、递增任务版本并保存幂等、审计及原始回执。
+相同成果版本文本也会新增修订，旧材料和历史结论不改写；详情仅对当前修订读取检查和复核，新回执中的inspectionId/reviewId为null。
+仅登记材料，不访问证据链接或原件、不生成检查通过、不完成返工或关闭问题；Header仍不证明人工确认，独立Approval/写Tool及页面待后续。
+`make test-java-write`包含真实HTTP、字段边界、并发和故障回滚；详见[契约第十五节](../docs/api/REWORK_CONTRACT.md#15-t811成果登记实现边界)。
+
+### T812 Java人工检查登记
+
+`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/inspections`严格接收expectedVersion、processingRevision和非空items；每项包含checkItem、PASSED/FAILED、comment和证据引用，逐项校验UTF-16长度及无损存储规则。
+`ReworkInspectionService.register`重验身份、归属、受控轮次无后继、共享版本、原生产COMPLETED及RUNNING/PROCESSING，只能检查当前成果修订；检查人和UTC时间取服务端，不接受自报总体结论、人员、时间或确认。
+`ReworkInspection.recorded`汇总各项结果，任一FAILED则总体失败、返工仍RUNNING且问题PROCESSING；全部PASSED调用既有领域COMPLETE约束，将检查、本轮COMPLETED与问题RESOLVED一起提交。
+为遵守冻结契约，通过分支的最小原子写入随T812一并接通，T814专项验收仍待完成；没有独立complete接口，不关闭问题或推进订单/交付。
+检查序号在本返工所有成果修订间连续递增，材料与失败记录只追加；新检查、任务版本、幂等完成、审计及原始回执同事务保存或回滚，旧请求重放不覆盖最新事实。
+`make test-java-write`包含真实HTTP登记、成果变更绑定、并发和故障回滚；详见[契约第十六节](../docs/api/REWORK_CONTRACT.md#16-t812人工检查登记实现边界)。
+独立Approval/写Tool、确认快照失效处理、历史分页和页面仍待后续；Header不是人工确认凭证，系统不执行自动成果检查。
+
+### T813 检查失败与成果更新验收
+
+`ReworkRevisionConsistencyIntegrationTest`在独立schema经真实HTTP走开始→登记→失败检查→更新成果→当前修订检查通过，逐项验证成果标识、版本、说明、证据变更及相同材料再次登记。
+更新后当前inspection/review为空，旧修订和失败记录完整保留；过期任务版本或旧修订的检查请求返回409且无写入，终态也不能追加新材料。
+检查失败可以在同一修订上再次检查，但必须使用最新共享版本；旧成功请求重放只返回原回执，不能重置当前事实。
+并发用例先持有父任务锁，通过pg_stat_activity核对两个真实HTTP写事务均在等待，再放行检查与更新或两个更新，验证同版本只有一个提交且无额外修订。
+更新的审计/回执故障保留旧FAILED检查为当前结论，移除故障后显式用原未提交键重提才切换新修订；产品没有新增自动重试。
+本任务只补跨接口验收和Make入口，不改运行实现或接口；Java拒绝过期参数不代表已实现Python Approval的STALE状态或前端确认失效处理。
+详见[契约第十七节](../docs/api/REWORK_CONTRACT.md#17-t813失败检查与成果更新验收边界)，`make test-java-write`纳入本组回归，独立确认与历史分页仍待后续。
 
 本机无Docker时，Java集成测试支持显式指定已准备好的隔离PostgreSQL，例如：
 
