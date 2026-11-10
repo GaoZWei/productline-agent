@@ -12,7 +12,7 @@
 | 业务模型 | [领域模型](architecture/DOMAIN_MODEL.md) | 订单、任务、问题、复核及交付关系 |
 | 流程图片 | [业务流程图](architecture/flow/README.md) | 业务阶段与系统执行总览，注明适用边界 |
 | Java 接口 | [API 契约](api/API_CONTRACT.md) | 业务查询、响应和写入契约 |
-| 返工生命周期 | [M8契约v1](api/REWORK_CONTRACT.md) | M8.2已验收，T811～T814登记、更新及通过原子性收口完成；三端确认仍待开发 |
+| 返工生命周期 | [M8契约v1](api/REWORK_CONTRACT.md) | M8.1～M8.3已验收，T816读取及T817复核通过关闭已接通；退回/下一轮及三端确认仍待开发 |
 | 演示记录 | [ORDER-003 演示链路](demo/AGENT_DEMO_FLOW.md) | 2026-10-22 的已发生记录及原始快照，不代表当前运行库状态 |
 | 固定场景 | [演示数据](demo/DEMO_DATA.md) | 固定 ID、30 单场景与黄金链路 |
 | 重复演示 | [重置手册](demo/DEMO_RESET.md) | 数据清除、证据保留及恢复步骤 |

@@ -284,14 +284,14 @@ test-business-data: ## 验证 M0.3 固定数据映射和业务状态组合
 		-Dtest=DemoDataIntegrityIntegrationTest,DemoMigrationUpgradeIntegrationTest,ReworkPersistenceIntegrationTest,BusinessStateConsistencyValidatorTest \
 		test
 
-test-java-contract: ## 验证Java只读查询及M8返工详情接口契约
+test-java-contract: ## 验证Java只读查询及M8详情、有效复核与材料/复核历史契约
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessQueryApiIntegrationTest,ReworkQueryApiIntegrationTest \
+		-Dtest=BusinessQueryApiIntegrationTest,ReworkQueryApiIntegrationTest,ReworkHistoryApiIntegrationTest,EffectiveReviewApiIntegrationTest \
 		test
 
-test-java-write: ## 验证Java写接口及M8返工、修订失效、完成原子性与实际写入行数
+test-java-write: ## 验证Java写接口及M8返工、完成/复核关闭原子性与实际写入行数
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessWriteApiIntegrationTest,ReworkStartApiIntegrationTest,ReworkInterruptionApiIntegrationTest,ReworkResumeApiIntegrationTest,ReworkWriteConsistencyIntegrationTest,ReworkResultApiIntegrationTest,ReworkInspectionApiIntegrationTest,ReworkRevisionConsistencyIntegrationTest,ReworkCompletionAtomicityIntegrationTest \
+		-Dtest=BusinessWriteApiIntegrationTest,ReworkStartApiIntegrationTest,ReworkInterruptionApiIntegrationTest,ReworkResumeApiIntegrationTest,ReworkWriteConsistencyIntegrationTest,ReworkResultApiIntegrationTest,ReworkInspectionApiIntegrationTest,ReworkRevisionConsistencyIntegrationTest,ReworkCompletionAtomicityIntegrationTest,ReworkReviewApiIntegrationTest \
 		test
 
 test-java-errors: ## 验证 M0.6 统一响应、错误映射和 Trace ID

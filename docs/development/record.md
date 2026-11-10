@@ -2410,3 +2410,63 @@ Java角色权限查询需要由Python按严格契约调用，响应格式正确�
 - 开始、阻塞/失败、恢复、成果及检查登记统一执行共用写入约束，正常成功响应和幂等回执字段保持原契约。
 - 检查通过只将本轮置COMPLETED、问题置RESOLVED；事务提交失败不返回成功，事务外读取只看到提交前或提交后的完整事实。
 - 失败后没有自动重试或改键，旧成功请求仍只重放原回执；没有新增HTTP、迁移、三端确认或关闭问题能力。
+
+## 2026-11-10 T815 M8.3 成果修订与检查历史查询
+
+### 核心解决的问题
+
+只展示当前材料会隐藏旧修订和失败检查，无法还原人工处理过程；翻页时若把新增记录混入，也容易漏看或重复理解证据。
+提供完整、按Java序号排列的历史，在独立只读快照核对归属，并以绑定上下文及首屏上界的签名游标稳定向后读取。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkHistoryController.java`、`api/dto/ReworkHistoryResponse.java`：成果与检查GET及固定分页响应。
+- `business-service/src/main/java/com/productline/business/application/ReworkHistoryService.java`、`ReworkHistoryCursor.java`：每页授权/归属复查、只读快照、首屏序号上界和上下文签名。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkHistoryRepository.java`：按修订/检查序号读取完整真实材料，不使用当前有效材料过滤器。
+
+### 实现的核心功能
+
+- 返回完整成果版本、说明、证据和登记人员/时间；检查带真实轮次/修订、序号、结论及完整检查项，旧失败和旧修订保持。
+- 空历史返回空数组和null游标，不自动纳管存量或补造证据；读取不改变版本、状态、审计或幂等。
+- 页大小1～100，游标签名绑定用户、资源、历史类型、末条序号及首屏上界，后续追加不混入本次翻页；换人/类型/目标或篡改均拒绝。
+- 实例重启或跨实例后旧游标失效，须重新读取首页；当前不提供持久密钥或多实例共享能力。历史读取不代替当前有效结论，不执行再次复核、关闭问题或自动成果检查。
+
+## 2026-11-10 T816 M8.4 当前有效复核与完整历史读取
+
+### 核心解决的问题
+
+把全部历史复核混作当前结论，会让旧失败永久阻塞，或让旧通过错误覆盖新轮次、新成果和新检查。
+Java按当前材料绑定选择有效复核，并把完整历史和存量缺证据事实单独返回，为后续Tool消费可信结论提供只读入口。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/EffectiveReviewController.java`、`api/dto/EffectiveReviewsResponse.java`、`domain/dto/EffectiveReviewSnapshot.java`：任务级有效复核入口和显式缺失/存量边界。
+- `business-service/src/main/java/com/productline/business/application/EffectiveReviewService.java`、`domain/repository/EffectiveReviewRepository.java`：授权、独立只读快照、按问题选择当前轮次/修订/检查及绑定复核。
+- `business-service/src/main/java/com/productline/business/api/ReworkHistoryController.java`、`application/ReworkHistoryService.java`、`domain/repository/ReworkHistoryRepository.java`：扩展REVIEWS历史分页，复用已有签名游标及上界。
+
+### 实现的核心功能
+
+- 有效复核仅来自最新受控轮次、当前成果和当前PASSED检查下最大复核序号；最新失败不回退旧通过，新轮/材料/检查不继承旧复核。
+- 缺少生命周期时保留旧DTO数组且绑定为null，不伪造轮次或有效结论；受控问题不混入旧表复核，旧接口和诊断规则保持。
+- 完整新复核历史按真实序号升序分页，保留旧失败和旧绑定，游标绑定用户、资源、历史类型及首屏上界。
+- 每次读取在独立只读可重复读快照内核对父任务/归属和材料，不写状态、版本、审计或幂等，不执行再次复核确认或关闭问题。
+
+## 2026-11-10 T817 M8.4 复核通过与来源问题原子关闭
+
+### 核心解决的问题
+
+读取到当前通过检查不代表之后仍可复核，旧检查或过期版本若被直接用于确认，会错误关闭新成果对应的问题。
+写入时重新裁决当前绑定，并把APPROVED复核与来源问题关闭一起提交，避免重复确认或局部失败留下不完整成功。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkReviewController.java`、`api/dto/ReworkReviewRequest.java`：严格五字段复核入口与原样说明校验。
+- `business-service/src/main/java/com/productline/business/application/ReworkReviewService.java`：`submitInTransaction`重验版本/状态/当前材料，复用领域REVIEW约束及幂等/审计/原回执写集。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkReviewRepository.java`：完成状态及问题状态锁、连续复核序号、只追加复核和条件关闭。
+
+### 实现的核心功能
+
+- 仅受控轮次无后继、原生产COMPLETED、本轮COMPLETED/问题RESOLVED及当前修订对应的最新PASSED检查可提交APPROVED，旧检查和最新失败不被沿用。
+- 复核保存实际请求人、服务端UTC时间、原样说明及真实绑定，关闭来源问题并只递增一次任务版本；本轮完成、开始信息、历史材料及其他问题保持。
+- 完整请求幂等、新复核、关闭、版本、审计和原成功回执同事务保存，实际写入数必须一行；异常、零行或提交失败全部回滚，同请求只重放原结果。
+- 本轮只提供APPROVED，退回分支仍待后续，不推进订单/交付，不接入Python确认/写Tool、诊断切换或页面，不把Header当确认凭证。

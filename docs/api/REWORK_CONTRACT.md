@@ -1,9 +1,9 @@
-# M8返工生命周期契约 v1（T804冻结，M8.2已验收，T811/T812成果与检查登记已接通）
+# M8返工生命周期契约 v1（T804冻结，M8.1～M8.3已验收，T816读取及T817通过复核关闭已接通）
 
 ## 1. 适用范围与实现边界
 
 本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
-T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入；T810完成本组跨操作一致性验收，T811/T812接通POST R/results成果及R/inspections人工检查登记，T813/T814完成更新材料与检查通过原子性验收。
+T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入；T810完成本组跨操作一致性验收，T811/T812接通POST R/results成果及R/inspections人工检查登记，T813/T814完成更新材料与检查通过原子性验收，T815接通成果修订/检查历史GET并完成M8.3验收，T816接通任务级有效复核及本返工复核历史GET，T817接通复核POST的APPROVED分支与来源问题原子关闭。
 其余新增路径仍待实现；Python Client/Tool、独立Approval及前端新类型尚未接线，不能将Java写接口描述为完整人工确认闭环。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
@@ -28,7 +28,7 @@ Java JSON使用camelCase；Python内部使用snake_case并显式绑定别名，�
 | 人员与时间 | 写入人从实际请求身份确定，写入时间由Java生成UTC ISO-8601字符串；请求不得提交inspectorId、reviewedBy或登记时间 |
 | Header | 新端点要求非空白且最多128位、无CR/LF的X-User-Id和精确REVIEWER角色；写入还要求1～128位`^[A-Za-z0-9._:-]+$`的Idempotency-Key |
 
-以下为确定性权限映射，T806已落实READ_REWORK，T807～T809已落实Java START_REWORK/BLOCK_REWORK/FAIL_REWORK/RESUME_REWORK角色校验，独立Approval仍待接线；新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
+以下为确定性权限映射，已接通的M8 Java读取及开始/异常/恢复/成果/检查/通过复核端点均落实REVIEWER角色校验；M8 Python权限与独立Approval仍待接线。新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
 
 | operation | Python权限 | 独立人工确认 |
 | --- | --- | --- |
@@ -49,16 +49,16 @@ Java Header或请求中的approval_id不是人工确认的证明；新Java业务
 
 ## 3. 读取接口与缺失历史
 
-下表仅GET R已由T806实现，其余路径仍待实现；`B=/api/tasks/{taskId}/reworks`，`R=B/{reworkTaskId}`。查询只返回Java事实，每次响应内部使用一致读取快照。
+下表GET R由T806实现，GET R/results及R/inspections由T815实现，GET R/reviews及任务级effective-reviews由T816实现，其余读取路径仍待实现；`B=/api/tasks/{taskId}/reworks`，`R=B/{reworkTaskId}`。查询只返回Java事实，每次响应内部使用一致读取快照。
 
 | 方法与路径 | data内容 | 对应后续实现 |
 | --- | --- | --- |
 | GET B | taskId、taskVersion、reworkTasks摘要数组、nextCursor | M8.2查询 |
 | GET R | ReworkDetail | T806已实现，当前材料从V5读取；材料写入仍待后续阶段 |
-| GET R/results | taskId、reworkTaskId、records处理修订数组、nextCursor | M8.3 |
-| GET R/inspections | taskId、reworkTaskId、records检查数组、nextCursor | M8.3 |
-| GET R/reviews | taskId、reworkTaskId、records复核数组、nextCursor | M8.4 |
-| GET /api/tasks/{taskId}/effective-reviews | taskId、taskVersion、issues有效复核分组数组 | M8.4，替代新生命周期中的历史混合判断 |
+| GET R/results | taskId、reworkTaskId、records处理修订数组、nextCursor | T815已实现，按processingRevision升序 |
+| GET R/inspections | taskId、reworkTaskId、records检查数组、nextCursor | T815已实现，按inspectionSequence升序 |
+| GET R/reviews | taskId、reworkTaskId、records复核数组、nextCursor | T816已实现，按reviewSequence升序 |
+| GET /api/tasks/{taskId}/effective-reviews | taskId、taskVersion、issues有效复核分组数组 | T816已实现，Python消费留待M8.5 |
 | POST B/operations/query | 请求仅idempotencyKey；data为found及receipt（未见回执时null） | Java部分在M8.2实现，供后续结果未知核对使用；这是只读查询，不要求确认或写入幂等Header |
 
 列表/历史分页参数仅cursor和limit，limit默认20、最大100；cursor由服务端生成，绑定用户、任务、返工/历史类型及首屏序号上界，
@@ -98,7 +98,7 @@ expectedVersion必须来自最新Java事实。所有写入仅在生产任务COMP
 | POST R/resume | expectedVersion、reason | T809已实现Java RESUME_REWORK；BLOCKED或FAILED/PROCESSING → RUNNING/PROCESSING |
 | POST R/results | expectedVersion、artifact、processingComment、evidenceReferences | T811已实现Java REGISTER_REWORK_RESULT；仅RUNNING/PROCESSING，生成新的processingRevision，旧修订保留 |
 | POST R/inspections | expectedVersion、processingRevision、items | T812已实现Java REGISTER_REWORK_INSPECTION；仅RUNNING/PROCESSING，检查须绑定当前处理修订，通过分支原子完成本轮并将问题置为RESOLVED |
-| POST R/review | expectedVersion、processingRevision、inspectionId、status、reviewComment | SUBMIT_REWORK_REVIEW；仅COMPLETED/RESOLVED，status为APPROVED/REJECTED/REWORK_REQUIRED |
+| POST R/review | expectedVersion、processingRevision、inspectionId、status、reviewComment | T817已实现APPROVED；仅COMPLETED/RESOLVED；REJECTED/REWORK_REQUIRED合法但暂返409，留待T818 |
 | POST R/next-round | expectedVersion、reason | CREATE_NEXT_REWORK；当前轮COMPLETED/OPEN且有效复核为REJECTED或REWORK_REQUIRED，无活动返工；生成后继PENDING轮次 |
 
 检查请求不提交总体result，由非空items确定：任一FAILED则总体FAILED、返工仍RUNNING/问题PROCESSING；全部PASSED则在同一事务
@@ -228,8 +228,8 @@ Agent首版仍仅沿用坐标系返工语义，新增HTTP及领域类型不代�
 最新检查失败但旧检查通过；旧成果通过不能放行新轮；通过检查的原子完成与回滚；退回后独立下一轮；
 缺证据/轮次的历史只读；旧路径/DTO及ORDER-003初始黄金链路不变；写入超时核对不冒充未执行。
 
-T804只冻结本文和三端字段映射，示例不是实际操作记录；T806交付GET R，T807交付POST R/start，T808交付POST R/block及R/fail，T809交付POST R/resume，其余新HTTP及三端确认验收留在后续任务。
-T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1已验收，M8.2已接入详情及Java开始/异常/恢复写入。
+T804只冻结本文和三端字段映射，示例不是实际操作记录；T806交付GET R，T807交付POST R/start，T808交付POST R/block及R/fail，T809交付POST R/resume；T811/T812交付成果及检查POST，T815交付对应历史GET，其余新HTTP及三端确认验收留在后续任务。
+T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1～M8.3已验收，详情、Java开始/异常/恢复、成果/检查登记及历史读取已接通。
 
 ## 9. T805存储实现边界
 
@@ -303,7 +303,7 @@ Java预留完整请求幂等绑定，锁父任务后重新核对归属、受控�
 在同一事务追加原样artifact、说明、证据引用与实际请求人/服务端UTC时间，任务版本加一，保存审计、幂等完成及固定12字段原成功回执；任一步失败全部回滚。
 材料和回执不可覆盖，同键绑定operation、目标、原预期版本及完整材料（含引用顺序和说明空白）与用户；同请求重放只返回首次回执，不因后来阻塞或新修订重建结果。
 成果版本文本相同也新增修订；原材料/检查/复核历史保留，当前详情按新修订绑定，inspectionId/reviewId为空，不把旧通过用于新材料。
-成果登记后返工仍RUNNING、问题仍PROCESSING、原生产仍COMPLETED，不访问或执行引用、不验证原件、不生成检查结论或解除交付阻塞；人工检查已由T812接通、T814完成专项收口，T815历史分页仍待完成。
+成果登记后返工仍RUNNING、问题仍PROCESSING、原生产仍COMPLETED，不访问或执行引用、不验证原件、不生成检查结论或解除交付阻塞；人工检查已由T812接通、T814完成专项收口，T815已实现历史分页并完成M8.3收口，见第19节。
 本任务仅交付Java登记底座，不改变旧DTO、迁移、固定数据或Python/前端契约实现；Header不是确认凭证，独立Approval/写Tool、确认失效处理与页面仍待后续。
 
 ## 16. T812人工检查登记实现边界
@@ -316,7 +316,7 @@ Java预留完整请求幂等绑定，锁父任务后重新核对归属、受控�
 为避免公开“已通过但未完成”的中间状态，最小通过分支与T812一并接通、T814完成专项原子性收口；不另设complete接口、不关闭问题、不推进订单或交付。
 检查、共享版本递增一次、幂等完成、审计和固定12字段原回执同事务提交或回滚；回执包含当前修订及本次inspectionId，reviewId为null。
 同用户/键/操作/目标/原版本/修订/完整检查项重放只读首次回执；改变任一绑定或项/引用顺序冲突，后来的通过不能改写旧失败回执或再次执行旧操作，当前事实通过详情查询另读。
-本任务没有新增迁移或变更旧接口；独立Approval/写Tool、确认快照失效处理、历史分页、再次复核及页面仍待后续，Header不能证明人工确认，T812交付不代表M8.3整体验收。
+T812本身没有新增迁移或变更旧接口，不代表M8.3整体验收；历史GET和阶段验收已由T815完成。独立Approval/写Tool、确认快照失效处理、再次复核及页面仍待后续，Header不能证明人工确认。
 
 ## 17. T813失败检查与成果更新验收边界
 
@@ -327,7 +327,7 @@ T813只增加真实HTTP跨接口验收和Make入口，不新增端点或改变�
 并发测试先持有父任务锁，确认两个HTTP写事务均实际等待锁后再放行，验证检查与更新、两次不同更新争同版本时只一方提交，失败方不留幂等、审计或额外记录。
 更新事务在审计或回执写入失败时全部回滚，旧失败检查继续作为当前结论；移除故障并显式重新提交成功后，新修订才使旧检查不再适用，产品不自动重试或改键。
 这里验收的是Java拒绝过期业务参数；Python Approval快照STALE、独立确认、写Tool和页面仍待M8.5～M8.7，不将后续能力描述为已实现，也不证明跨服务全局只执行一次。
-T814检查通过的原子性专项收口已完成，见下一节；T815历史分页及M8.3整体验收仍待完成，不进入再次复核或关闭问题。
+T814检查通过的原子性专项收口已完成，见下一节；T815历史分页及M8.3整体验收已完成，见第19节；再次复核或关闭问题留待M8.4。
 
 ## 18. T814检查通过原子性验收与零行写入防护
 
@@ -337,4 +337,31 @@ T814检查通过的原子性专项收口已完成，见下一节；T815历史分
 三处事务中途暂停的真实HTTP验收确认：返工已更新但问题未更新、业务状态已更新但幂等未完成、回执尚未写入时，其他详情GET及SQL观察仍只能读取旧完整事实，释放后才读到本轮COMPLETED/问题RESOLVED和新检查。
 同键同请求返回原始成功JSON，新键或新版本不能重复完成；没有检查项、空检查项及独立complete路径拒绝，失败历史与成果不覆盖。
 故障解除后必须由调用方显式重提原未提交键；产品没有增加自动重试。既有成功状态码、回执结构和幂等绑定不变，HTTP错误仍不能让客户端猜测未知请求结果。
-本轮只补强Java实际写入与事务成功边界，独立Approval/写Tool及页面仍待后续；问题只到RESOLVED，原生产/订单/交付不推进，下一最小任务T815历史查询与阶段收口。
+本轮只补强Java实际写入与事务成功边界，独立Approval/写Tool及页面仍待后续；问题只到RESOLVED，原生产/订单/交付不推进，T814之后的历史查询与阶段收口由T815完成，见第19节。
+
+## 19. T815成果与检查历史查询及M8.3收口
+
+新增`GET R/results`及`GET R/inspections`，要求REVIEWER身份，返回固定taskId、reworkTaskId、records、nextCursor；处理与检查记录复用第3节完整字段，不截断说明/引用、不按当前修订过滤旧材料或失败历史。检查返回自身真实轮次及处理修订，按本返工Java序号升序，不按ID或时间猜顺序。
+只接受单值cursor及limit，limit默认20、范围1～100；未知/重复参数、空值、非整数或越界为400。无材料/未纳管存量返回records=[]、nextCursor=null，不自动补历史；任务/返工不存在404、路径归属不符409。
+身份/参数检查后，每页使用独立REPEATABLE READ READ ONLY事务核对父任务、返工归属与材料，拒绝继承调用方读写事务。查询不修改版本、状态、材料、幂等或审计，历史读取不等于当前结论有效或允许执行后续动作。
+首屏读取该类型最大Java序号作为上界，以末条返回序号向后分页，多读一条决定nextCursor；到末页显式null。后续追加记录不混入本次翻页，新首页可读到新增材料；各页仍为各自快照，不宣称跨页长期数据库快照。
+游标由服务端HMAC签名，绑定用户/任务/返工/历史类型、末条序号及首屏上界；身份和资源上下文以摘要绑定，游标不携带明文用户标识。篡改、换人/目标/类型、格式错误均400，权限仍逐页重验。签名密钥仅保存在本Java实例内存，重启或跨实例会使原游标失效，客户端须重新从首页读取；当前不提供持久密钥或多实例共享游标能力，不把游标作为权限或人工确认凭证。
+M8.3已验收：登记→失败检查→更新修订→通过检查仅到本轮COMPLETED/问题RESOLVED，完整历史与原回执保持；终态不能追加或改写材料。无新迁移、依赖、Python/前端装配、自动成果检查、再次复核或关闭问题。下一最小任务T816，但本轮停在M8.3停止线，不启动M8.4。
+
+## 20. T816当前有效复核与复核历史实现边界
+
+新增`GET /api/tasks/{taskId}/effective-reviews`，要求REVIEWER身份且不接受查询参数，固定返回taskId、taskVersion、issues；每个问题的7字段沿用第5节，所有缺失绑定及review显式null，legacyReviews始终为数组，无问题时issues=[]。问题按issueId稳定排序，只作展示顺序，不作为时序判断。
+按每个问题最大真实roundNumber选最新受控返工，再取当前最大processingRevision及其最大inspectionSequence，包含最新FAILED；inspectionId保留真实当前检查，即使FAILED也不回退旧PASSED。仅当前检查PASSED时，在相同返工/轮次、修订、检查绑定内选最大reviewSequence，新轮、新材料或新检查不能沿用旧结论，不按ID、时间或存在任意APPROVED选择通过。
+无生命周期时reworkTaskId/roundNumber/processingRevision/inspectionId/review均null，legacyReviews保持旧ReviewRecordDto及旧接口reviewId稳定顺序，不制造旧数据缺失的轮次、材料或有效结论；有生命周期时legacyReviews=[]，旧表历史不参与新有效判断。旧review/overview接口、原记录及当前Python规则保持不变。
+新增`GET R/reviews`，返回第3节完整9字段复核记录，按本返工全部绑定下reviewSequence升序分页，旧失败、旧修订/检查对应复核仍完整保留；无记录/存量空历史返回[]和nextCursor=null，不从旧表合成新记录。复用T815默认20/最大100、单值cursor/limit校验、首屏序号上界、用户/任务/返工/REVIEWS类型签名绑定与单实例重启/跨实例失效边界。
+有效查询在独立REPEATABLE READ READ ONLY事务内读取父任务版本、问题与绑定；历史每页同样使用独立只读快照核对父任务和归属，不继承外层读写事务或把跨页当作同一长期快照。缺身份401、非REVIEWER角色403、非法ID/参数/游标400、不存在404，历史路径归属不符409；错误不回显材料或内部摘要。
+本轮只提供读取，不改变状态、版本、审计、幂等或存量，不新增迁移/依赖，不实现复核确认写入、问题关闭、下一轮创建、Python诊断切换或页面。T817仍须重新校验当前事实并独立确认，返回APPROVED也不代表本接口执行了关闭或解除交付阻塞；M8.4未整体验收，下一最小任务T817。
+
+## 21. T817复核通过与问题关闭实现边界
+
+新增`POST R/review`，严格且仅接受第4节五个字段，status的最终枚举仍为APPROVED/REJECTED/REWORK_REQUIRED；T817只执行APPROVED，其他两个合法值409且零写入，T818再接通退回，不把PENDING作为最终结论。版本/修订安全整数、检查ID和UTF-16说明遵循公共规则，说明原样保留，拒绝未知/重复字段、尾随JSON、类型强转和不能无损存储的文本。
+要求REVIEWER身份与安全Idempotency-Key；新请求先预留完整请求绑定并锁父任务，重验归属、受控轮次无后继、共享版本、原生产COMPLETED、本轮COMPLETED及来源问题RESOLVED。明确修订必须为当前最大修订、inspectionId必须是该修订的最新PASSED检查，不能越过新失败或用旧通过覆盖新材料。重建真实完整处理材料与检查项后执行T803 REVIEW约束，来源问题和本轮状态锁保持至提交。
+追加本返工全部绑定下的连续reviewSequence，复核身份由Java生成、reviewedBy取实际请求人、reviewedAt取服务端UTC。复核、来源问题CLOSED、一次共享版本递增、幂等完成、审计及固定12字段成功回执同事务提交；每步要求实际影响一行，异常、零行或COMMIT失败全量回滚，不能出现已关问题但缺审计/原回执的成功。
+请求摘要绑定operation、任务/返工、原expectedVersion、processingRevision、inspectionId、status和原样reviewComment，实际用户另与幂等记录核对。相同请求只重放首次成功JSON，后来版本或其他问题变化不重建旧结果；换人/目标/操作/材料/版本或说明均不能借用同键，失败不自动换键重试。
+本轮返工与原生产仍COMPLETED，原始原因、开始元数据、全部成果/检查、旧复核及旧回执保留，其他问题不被一并关闭。任务级有效复核和本轮历史可查询新APPROVED，旧review/overview接口与Python诊断保持，不自动推进订单或交付。
+无新迁移、依赖、独立Approval/写Tool或页面接线，Header不是人工确认凭证，本Java接口不构成三端确认闭环；未实现退回、下一轮创建或其他交付条件查询。下一最小任务T818，M8.4尚未整体验收。

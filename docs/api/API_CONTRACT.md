@@ -6,7 +6,7 @@
 状态字符串。当前已实现9个只读端点（含V4扩充后的订单列表），M0.5已实现提交复核和创建返工两个写端点，
 M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
 KB-02.1新增无写入的知识管理授权查询`POST /api/knowledge/authorize`，详见[知识管理授权契约](../knowledge/KNOWLEDGE_AUTHORIZATION.md)。
-M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809及T811/T812已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`、`/resume`、`/results`及`/inspections`；其他新增路径及三端确认仍待开发。
+M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809及T811/T812已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`、`/resume`、`/results`及`/inspections`，T815已接通同一返工路径下`GET /results`及`/inspections`历史分页，T816已接通本返工`GET /reviews`及任务级`GET /api/tasks/{taskId}/effective-reviews`，T817已接通同一返工路径`POST /review`的APPROVED分支与问题关闭；其他新增路径及三端确认仍待开发。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -572,3 +572,9 @@ T811新增[成果登记](REWORK_CONTRACT.md#15-t811成果登记实现边界)，�
 T812新增[人工检查登记](REWORK_CONTRACT.md#16-t812人工检查登记实现边界)，绑定明确当前修订，Java记录人员/时间并汇总检查项；FAILED保留运行状态，PASSED原子完成本轮并将问题置为RESOLVED，仍待再次复核，不关闭问题或解除交付阻塞。
 T813完成[失败检查与成果更新验收](REWORK_CONTRACT.md#17-t813失败检查与成果更新验收边界)，覆盖完整HTTP链路、过期版本/修订拒绝、历史与原回执保留、实际锁竞争及更新回滚；不新增接口或修改运行实现，Python确认快照STALE仍待后续。
 T814完成[检查通过原子性专项验收](REWORK_CONTRACT.md#18-t814检查通过原子性验收与零行写入防护)，补齐提交失败、事务外完整读取及零行写入拒绝；共用审计/回执写入必须实际插入一行，否则409并整笔回滚，既有成功响应及接口字段不变。
+
+T815新增[成果及检查历史GET](REWORK_CONTRACT.md#19-t815成果与检查历史查询及m83收口)，按Java序号输出完整历史，以绑定用户/资源/类型及首屏上界的签名游标分页，每页独立只读一致快照且重验归属；不把旧失败或旧修订过滤为不存在。M8.3已验收，仍只到本轮完成/问题RESOLVED，再次复核、问题关闭和三端确认尚未接通。
+
+T816新增[当前有效复核与复核历史](REWORK_CONTRACT.md#20-t816当前有效复核与复核历史实现边界)，按问题的最新受控轮次、当前修订与当前通过检查选择最大绑定复核序号；新轮/材料或最新失败不沿用旧通过。缺少生命周期保留旧复核数组且不伪造绑定，完整新历史另按真实序号分页，旧接口与Python诊断不变；本轮不实现再次复核写入或关闭问题。
+
+T817新增[复核通过与来源问题关闭](REWORK_CONTRACT.md#21-t817复核通过与问题关闭实现边界)，重新绑定当前修订及当前PASSED检查，只允许COMPLETED/RESOLVED；复核、关闭、版本、幂等、审计及原回执原子提交，失败/零行/提交失败全部回滚，旧材料和原始回执保持。合法退回状态目前409，留待T818；独立确认、诊断切换和页面尚未接通，不自动推进订单/交付。
