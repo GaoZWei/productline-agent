@@ -238,9 +238,13 @@ class ReworkReviewApiIntegrationTest extends PostgresIntegrationTestSupport {
 
     @ParameterizedTest
     @ValueSource(strings = {"REJECTED", "REWORK_REQUIRED"})
-    void defersNonApprovedBranchToT818(String status) {
-        var before = facts(); error(submit("INVALID", body("INVALID", 0).put("status", status), "t817-deferred"), 409, "BUSINESS_CONFLICT");
-        absent("t817-deferred"); assertThat(facts()).isEqualTo(before);
+    void acceptsNonApprovedBranchAfterT818WithoutChangingCompletedWork(String status) {
+        String id = "RETURN-" + status.replace('_', '-'); ready(id);
+        var response = submit(id, body(id, 0).put("status", status), "t817-return-" + status);
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody().path("data").path("issueStatus").asText()).isEqualTo("OPEN");
+        assertThat(state(id)).containsEntry("version", 1L).containsEntry("issue_status", "OPEN").containsEntry("rework_status", "COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT status FROM rework_reviews WHERE rework_task_id=?", String.class, rework(id))).isEqualTo(status);
     }
 
     @Test

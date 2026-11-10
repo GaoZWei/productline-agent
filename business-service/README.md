@@ -72,7 +72,7 @@ T804冻结[返工生命周期契约v1](../docs/api/REWORK_CONTRACT.md)：列明�
 独立人工确认、任务共享版本、原始幂等回执、当前检查/复核选择及存量只读边界。
 检查通过与完成返工合并为一次明确确认的原子写入，不另设complete接口；下一轮必须独立确认创建。
 当前T806详情、T807～T809开始/阻塞/失败/恢复、T811/T812成果/检查登记及T815对应历史GET及T816有效复核/复核历史GET、T817复核POST的APPROVED分支已实现，其他新增路径仍为契约要求；未装配Python Client/Tool或前端类型，不能把旧接口回归当作其他新HTTP已实现。
-T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3已完成T811～T815成果/检查登记、更新一致性、完成原子性及历史查询验收，M8.4已接通T816有效复核及复核历史，T817已接通APPROVED复核通过原子关闭问题，下一最小任务T818保存未通过结论。
+T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3已完成T811～T815成果/检查登记、更新一致性、完成原子性及历史查询验收，M8.4已接通T816有效复核/历史及T817/T818全部最终复核结论，下一最小任务T819受控首轮及下一轮创建。
 
 V5由Flyway在未来Java启动时执行，本轮只在隔离测试库应用；不改V1～V4、种子或运行库，不自动生成历史轮次/证据。
 
@@ -198,11 +198,20 @@ ReworkRound内部轮次由int对齐为long并限制正安全整数，与既有JS
 ### T817 复核通过与问题关闭
 
 `POST /api/tasks/{taskId}/reworks/{reworkTaskId}/review`严格接受expectedVersion、processingRevision、inspectionId、status及reviewComment。版本/修订为安全整数，检查ID遵循业务ID规则，说明非空白且最多1000个UTF-16单元，原样保存；拒绝未知/重复字段、尾随JSON、类型强转及无法无损存储的文本。
-本轮只提供APPROVED分支，合法REJECTED/REWORK_REQUIRED暂返409且零写入，留给T818；PENDING或非法枚举400。要求REVIEWER身份和安全Idempotency-Key，Header不证明人工确认。
+T817接通APPROVED分支，T818已接通REJECTED/REWORK_REQUIRED并将问题回到OPEN；PENDING或非法枚举400。要求REVIEWER身份和安全Idempotency-Key，Header不证明人工确认。
 持有父任务锁后重新校验归属、受控轮次无后继、共享版本、原生产COMPLETED、本轮COMPLETED/问题RESOLVED及明确当前修订和当前PASSED检查。重建完整材料后执行领域REVIEW约束，不能沿用旧修订、旧通过或越过最新失败关闭问题。
 同一事务追加复核序号、实际请求人及服务端UTC时间，关闭来源问题、递增一次任务版本，保存幂等完成、审计及固定12字段原成功JSON；所有写入实际影响一行，异常/零行或提交失败全部回滚。同请求重放原回执，不重新关闭或从后来状态重建结果。
 原生产和本轮仍COMPLETED，开始信息、成果/检查、旧复核及其他问题保持；不自动改变订单/交付，不执行自动成果检查或三端确认。Python仍使用原诊断规则，未宣称线上阻塞判断已切换。
 详见[契约第二十一节](../docs/api/REWORK_CONTRACT.md#21-t817复核通过与问题关闭实现边界)，`make test-java-write`纳入真实HTTP、版本/材料拒绝、并发、逐写入点及提交原子性验收。
+
+### T818 未通过复核与问题退回
+
+沿用同一`POST /review`及严格五字段请求，REJECTED和REWORK_REQUIRED也必须绑定本轮当前成果修订及最新PASSED检查；检查通过不等于再次复核通过。
+`ReworkReviewService.submitInTransaction`复用身份、归属、受控轮次无后继、共享版本、原生产/本轮COMPLETED及问题RESOLVED重验，经领域REVIEW规则决定退回；`ReworkReviewRepository.reopen`只将来源问题由RESOLVED条件更新为OPEN。
+未通过结论、原样说明、请求人/UTC时间、连续复核序号、一次版本递增、审计及原成功回执同事务保存，异常、零行或提交失败全部回滚。
+原生产、本轮完成、创建原因、开始信息和成果/检查历史保持；其他问题、旧表复核、订单及交付不变，不自动创建后继或重跑生产，下一轮Java创建留给T819。
+有效复核及历史读取可见真实退回结论；旧请求重放只返回第一次OPEN回执，即使后继轮后来通过关闭问题，也不会重新打开问题。后继轮测试使用明确SQL夹具，不代表创建HTTP已实现。
+`make test-java-write`包含两类退回、原通过分支、并发结论竞争、逐写入点/提交回滚及提交前读取；详见[契约第二十二节](../docs/api/REWORK_CONTRACT.md#22-t818未通过复核与问题退回实现边界)。M8独立Approval/写Tool和页面仍待后续。
 
 本机无Docker时，Java集成测试支持显式指定已准备好的隔离PostgreSQL，例如：
 
@@ -213,6 +222,7 @@ mvn --file business-service/pom.xml \
 ```
 
 该选项仅供测试，要求显式环回端口、`business_service_test_`前缀库名、无URL凭据/参数，固定测试用户及密码为`test`。
+集成测试底座将每个Spring上下文的连接池限制为最多4条、最少空闲0条，避免多上下文共用隔离库时耗尽连接；仍支持父任务锁、两个HTTP写事务及独立观察连接同时执行，不改变服务运行连接池。
 调用方须单独创建可丢弃测试库，测试会迁移和写入夹具；不会读取`.env`或自动选择开发/运行库。不传此选项仍使用原Testcontainers。
 旧迁移/存储用例只改为共用连接获取函数，原断言保持；此测试入口不改变服务运行配置。
 

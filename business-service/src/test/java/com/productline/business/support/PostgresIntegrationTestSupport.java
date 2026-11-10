@@ -46,5 +46,9 @@ public abstract class PostgresIntegrationTestSupport {
         registry.add("spring.datasource.url", PostgresIntegrationTestSupport::databaseUrl);
         registry.add("spring.datasource.username", PostgresIntegrationTestSupport::databaseUsername);
         registry.add("spring.datasource.password", PostgresIntegrationTestSupport::databasePassword);
+        // 多个缓存的Spring测试上下文共用隔离库，避免每个默认池预留10条连接耗尽PostgreSQL。
+        // 4条仍容纳父任务锁、两个真实HTTP写事务及独立观察连接，不降低并发验收强度。
+        registry.add("spring.datasource.hikari.maximum-pool-size", () -> 4);
+        registry.add("spring.datasource.hikari.minimum-idle", () -> 0);
     }
 }

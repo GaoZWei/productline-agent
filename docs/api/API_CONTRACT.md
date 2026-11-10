@@ -6,7 +6,7 @@
 状态字符串。当前已实现9个只读端点（含V4扩充后的订单列表），M0.5已实现提交复核和创建返工两个写端点，
 M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
 KB-02.1新增无写入的知识管理授权查询`POST /api/knowledge/authorize`，详见[知识管理授权契约](../knowledge/KNOWLEDGE_AUTHORIZATION.md)。
-M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809及T811/T812已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`、`/resume`、`/results`及`/inspections`，T815已接通同一返工路径下`GET /results`及`/inspections`历史分页，T816已接通本返工`GET /reviews`及任务级`GET /api/tasks/{taskId}/effective-reviews`，T817已接通同一返工路径`POST /review`的APPROVED分支与问题关闭；其他新增路径及三端确认仍待开发。
+M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809及T811/T812已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`、`/resume`、`/results`及`/inspections`，T815已接通同一返工路径下`GET /results`及`/inspections`历史分页，T816已接通本返工`GET /reviews`及任务级`GET /api/tasks/{taskId}/effective-reviews`，T817/T818已接通同一返工路径`POST /review`的通过关闭和退回OPEN分支；其他新增路径及三端确认仍待开发。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -577,4 +577,5 @@ T815新增[成果及检查历史GET](REWORK_CONTRACT.md#19-t815成果与检查�
 
 T816新增[当前有效复核与复核历史](REWORK_CONTRACT.md#20-t816当前有效复核与复核历史实现边界)，按问题的最新受控轮次、当前修订与当前通过检查选择最大绑定复核序号；新轮/材料或最新失败不沿用旧通过。缺少生命周期保留旧复核数组且不伪造绑定，完整新历史另按真实序号分页，旧接口与Python诊断不变；本轮不实现再次复核写入或关闭问题。
 
-T817新增[复核通过与来源问题关闭](REWORK_CONTRACT.md#21-t817复核通过与问题关闭实现边界)，重新绑定当前修订及当前PASSED检查，只允许COMPLETED/RESOLVED；复核、关闭、版本、幂等、审计及原回执原子提交，失败/零行/提交失败全部回滚，旧材料和原始回执保持。合法退回状态目前409，留待T818；独立确认、诊断切换和页面尚未接通，不自动推进订单/交付。
+T817新增[复核通过与来源问题关闭](REWORK_CONTRACT.md#21-t817复核通过与问题关闭实现边界)，重新绑定当前修订及当前PASSED检查，只允许COMPLETED/RESOLVED；复核、关闭、版本、幂等、审计及原回执原子提交，失败/零行/提交失败全部回滚，旧材料和原始回执保持。T818已接通退回状态；独立确认、诊断切换和页面尚未接通，不自动推进订单/交付。
+T818新增[未通过复核与问题退回](REWORK_CONTRACT.md#22-t818未通过复核与问题退回实现边界)，REJECTED/REWORK_REQUIRED沿用同一严格请求及当前绑定重验，原子保存结论并将来源问题置OPEN，本轮及原生产仍COMPLETED；不自动创建下一轮或修改历史材料，原始回执可稳定重放。

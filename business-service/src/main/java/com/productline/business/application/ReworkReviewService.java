@@ -64,8 +64,6 @@ public class ReworkReviewService {
             String key, ReworkReviewRequest request) {
         validate(taskId, reworkId, actor, role, key);
         Objects.requireNonNull(request, "request");
-        // T817只接通通过分支，合法退回结论留给T818，不提前执行问题回到OPEN。
-        if (request.status() != ReviewStatus.APPROVED) throw new BusinessConflictException("non-approved rework review is not supported yet");
         String requestHash = hash(json(List.of(OPERATION, taskId, reworkId, request.expectedVersion(),
                 request.processingRevision(), request.inspectionId(), request.status(), request.reviewComment())));
         return Objects.requireNonNull(transaction.execute(status -> submitInTransaction(taskId, reworkId, actor, key, request, requestHash)));
@@ -120,8 +118,8 @@ public class ReworkReviewService {
         updated(writes.advanceVersion(taskId, request.expectedVersion()));
         updated(reviews.append(reviewId, reworkId, request.processingRevision(), request.inspectionId(), previousSequence + 1,
                 request.status(), request.reviewComment(), actor, Instant.now()));
-        // 复核通过与关闭来源问题不可分开提交；本轮完成和全部材料保留，不自动推进交付。
-        updated(reviews.close(taskId, issueId));
+        // 结论与来源问题状态不可分开提交；退回仍保留本轮完成事实，不自动创建下一轮。
+        updated(request.status() == ReviewStatus.APPROVED ? reviews.close(taskId, issueId) : reviews.reopen(taskId, issueId));
         String operationId = generatedId("OPERATION-");
         var receipt = new ReworkWriteReceipt(OPERATION, operationId, taskId, reworkId, nextVersion,
                 proposal.getAfter().reworkStatus(), proposal.getAfter().issueStatus(), current.roundNumber(), current.previousReworkTaskId(),
@@ -130,7 +128,7 @@ public class ReworkReviewService {
         String keyHash = hash(key);
         var before = auditState(reworkId, request.expectedVersion(), request.processingRevision(), request.inspectionId(),
                 current.review() == null ? null : current.review().reviewId(), QualityIssueStatus.RESOLVED);
-        var after = auditState(reworkId, nextVersion, request.processingRevision(), request.inspectionId(), reviewId, QualityIssueStatus.CLOSED);
+        var after = auditState(reworkId, nextVersion, request.processingRevision(), request.inspectionId(), reviewId, proposal.getAfter().issueStatus());
         after.put("reviewStatus", request.status()); after.put("reviewComment", request.reviewComment());
         updated(writes.audit(operationId, OPERATION, taskId, actor, keyHash, json(before), json(after)));
         updated(writes.saveReceipt(key, operationId, OPERATION, requestHash, actor, taskId, reworkId,

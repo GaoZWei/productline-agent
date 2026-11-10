@@ -38,4 +38,8 @@ public class ReworkReviewRepository {
     public int close(String task, String issue) {
         return jdbc.update("UPDATE quality_issues SET status='CLOSED' WHERE task_id=? AND issue_id=? AND status='RESOLVED'", task, issue);
     }
+
+    public int reopen(String task, String issue) {
+        return jdbc.update("UPDATE quality_issues SET status='OPEN' WHERE task_id=? AND issue_id=? AND status='RESOLVED'", task, issue);
+    }
 }

@@ -1,9 +1,9 @@
-# M8返工生命周期契约 v1（T804冻结，M8.1～M8.3已验收，T816读取及T817通过复核关闭已接通）
+# M8返工生命周期契约 v1（T804冻结，M8.1～M8.3已验收，T816读取及T817/T818通过/退回复核已接通）
 
 ## 1. 适用范围与实现边界
 
 本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
-T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入；T810完成本组跨操作一致性验收，T811/T812接通POST R/results成果及R/inspections人工检查登记，T813/T814完成更新材料与检查通过原子性验收，T815接通成果修订/检查历史GET并完成M8.3验收，T816接通任务级有效复核及本返工复核历史GET，T817接通复核POST的APPROVED分支与来源问题原子关闭。
+T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入；T810完成本组跨操作一致性验收，T811/T812接通POST R/results成果及R/inspections人工检查登记，T813/T814完成更新材料与检查通过原子性验收，T815接通成果修订/检查历史GET并完成M8.3验收，T816接通任务级有效复核及本返工复核历史GET，T817/T818接通复核POST的通过关闭和退回OPEN分支。
 其余新增路径仍待实现；Python Client/Tool、独立Approval及前端新类型尚未接线，不能将Java写接口描述为完整人工确认闭环。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
@@ -98,7 +98,7 @@ expectedVersion必须来自最新Java事实。所有写入仅在生产任务COMP
 | POST R/resume | expectedVersion、reason | T809已实现Java RESUME_REWORK；BLOCKED或FAILED/PROCESSING → RUNNING/PROCESSING |
 | POST R/results | expectedVersion、artifact、processingComment、evidenceReferences | T811已实现Java REGISTER_REWORK_RESULT；仅RUNNING/PROCESSING，生成新的processingRevision，旧修订保留 |
 | POST R/inspections | expectedVersion、processingRevision、items | T812已实现Java REGISTER_REWORK_INSPECTION；仅RUNNING/PROCESSING，检查须绑定当前处理修订，通过分支原子完成本轮并将问题置为RESOLVED |
-| POST R/review | expectedVersion、processingRevision、inspectionId、status、reviewComment | T817已实现APPROVED；仅COMPLETED/RESOLVED；REJECTED/REWORK_REQUIRED合法但暂返409，留待T818 |
+| POST R/review | expectedVersion、processingRevision、inspectionId、status、reviewComment | T817/T818已实现APPROVED/REJECTED/REWORK_REQUIRED；仅COMPLETED/RESOLVED，通过后关闭问题，退回后问题OPEN，本轮仍COMPLETED |
 | POST R/next-round | expectedVersion、reason | CREATE_NEXT_REWORK；当前轮COMPLETED/OPEN且有效复核为REJECTED或REWORK_REQUIRED，无活动返工；生成后继PENDING轮次 |
 
 检查请求不提交总体result，由非空items确定：任一FAILED则总体FAILED、返工仍RUNNING/问题PROCESSING；全部PASSED则在同一事务
@@ -359,9 +359,20 @@ M8.3已验收：登记→失败检查→更新修订→通过检查仅到本轮C
 
 ## 21. T817复核通过与问题关闭实现边界
 
-新增`POST R/review`，严格且仅接受第4节五个字段，status的最终枚举仍为APPROVED/REJECTED/REWORK_REQUIRED；T817只执行APPROVED，其他两个合法值409且零写入，T818再接通退回，不把PENDING作为最终结论。版本/修订安全整数、检查ID和UTF-16说明遵循公共规则，说明原样保留，拒绝未知/重复字段、尾随JSON、类型强转和不能无损存储的文本。
+新增`POST R/review`，严格且仅接受第4节五个字段，status的最终枚举为APPROVED/REJECTED/REWORK_REQUIRED；T817先接通APPROVED，T818已补齐两个退回结论，不把PENDING作为最终结论。版本/修订安全整数、检查ID和UTF-16说明遵循公共规则，说明原样保留，拒绝未知/重复字段、尾随JSON、类型强转和不能无损存储的文本。
 要求REVIEWER身份与安全Idempotency-Key；新请求先预留完整请求绑定并锁父任务，重验归属、受控轮次无后继、共享版本、原生产COMPLETED、本轮COMPLETED及来源问题RESOLVED。明确修订必须为当前最大修订、inspectionId必须是该修订的最新PASSED检查，不能越过新失败或用旧通过覆盖新材料。重建真实完整处理材料与检查项后执行T803 REVIEW约束，来源问题和本轮状态锁保持至提交。
 追加本返工全部绑定下的连续reviewSequence，复核身份由Java生成、reviewedBy取实际请求人、reviewedAt取服务端UTC。复核、来源问题CLOSED、一次共享版本递增、幂等完成、审计及固定12字段成功回执同事务提交；每步要求实际影响一行，异常、零行或COMMIT失败全量回滚，不能出现已关问题但缺审计/原回执的成功。
 请求摘要绑定operation、任务/返工、原expectedVersion、processingRevision、inspectionId、status和原样reviewComment，实际用户另与幂等记录核对。相同请求只重放首次成功JSON，后来版本或其他问题变化不重建旧结果；换人/目标/操作/材料/版本或说明均不能借用同键，失败不自动换键重试。
 本轮返工与原生产仍COMPLETED，原始原因、开始元数据、全部成果/检查、旧复核及旧回执保留，其他问题不被一并关闭。任务级有效复核和本轮历史可查询新APPROVED，旧review/overview接口与Python诊断保持，不自动推进订单或交付。
-无新迁移、依赖、独立Approval/写Tool或页面接线，Header不是人工确认凭证，本Java接口不构成三端确认闭环；未实现退回、下一轮创建或其他交付条件查询。下一最小任务T818，M8.4尚未整体验收。
+无新迁移、依赖、独立Approval/写Tool或页面接线，Header不是人工确认凭证，本Java接口不构成三端确认闭环；退回由T818接通，下一轮创建和其他交付条件查询仍待后续。M8.4尚未整体验收。
+
+## 22. T818未通过复核与问题退回实现边界
+
+同一POST R/review现已支持REJECTED及REWORK_REQUIRED，使用原五字段请求和固定12字段回执，不新增端点、状态枚举或迁移。
+退回与通过分支执行同样的身份、归属、受控轮次无后继、原生产/本轮COMPLETED、问题RESOLVED、预期版本、当前修订及最新PASSED检查校验，不能因结论未通过就省略检查绑定，也不能越过最新FAILED或复用旧材料。
+复用T803 REVIEW领域规则，将未通过结论、原样说明、真实复核序号、实际请求人及服务端UTC时间与来源问题OPEN、一次共享版本递增、幂等完成、审计及原回执在同一事务保存；每步实际一行，异常、零行或COMMIT失败全部回滚。
+本轮仍COMPLETED，原生产不回退，创建原因、开始信息、成果、检查、旧复核及旧回执完整保留；只退回来源问题，不改其他问题、订单或交付，不自动创建返工、不重跑生产。
+当前有效复核和完整历史输出真实REJECTED/REWORK_REQUIRED；详情允许动作可表达下一轮的事实前提，不代表T819创建接口已接通，也不是人工确认或权限凭证。
+幂等绑定仍覆盖实际用户、操作、任务/返工、原版本、修订、检查、结论及原样说明；重放旧退回请求只返回首次OPEN回执，后继轮后来关闭问题也不被旧请求重新打开，新键不能在OPEN或CLOSED状态再次退回旧轮。
+真实HTTP验收覆盖两种退回的完整处理链路、通过/退回/两种退回争同版本、同键重放、逐写入点和提交失败、提交前读取；第二轮状态用明确隔离SQL夹具表示，创建API仍待T819，不宣称完整两轮HTTP闭环已实现。
+没有Python独立Approval/写Tool、确认界面或诊断切换；下一最小任务T819受控首轮及下一轮创建，其他交付条件检查留给T820，M8.4尚未整体验收。
