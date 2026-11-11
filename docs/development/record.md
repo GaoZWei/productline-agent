@@ -2489,3 +2489,62 @@ Java按当前材料绑定选择有效复核，并把完整历史和存量缺证�
 - 未通过结论、原样说明、实际请求人、UTC时间及连续复核序号与问题OPEN、一次版本递增、幂等完成、审计和原成功回执同事务保存，异常、零行或提交失败全部回滚。
 - 本轮完成事实、创建/开始信息、成果、检查及复核历史完整保留，其他问题、订单和交付不变，不重启生产或自动创建后继。
 - 有效复核和完整历史可查询真实退回结论，同请求仅重放首次OPEN回执，不重新打开后来已关闭的问题；原通过分支保持，独立Approval/写Tool、下一轮创建和页面仍待后续。
+
+## 2026-11-11 T819 M8.4 受控首轮及下一轮创建
+
+### 核心解决的问题
+
+首轮缺少真实生命周期，退回复核后也没有独立创建下一轮的入口，只能用测试夹具模拟后继，无法保留可追溯的实际轮次链。
+新增受控创建并让新旧入口共同核对链路与活动返工，避免绕过前驱、并发分叉或把旧材料和旧通过结论直接沿用到新轮。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkCreationController.java`、`api/dto/ReworkLifecycleCreationRequest.java`：首轮三字段与后继两字段严格入口，版本/原因复用`ReworkInterruptionRequest`。
+- `business-service/src/main/java/com/productline/business/application/ReworkCreationService.java`：`createInTransaction`裁决当前事实及完整请求幂等，`requireReturnedRound`重验当前退回绑定，组织新PENDING与原回执原子写入。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkCreationRepository.java`：问题状态锁、活动返工判断、返工及连续生命周期SQL。
+- `business-service/src/main/java/com/productline/business/application/BusinessWriteService.java`及原任务/返工Repository：旧创建共用父任务锁并拒绝已有受控链，旧成功重放保持PENDING和原版本。
+
+### 实现的核心功能
+
+- 首轮仅在同属OPEN问题且无受控链/活动返工时生成轮次1；后继要求前轮COMPLETED、无后继且当前成果和最新PASSED检查下存在有效退回复核，Java分配真实连续轮次及前驱。
+- 新PENDING、生命周期、一次共享版本递增、幂等完成、审计与固定原回执同事务写入，实际行数必须一行，异常、零行或提交失败整体回滚；同请求只重放首次结果。
+- 新轮不继承成果、检查或复核；前轮全部证据和开始信息保持，后继审计关联真实退回结论及原意见，新原因独立原样保存，不自动开始处理或推进订单/交付。
+- 新旧创建保留各自请求/响应，旧入口不能绕过受控前驱，旧Python路径保持；Java身份与幂等不等于独立人工确认，Python Approval/Tool及页面仍待接线。
+
+## 2026-11-11 T820 M8.4 订单交付条件查询与关闭并发读取
+
+### 核心解决的问题
+
+关闭一个来源问题不能说明同订单的其他生产、质量或交付条件都已满足；混读不同请求的版本、问题和复核，还会展示根本未同时存在的结果。
+在一个独立只读快照汇总已知条件，明确区分当前有效复核与旧审计历史，让受控旧失败不会永久阻塞新通过，同时保留其他真实阻塞。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/DeliveryConditionsController.java`、`api/dto/DeliveryConditionsResponse.java`：订单级只读入口、完整事实与带资源定位的稳定阻塞结构。
+- `business-service/src/main/java/com/productline/business/application/DeliveryConditionsService.java`：`conditions`组织独立只读快照，`issueBlockers`分开受控当前绑定与存量规则，复用T816仓储。
+- `business-service/src/main/java/com/productline/business/domain/repository/DeliveryConditionsRepository.java`：限定订单/任务归属并稳定排序读取生产、步骤、问题、活动返工和交付记录。
+
+### 实现的核心功能
+
+- 返回订单、全部任务及共享版本、生产步骤、问题和当前复核、活动返工、交付记录及已知阻塞，不把多次独立HTTP读取拼成一个快照。
+- 受控问题要求CLOSED及当前绑定APPROVED，新轮/新材料不沿用旧通过，旧受控未通过不永久阻塞新通过；存量显式保留旧规则，不补造轮次或最新结论。
+- 同时列出其他生产/问题、活动返工、缺失资料和交付未就绪等条件；没有已知阻塞也不构成交付授权，不改变订单或交付状态，不替换旧Python诊断或旧HTTP响应。
+
+## 2026-11-11 T821 M8.5 独立返工契约与HTTP适配
+
+### 核心解决的问题
+
+Java新增的完整返工状态、当前材料和原成功回执不能直接套用旧PENDING创建响应，自动去空白和字符计数差异还会改变用户审查的内容。
+新增独立跨语言契约与类型化HTTP适配，在保留旧调用的同时准确传递新事实和原始请求，防止格式合法但资源、版本或动作不匹配的结果进入编排。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/rework.py`：`ReworkSchema`、`_text`、详情/历史/有效复核/九类写动作请求与`ReworkWriteReceipt`，保留原值并核对响应材料绑定。
+- `agent-service/app/schemas/rework_delivery.py`：`DeliveryConditions`及嵌套事实，校验已有归属字段、阻塞资源关联和hasBlockers自洽，不重新裁决Java条件。
+- `agent-service/app/clients/rework.py`：`ReworkHttpClient`借用共享连接池；`_history`核对单页事实，`_write`和`_write_binding`绑定原请求、操作及实际回执副作用。
+
+### 实现的核心功能
+
+- 新Schema严格限制安全整数、业务ID、显式null和枚举；说明、成果版本和证据按Java UTF-16及空白语义原样传递，新完整状态与存量PENDING/null说明分开，旧创建响应不放宽。
+- 类型化调用已有六类GET和九类POST，核对Trace、资源、历史序号/分页及写操作、原版本递增和状态/材料副作用，不按后来GET重建原成功回执。
+- Client每次只发一次请求，借用外层生命周期的连接池，不注册Tool、不管理人工确认、不切换诊断或直接访问业务表；写入结果不确定时禁止自动重发，未实现的Java查询不伪造空结果。

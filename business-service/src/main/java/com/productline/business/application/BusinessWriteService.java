@@ -181,10 +181,16 @@ public class BusinessWriteService {
                         return replayRework(idempotency);
                 }
 
+                // 与受控创建串行裁决，禁止旧入口在受控链路之后绕过前驱再建首轮。
+                taskRepository.lockForReworkCreation(taskId)
+                                .orElseThrow(() -> new ResourceNotFoundException("task", taskId));
                 ProductionTask task = requireTask(taskId);
                 validateExpectedVersion(task, request.expectedVersion());
                 validateCompletedTask(task);
                 QualityIssue issue = requireIssueForTask(request.sourceIssueId(), taskId);
+                if (reworkRepository.hasLifecycle(taskId, issue.getIssueId())) {
+                        throw new BusinessConflictException("controlled rework already exists; use next-round");
+                }
                 if (issue.getStatus() == QualityIssueStatus.CLOSED) {
                         throw new BusinessConflictException("closed issue cannot create rework");
                 }
@@ -271,7 +277,11 @@ public class BusinessWriteService {
                                 .orElseThrow(
                                                 () -> new BusinessConflictException(
                                                                 "idempotent rework result is unavailable"));
-                return new ReworkWriteResponse(toDto(rework), record.getTaskVersionAfter());
+                // 旧创建的首次状态固定PENDING，后续状态不得改变旧Python响应契约。
+                ReworkTaskDto current = toDto(rework);
+                return new ReworkWriteResponse(new ReworkTaskDto(
+                                current.reworkTaskId(), current.taskId(), current.sourceIssueId(),
+                                ProductionTaskStatus.PENDING, current.reason()), record.getTaskVersionAfter());
         }
 
         // 校验用户角色

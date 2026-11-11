@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.productline.business.api.error.InvalidRequestException;
 import java.nio.charset.StandardCharsets;
 
-/** 异常原因及恢复说明按原值登记，UTF-16长度与Java/前端契约一致，不改变旧请求解析。 */
+/** 异常、恢复及下一轮创建共用版本/原因输入；按原值登记，不改变旧请求解析。 */
 public record ReworkInterruptionRequest(long expectedVersion, String reason) {
     public static final long MAX_SAFE_INTEGER = ReworkStartRequest.MAX_SAFE_INTEGER;
 

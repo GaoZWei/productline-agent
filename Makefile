@@ -27,8 +27,8 @@ smoke: ## 验证 Java、Python 和 Web 健康检查
 test-agent-foundation: ## 验证 M1.1 FastAPI、数据库、Alembic 和结构化日志基础
 	cd agent-service && uv run --frozen pytest -q tests/test_health.py tests/test_database.py tests/test_observability.py tests/test_alembic.py
 
-test-agent-client: ## 验证 M1.2 Java HTTP Client 配置、生命周期和响应契约
-	cd agent-service && uv run --frozen pytest -q tests/test_business_client.py
+test-agent-client: ## 验证Java共享HTTP Client及M8返工Schema与端点绑定
+	cd agent-service && uv run --frozen pytest -q tests/test_business_client.py tests/test_rework_contract.py
 
 test-agent-errors: ## 验证 M1.3 标准 Tool 错误模型和跨服务错误映射
 	cd agent-service && uv run --frozen pytest -q tests/test_tool_errors.py
@@ -37,7 +37,7 @@ test-agent-tool-protocol: ## 验证 M1.4 Tool 基础协议、执行门禁和注�
 	cd agent-service && uv run --frozen pytest -q tests/test_tool_protocol.py
 
 test-tools: test-agent-tool-protocol ## 验证 M1.4-M1.8 Tool 协议、调用策略和开发调试 API
-	cd agent-service && uv run --frozen pytest -q tests/test_retry_policy.py tests/test_tool_call_deduplication.py tests/integration/tools tests/integration/test_tool_debug_api.py
+	cd agent-service && uv run --frozen pytest -q tests/test_retry_policy.py tests/test_tool_call_deduplication.py tests/test_rework_contract.py tests/integration/tools tests/integration/test_tool_debug_api.py
 
 test-agent-persistence: ## 在隔离 PostgreSQL 上验证 M2.1-M2.5 运行记录持久化
 	./scripts/test-agent-persistence.sh
@@ -284,14 +284,14 @@ test-business-data: ## 验证 M0.3 固定数据映射和业务状态组合
 		-Dtest=DemoDataIntegrityIntegrationTest,DemoMigrationUpgradeIntegrationTest,ReworkPersistenceIntegrationTest,BusinessStateConsistencyValidatorTest \
 		test
 
-test-java-contract: ## 验证Java只读查询及M8详情、有效复核与材料/复核历史契约
+test-java-contract: ## 验证Java只读查询及M8详情、有效复核、历史与订单交付条件
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessQueryApiIntegrationTest,ReworkQueryApiIntegrationTest,ReworkHistoryApiIntegrationTest,EffectiveReviewApiIntegrationTest \
+		-Dtest=BusinessQueryApiIntegrationTest,ReworkQueryApiIntegrationTest,ReworkHistoryApiIntegrationTest,EffectiveReviewApiIntegrationTest,DeliveryConditionsApiIntegrationTest \
 		test
 
 test-java-write: ## 验证Java写接口及M8返工、完成/复核关闭原子性与实际写入行数
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessWriteApiIntegrationTest,ReworkStartApiIntegrationTest,ReworkInterruptionApiIntegrationTest,ReworkResumeApiIntegrationTest,ReworkWriteConsistencyIntegrationTest,ReworkResultApiIntegrationTest,ReworkInspectionApiIntegrationTest,ReworkRevisionConsistencyIntegrationTest,ReworkCompletionAtomicityIntegrationTest,ReworkReviewApiIntegrationTest,ReworkReviewReturnApiIntegrationTest \
+		-Dtest=BusinessWriteApiIntegrationTest,ReworkCreationApiIntegrationTest,ReworkStartApiIntegrationTest,ReworkInterruptionApiIntegrationTest,ReworkResumeApiIntegrationTest,ReworkWriteConsistencyIntegrationTest,ReworkResultApiIntegrationTest,ReworkInspectionApiIntegrationTest,ReworkRevisionConsistencyIntegrationTest,ReworkCompletionAtomicityIntegrationTest,ReworkReviewApiIntegrationTest,ReworkReviewReturnApiIntegrationTest \
 		test
 
 test-java-errors: ## 验证 M0.6 统一响应、错误映射和 Trace ID

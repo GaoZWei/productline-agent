@@ -72,7 +72,7 @@ T804冻结[返工生命周期契约v1](../docs/api/REWORK_CONTRACT.md)：列明�
 独立人工确认、任务共享版本、原始幂等回执、当前检查/复核选择及存量只读边界。
 检查通过与完成返工合并为一次明确确认的原子写入，不另设complete接口；下一轮必须独立确认创建。
 当前T806详情、T807～T809开始/阻塞/失败/恢复、T811/T812成果/检查登记及T815对应历史GET及T816有效复核/复核历史GET、T817复核POST的APPROVED分支已实现，其他新增路径仍为契约要求；未装配Python Client/Tool或前端类型，不能把旧接口回归当作其他新HTTP已实现。
-T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3已完成T811～T815成果/检查登记、更新一致性、完成原子性及历史查询验收，M8.4已接通T816有效复核/历史及T817/T818全部最终复核结论，下一最小任务T819受控首轮及下一轮创建。
+T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3已完成T811～T815成果/检查登记、更新一致性、完成原子性及历史查询验收，M8.4已接通T816有效复核/历史及T817/T818全部最终复核结论。T819受控创建和T820交付条件查询已开发待项目电脑验收，M8.4未整体验收；T821独立Python契约层已开发待验收，新Tool/确认和诊断尚未装配。
 
 V5由Flyway在未来Java启动时执行，本轮只在隔离测试库应用；不改V1～V4、种子或运行库，不自动生成历史轮次/证据。
 
@@ -212,6 +212,21 @@ T817接通APPROVED分支，T818已接通REJECTED/REWORK_REQUIRED并将问题回�
 原生产、本轮完成、创建原因、开始信息和成果/检查历史保持；其他问题、旧表复核、订单及交付不变，不自动创建后继或重跑生产，下一轮Java创建留给T819。
 有效复核及历史读取可见真实退回结论；旧请求重放只返回第一次OPEN回执，即使后继轮后来通过关闭问题，也不会重新打开问题。后继轮测试使用明确SQL夹具，不代表创建HTTP已实现。
 `make test-java-write`包含两类退回、原通过分支、并发结论竞争、逐写入点/提交回滚及提交前读取；详见[契约第二十二节](../docs/api/REWORK_CONTRACT.md#22-t818未通过复核与问题退回实现边界)。M8独立Approval/写Tool和页面仍待后续。
+
+### T819 受控首轮及下一轮创建（待项目电脑验收）
+
+`POST /api/tasks/{taskId}/reworks`严格接收sourceIssueId、expectedVersion和reason，`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/next-round`仅接收expectedVersion和reason；身份、角色、幂等键、严格JSON及UTF-16说明约束沿用M8契约。
+`ReworkCreationService`先绑定完整请求与实际用户，成功重放直接返回原回执；新请求锁父任务，重验原生产COMPLETED、安全版本、OPEN问题归属和活动返工。首轮禁止已有受控链；后继必须来自无后继的COMPLETED受控轮、当前成果/最新PASSED检查及当前REJECTED/REWORK_REQUIRED复核，轮次连续加一。
+同事务写入新PENDING任务、生命周期、一次版本递增、审计和原回执，实际写入必须一行；后继审计保留前轮真实退回结论及原始意见，新原因原样另存。新轮无材料、检查或复核，前轮证据和开始信息不变，不自动开始处理或推进订单/交付。
+旧`POST /rework`保持请求/响应结构，并使用同一父任务锁拒绝受控链绕过；匹配的旧创建成功仍重放PENDING及原版本，不因后来状态改变而破坏旧Python Schema。Python仍使用旧路径，没有独立Approval/写Tool或页面接线；Header不是确认凭证。
+`ReworkCreationApiIntegrationTest`已加入`make test-java-write`，包含完整两轮HTTP及原子性/并发用例；按用户要求本机未运行编译、测试或质量检查。项目电脑执行命令见[当前状态](../docs/STATUS.md)，实现边界见[契约第二十三节](../docs/api/REWORK_CONTRACT.md#23-t819受控首轮与下一轮创建实现边界)。
+
+### T820 订单交付条件及关闭并发（待项目电脑验收）
+
+`GET /api/orders/{orderId}/delivery-conditions`要求REVIEWER身份、合法ORDER-ID且不接受查询参数，返回order、tasks、deliveryRecords、blockers和hasBlockers。每个任务列出共享版本、生产状态、步骤、问题及T816有效复核和活动返工；阻塞含稳定代码及真实资源ID/状态，缺失值明确null。
+`DeliveryConditionsService`在独立只读可重复读事务中调用查询仓储和T816仓储，避免跨Service快照拼接；受控问题须CLOSED且当前绑定APPROVED，旧受控失败保留历史而不永久阻塞新通过。未纳管问题明确保留原质检/复核规则，不猜测哪个旧通过最新。
+仍检查同订单其他问题、生产/步骤、活动返工及实际交付记录；缺任务/步骤/交付记录显式列出，订单BLOCKED及交付NOT_READY/BLOCKED/FAILED保持阻塞。hasBlockers=false只说明列出的已知条件未发现阻塞，不代表完整交付资格或授权，不写订单/交付状态；旧HTTP和Python诊断不变。
+`DeliveryConditionsApiIntegrationTest`加入`make test-java-contract`，包含真实复核关闭期间的快照/提交前读取、两个问题争共享版本及后继轮通过；全部尚未执行。先在项目电脑验收T819/T820和M8.4，再进入M8.5；接口、字段和代码清单见[契约第二十四节](../docs/api/REWORK_CONTRACT.md#24-t820订单交付条件查询及关闭并发边界)。
 
 本机无Docker时，Java集成测试支持显式指定已准备好的隔离PostgreSQL，例如：
 
