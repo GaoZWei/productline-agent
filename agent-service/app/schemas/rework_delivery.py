@@ -17,11 +17,19 @@ from app.schemas.rework import (
 from app.schemas.tools import DeliveryState, OrderStatus, ProductionStatus, QualityIssueStatus
 
 type DeliveryConditionCode = Literal[
-    "ORDER_BLOCKED", "MISSING_PRODUCTION_TASKS", "PRODUCTION_TASK_NOT_COMPLETED",
-    "MISSING_PRODUCTION_STEPS", "PRODUCTION_STEP_NOT_COMPLETED", "ACTIVE_REWORK",
-    "QUALITY_ISSUE_UNRESOLVED", "CONTROLLED_ISSUE_NOT_CLOSED", "EFFECTIVE_REVIEW_NOT_APPROVED",
-    "LEGACY_REVIEW_NOT_APPROVED", "LEGACY_RESOLVED_ISSUE_WITHOUT_APPROVAL",
-    "MISSING_DELIVERY_RECORDS", "DELIVERY_NOT_READY",
+    "ORDER_BLOCKED",
+    "MISSING_PRODUCTION_TASKS",
+    "PRODUCTION_TASK_NOT_COMPLETED",
+    "MISSING_PRODUCTION_STEPS",
+    "PRODUCTION_STEP_NOT_COMPLETED",
+    "ACTIVE_REWORK",
+    "QUALITY_ISSUE_UNRESOLVED",
+    "CONTROLLED_ISSUE_NOT_CLOSED",
+    "EFFECTIVE_REVIEW_NOT_APPROVED",
+    "LEGACY_REVIEW_NOT_APPROVED",
+    "LEGACY_RESOLVED_ISSUE_WITHOUT_APPROVAL",
+    "MISSING_DELIVERY_RECORDS",
+    "DELIVERY_NOT_READY",
 ]
 
 
@@ -82,9 +90,11 @@ class DeliveryTaskConditions(ReworkSchema):
     def consistent_ownership(self) -> Self:
         """核对任务内资源归属及重复身份，不重新裁决是否可交付。"""
 
-        if any(step.task_id != self.task_id for step in self.steps) or any(
-            entry.issue.task_id != self.task_id for entry in self.issues
-        ) or any(rework.task_id != self.task_id for rework in self.active_reworks):
+        if (
+            any(step.task_id != self.task_id for step in self.steps)
+            or any(entry.issue.task_id != self.task_id for entry in self.issues)
+            or any(rework.task_id != self.task_id for rework in self.active_reworks)
+        ):
             raise ValueError("delivery facts belong to another task")
         for identities in (
             [step.step_id for step in self.steps],
@@ -94,8 +104,10 @@ class DeliveryTaskConditions(ReworkSchema):
             if len(identities) != len(set(identities)):
                 raise ValueError("delivery resource identities must be unique")
         issue_ids = {entry.issue.issue_id for entry in self.issues}
-        if any(rework.source_issue_id is not None and rework.source_issue_id not in issue_ids
-               for rework in self.active_reworks):
+        if any(
+            rework.source_issue_id is not None and rework.source_issue_id not in issue_ids
+            for rework in self.active_reworks
+        ):
             raise ValueError("active rework source is not part of this task")
         return self
 
@@ -109,14 +121,19 @@ class DeliveryConditionRecord(ReworkSchema):
 
 
 class DeliveryConditionBlocker(ReworkSchema):
-    """稳定Java阻塞代码及资源定位；缺失状态显式为null。"""
+    """稳定Java阻塞代码及资源定位。缺失状态显式为null。"""
 
     code: DeliveryConditionCode
     task_id: TaskId | None = Field(alias="taskId")
     resource_id: BusinessId = Field(alias="resourceId")
-    status: ProductionStatus | QualityIssueStatus | DeliveryState | OrderStatus | Literal[
-        "APPROVED", "REJECTED", "REWORK_REQUIRED"
-    ] | None
+    status: (
+        ProductionStatus
+        | QualityIssueStatus
+        | DeliveryState
+        | OrderStatus
+        | Literal["APPROVED", "REJECTED", "REWORK_REQUIRED"]
+        | None
+    )
 
 
 class DeliveryConditions(ReworkSchema):
@@ -137,7 +154,9 @@ class DeliveryConditions(ReworkSchema):
             raise ValueError("delivery tasks must be unique")
         if any(record.order_id != self.order.order_id for record in self.delivery_records):
             raise ValueError("delivery record belongs to another order")
-        if len({record.delivery_id for record in self.delivery_records}) != len(self.delivery_records):
+        if len({record.delivery_id for record in self.delivery_records}) != len(
+            self.delivery_records
+        ):
             raise ValueError("delivery records must be unique")
         if any(row.task_id is not None and row.task_id not in task_ids for row in self.blockers):
             raise ValueError("blocker belongs to another task")
@@ -146,10 +165,15 @@ class DeliveryConditions(ReworkSchema):
         }
         for task in self.tasks:
             resources[task.task_id] = {
-                task.task_id, *(step.step_id for step in task.steps),
+                task.task_id,
+                *(step.step_id for step in task.steps),
                 *(entry.issue.issue_id for entry in task.issues),
                 *(rework.rework_task_id for rework in task.active_reworks),
-                *(old.review_id for entry in task.issues for old in entry.effective_review.legacy_reviews),
+                *(
+                    old.review_id
+                    for entry in task.issues
+                    for old in entry.effective_review.legacy_reviews
+                ),
             }
         if any(row.resource_id not in resources[row.task_id] for row in self.blockers):
             raise ValueError("blocker resource is not part of its stated scope")

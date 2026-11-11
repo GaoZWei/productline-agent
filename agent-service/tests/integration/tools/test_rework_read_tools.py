@@ -27,7 +27,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 TASK = "TASK-T822-A"
 REWORK = "REWORK-T822-A"
 TRACE = "trace-t822"
-RESOURCE = {"task_id": TASK, "rework_task_id": REWORK}
+RESOURCE: dict[str, object] = {"task_id": TASK, "rework_task_id": REWORK}
 BASE = f"/api/tasks/{TASK}/reworks/{REWORK}"
 
 
@@ -62,61 +62,115 @@ def page(record: dict[str, object]) -> dict[str, object]:
 
 CASES = (
     ReadCase(
-        "get_rework_detail", RESOURCE, BASE,
+        "get_rework_detail",
+        RESOURCE,
+        BASE,
         {
             "reworkTask": {
-                "reworkTaskId": REWORK, "taskId": TASK, "sourceIssueId": "ISSUE-T822-A",
-                "status": "PENDING", "reason": "  原始创建原因🚀  ",
+                "reworkTaskId": REWORK,
+                "taskId": TASK,
+                "sourceIssueId": "ISSUE-T822-A",
+                "status": "PENDING",
+                "reason": "  原始创建原因🚀  ",
             },
-            "issueStatus": "OPEN", "roundNumber": 1, "previousReworkTaskId": None,
-            "allowedActions": ["START_REWORK"], "taskVersion": 4,
-            "processing": None, "inspection": None, "review": None,
+            "issueStatus": "OPEN",
+            "roundNumber": 1,
+            "previousReworkTaskId": None,
+            "allowedActions": ["START_REWORK"],
+            "taskVersion": 4,
+            "processing": None,
+            "inspection": None,
+            "review": None,
         },
     ),
     ReadCase("get_rework_results", RESOURCE, BASE + "/results", page(processing())),
     ReadCase(
-        "get_rework_inspections", RESOURCE, BASE + "/inspections",
-        page({
-            "inspectionId": "CHECK-T822-A", "inspectionSequence": 1,
-            "roundNumber": 1, "processingRevision": 1, "inspectorId": "inspector-test",
-            "inspectedAt": "2026-11-11T00:02:00Z", "result": "FAILED",
-            "items": [{
-                "checkItem": "坐标系", "result": "FAILED", "comment": "保留失败说明",
-                "evidenceReferences": ["report:failed-check"],
-            }],
-        }),
+        "get_rework_inspections",
+        RESOURCE,
+        BASE + "/inspections",
+        page(
+            {
+                "inspectionId": "CHECK-T822-A",
+                "inspectionSequence": 1,
+                "roundNumber": 1,
+                "processingRevision": 1,
+                "inspectorId": "inspector-test",
+                "inspectedAt": "2026-11-11T00:02:00Z",
+                "result": "FAILED",
+                "items": [
+                    {
+                        "checkItem": "坐标系",
+                        "result": "FAILED",
+                        "comment": "保留失败说明",
+                        "evidenceReferences": ["report:failed-check"],
+                    }
+                ],
+            }
+        ),
     ),
     ReadCase(
-        "get_rework_reviews", RESOURCE, BASE + "/reviews",
-        page({
-            "reviewId": "REVIEW-T822-A", "reviewSequence": 1, "roundNumber": 1,
-            "processingRevision": 1, "inspectionId": "CHECK-T822-PASS",
-            "status": "REWORK_REQUIRED", "reviewComment": "  保留退回意见  ",
-            "reviewedBy": "reviewer-test", "reviewedAt": "2026-11-11T00:03:00Z",
-        }),
+        "get_rework_reviews",
+        RESOURCE,
+        BASE + "/reviews",
+        page(
+            {
+                "reviewId": "REVIEW-T822-A",
+                "reviewSequence": 1,
+                "roundNumber": 1,
+                "processingRevision": 1,
+                "inspectionId": "CHECK-T822-PASS",
+                "status": "REWORK_REQUIRED",
+                "reviewComment": "  保留退回意见  ",
+                "reviewedBy": "reviewer-test",
+                "reviewedAt": "2026-11-11T00:03:00Z",
+            }
+        ),
     ),
     ReadCase(
-        "get_effective_rework_reviews", {"task_id": TASK},
+        "get_effective_rework_reviews",
+        {"task_id": TASK},
         f"/api/tasks/{TASK}/effective-reviews",
-        {"taskId": TASK, "taskVersion": 4, "issues": [{
-            "issueId": "ISSUE-T822-A", "reworkTaskId": REWORK, "roundNumber": 1,
-            "processingRevision": None, "inspectionId": None, "review": None,
-            "legacyReviews": [],
-        }]},
+        {
+            "taskId": TASK,
+            "taskVersion": 4,
+            "issues": [
+                {
+                    "issueId": "ISSUE-T822-A",
+                    "reworkTaskId": REWORK,
+                    "roundNumber": 1,
+                    "processingRevision": None,
+                    "inspectionId": None,
+                    "review": None,
+                    "legacyReviews": [],
+                }
+            ],
+        },
     ),
     ReadCase(
-        "get_delivery_conditions", {"order_id": "ORDER-T822-A"},
+        "get_delivery_conditions",
+        {"order_id": "ORDER-T822-A"},
         "/api/orders/ORDER-T822-A/delivery-conditions",
         {
             "order": {
-                "orderId": "ORDER-T822-A", "productType": "DOM", "status": "CREATED",
+                "orderId": "ORDER-T822-A",
+                "productType": "DOM",
+                "status": "CREATED",
             },
-            "tasks": [], "deliveryRecords": [],
+            "tasks": [],
+            "deliveryRecords": [],
             "blockers": [
-                {"code": "MISSING_PRODUCTION_TASKS", "taskId": None,
-                 "resourceId": "ORDER-T822-A", "status": None},
-                {"code": "MISSING_DELIVERY_RECORDS", "taskId": None,
-                 "resourceId": "ORDER-T822-A", "status": None},
+                {
+                    "code": "MISSING_PRODUCTION_TASKS",
+                    "taskId": None,
+                    "resourceId": "ORDER-T822-A",
+                    "status": None,
+                },
+                {
+                    "code": "MISSING_DELIVERY_RECORDS",
+                    "taskId": None,
+                    "resourceId": "ORDER-T822-A",
+                    "status": None,
+                },
             ],
             "hasBlockers": True,
         },
@@ -125,15 +179,20 @@ CASES = (
 
 
 def context(
-    permissions: frozenset[str] = frozenset({"REWORK_READ"}), role: str = "REVIEWER",
+    permissions: frozenset[str] = frozenset({"REWORK_READ"}),
+    role: str = "REVIEWER",
 ) -> ToolContext:
     """模拟服务端上下文，不从Tool参数获取角色、权限或令牌。"""
 
     return ToolContext(
         identity=BusinessIdentity(
-            user_id="reviewer-test", role=role, token=SecretStr("synthetic-test-token"),
+            user_id="reviewer-test",
+            role=role,
+            token=SecretStr("synthetic-test-token"),
         ),
-        permissions=permissions, trace_id=TRACE, run_id="run-t822",
+        permissions=permissions,
+        trace_id=TRACE,
+        run_id="run-t822",
     )
 
 
@@ -149,10 +208,18 @@ def shared_client(transport: httpx.MockTransport) -> BusinessHttpClient:
 def success(data: object) -> httpx.Response:
     """Java六字段成功信封和响应Header使用同一Trace。"""
 
-    return httpx.Response(200, headers={"X-Trace-Id": TRACE}, json={
-        "success": True, "code": "SUCCESS", "message": "success", "data": data,
-        "trace_id": TRACE, "retryable": False,
-    })
+    return httpx.Response(
+        200,
+        headers={"X-Trace-Id": TRACE},
+        json={
+            "success": True,
+            "code": "SUCCESS",
+            "message": "success",
+            "data": data,
+            "trace_id": TRACE,
+            "retryable": False,
+        },
+    )
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
@@ -202,7 +269,9 @@ async def test_missing_permission_is_rejected_before_input_and_http(case: ReadCa
     denied_context = context(frozenset({"TASK_READ", "REVIEW_READ"}))
     try:
         tool = create_rework_read_tool_registry(ReworkHttpClient(shared)).get(case.name)
-        result = await tool.execute({"role": "REVIEWER", "permissions": ["REWORK_READ"]}, denied_context)
+        result = await tool.execute(
+            {"role": "REVIEWER", "permissions": ["REWORK_READ"]}, denied_context
+        )
         assert not result.success and result.error is not None
         assert result.error.code == ToolErrorCode.PERMISSION_DENIED
         assert not result.error.retryable and captured == []
@@ -234,7 +303,9 @@ async def test_unknown_self_reported_fields_are_rejected_without_http(case: Read
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
-async def test_same_run_duplicate_is_blocked_and_explicit_refresh_reads_again(case: ReadCase) -> None:
+async def test_same_run_duplicate_is_blocked_and_explicit_refresh_reads_again(
+    case: ReadCase,
+) -> None:
     calls = 0
 
     def handler(_: httpx.Request) -> httpx.Response:
@@ -260,7 +331,9 @@ async def test_same_run_duplicate_is_blocked_and_explicit_refresh_reads_again(ca
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
 @pytest.mark.parametrize("failure", ["network", "timeout"])
-async def test_transient_error_retries_one_get_inside_the_same_run(case: ReadCase, failure: str) -> None:
+async def test_transient_error_retries_one_get_inside_the_same_run(
+    case: ReadCase, failure: str
+) -> None:
     captured: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -277,7 +350,9 @@ async def test_transient_error_retries_one_get_inside_the_same_run(case: ReadCas
     run = context()
     policy = RetryPolicy(max_retries=1, initial_backoff_seconds=0.001)
     try:
-        tool = create_rework_read_tool_registry(ReworkHttpClient(shared), retry_policy=policy).get(case.name)
+        tool = create_rework_read_tool_registry(ReworkHttpClient(shared), retry_policy=policy).get(
+            case.name
+        )
         result = await tool.execute(case.tool_input, run)
         assert result.success and len(captured) == 2
         assert run.tool_call_ledger.recorded_call_count == 1
@@ -288,10 +363,16 @@ async def test_transient_error_retries_one_get_inside_the_same_run(case: ReadCas
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
-@pytest.mark.parametrize("status,code", [
-    (400, "PARAM_VALIDATION_ERROR"), (403, "PERMISSION_DENIED"),
-    (404, "RESOURCE_NOT_FOUND"), (409, "BUSINESS_CONFLICT"), (500, "INTERNAL_SERVER_ERROR"),
-])
+@pytest.mark.parametrize(
+    "status,code",
+    [
+        (400, "PARAM_VALIDATION_ERROR"),
+        (403, "PERMISSION_DENIED"),
+        (404, "RESOURCE_NOT_FOUND"),
+        (409, "BUSINESS_CONFLICT"),
+        (500, "INTERNAL_SERVER_ERROR"),
+    ],
+)
 async def test_java_rejections_are_not_retried(case: ReadCase, status: int, code: str) -> None:
     calls = 0
 
@@ -300,10 +381,18 @@ async def test_java_rejections_are_not_retried(case: ReadCase, status: int, code
 
         nonlocal calls
         calls += 1
-        return httpx.Response(status, headers={"X-Trace-Id": TRACE}, json={
-            "success": False, "code": code, "message": "safe rejection", "data": None,
-            "trace_id": TRACE, "retryable": False,
-        })
+        return httpx.Response(
+            status,
+            headers={"X-Trace-Id": TRACE},
+            json={
+                "success": False,
+                "code": code,
+                "message": "safe rejection",
+                "data": None,
+                "trace_id": TRACE,
+                "retryable": False,
+            },
+        )
 
     shared = shared_client(httpx.MockTransport(handler))
     try:
@@ -319,7 +408,9 @@ async def test_java_rejections_are_not_retried(case: ReadCase, status: int, code
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
 @pytest.mark.parametrize("failure", ["schema", "resource", "trace"])
-async def test_malformed_or_unrelated_facts_fail_without_retry(case: ReadCase, failure: str) -> None:
+async def test_malformed_or_unrelated_facts_fail_without_retry(
+    case: ReadCase, failure: str
+) -> None:
     calls = 0
 
     def handler(_: httpx.Request) -> httpx.Response:
@@ -342,10 +433,18 @@ async def test_malformed_or_unrelated_facts_fail_without_retry(case: ReadCase, f
             else:
                 raw["taskId"] = "TASK-OTHER"
             return success(raw)
-        return httpx.Response(200, headers={"X-Trace-Id": "trace-other"}, json={
-            "success": True, "code": "SUCCESS", "message": "success", "data": raw,
-            "trace_id": "trace-other", "retryable": False,
-        })
+        return httpx.Response(
+            200,
+            headers={"X-Trace-Id": "trace-other"},
+            json={
+                "success": True,
+                "code": "SUCCESS",
+                "message": "success",
+                "data": raw,
+                "trace_id": "trace-other",
+                "retryable": False,
+            },
+        )
 
     shared = shared_client(httpx.MockTransport(handler))
     try:
@@ -374,7 +473,9 @@ async def test_unsafe_cursor_is_rejected_before_the_call_fingerprint(cursor: str
     try:
         tool = create_rework_read_tool_registry(ReworkHttpClient(shared)).get("get_rework_results")
         result = await tool.execute({**RESOURCE, "cursor": cursor}, run)
-        assert result.error is not None and result.error.code == ToolErrorCode.PARAM_VALIDATION_ERROR
+        assert (
+            result.error is not None and result.error.code == ToolErrorCode.PARAM_VALIDATION_ERROR
+        )
         assert calls == 0 and run.tool_call_ledger.recorded_call_count == 0
     finally:
         await shared.aclose()
@@ -387,13 +488,17 @@ async def test_page_limit_is_strict_and_bounded(limit: object) -> None:
     try:
         tool = create_rework_read_tool_registry(ReworkHttpClient(shared)).get("get_rework_results")
         result = await tool.execute({**RESOURCE, "limit": limit}, run)
-        assert result.error is not None and result.error.code == ToolErrorCode.PARAM_VALIDATION_ERROR
+        assert (
+            result.error is not None and result.error.code == ToolErrorCode.PARAM_VALIDATION_ERROR
+        )
         assert run.tool_call_ledger.recorded_call_count == 0
     finally:
         await shared.aclose()
 
 
-async def test_history_pages_are_explicit_distinct_calls_and_defaults_share_one_fingerprint() -> None:
+async def test_history_pages_are_explicit_distinct_calls_and_defaults_share_one_fingerprint() -> (
+    None
+):
     captured: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -409,7 +514,9 @@ async def test_history_pages_are_explicit_distinct_calls_and_defaults_share_one_
     try:
         tool = create_rework_read_tool_registry(ReworkHttpClient(shared)).get("get_rework_results")
         first = await tool.execute(RESOURCE, run)
-        duplicate = await tool.execute({"taskId": TASK, "reworkTaskId": REWORK, "limit": 20, "cursor": None}, run)
+        duplicate = await tool.execute(
+            {"taskId": TASK, "reworkTaskId": REWORK, "limit": 20, "cursor": None}, run
+        )
         second = await tool.execute({**RESOURCE, "cursor": "opaque.Cursor-A"}, run)
         assert first.success and second.success
         assert first.data is not None and first.data.next_cursor == "opaque.Cursor-A"
@@ -421,9 +528,16 @@ async def test_history_pages_are_explicit_distinct_calls_and_defaults_share_one_
         await shared.aclose()
 
 
-@pytest.mark.parametrize("name", ["get_rework_results", "get_rework_inspections", "get_rework_reviews"])
+@pytest.mark.parametrize(
+    "name", ["get_rework_results", "get_rework_inspections", "get_rework_reviews"]
+)
 async def test_empty_history_preserves_explicit_null_end_cursor(name: str) -> None:
-    raw = {"taskId": TASK, "reworkTaskId": REWORK, "records": [], "nextCursor": None}
+    raw: dict[str, object] = {
+        "taskId": TASK,
+        "reworkTaskId": REWORK,
+        "records": [],
+        "nextCursor": None,
+    }
     shared = shared_client(httpx.MockTransport(lambda _: success(raw)))
     try:
         tool = create_rework_read_tool_registry(ReworkHttpClient(shared)).get(name)
@@ -437,14 +551,28 @@ async def test_empty_history_preserves_explicit_null_end_cursor(name: str) -> No
 async def test_legacy_detail_and_pending_review_are_returned_without_inventing_bindings() -> None:
     legacy = copy.deepcopy(CASES[0].data)
     legacy.update(roundNumber=None, allowedActions=[])
-    current: dict[str, object] = {"taskId": TASK, "taskVersion": 4, "issues": [{
-        "issueId": "ISSUE-T822-A", "reworkTaskId": None, "roundNumber": None,
-        "processingRevision": None, "inspectionId": None, "review": None,
-        "legacyReviews": [{
-            "reviewId": "REVIEW-T822-OLD", "issueId": "ISSUE-T822-A",
-            "status": "PENDING", "reviewComment": None,
-        }],
-    }]}
+    current: dict[str, object] = {
+        "taskId": TASK,
+        "taskVersion": 4,
+        "issues": [
+            {
+                "issueId": "ISSUE-T822-A",
+                "reworkTaskId": None,
+                "roundNumber": None,
+                "processingRevision": None,
+                "inspectionId": None,
+                "review": None,
+                "legacyReviews": [
+                    {
+                        "reviewId": "REVIEW-T822-OLD",
+                        "issueId": "ISSUE-T822-A",
+                        "status": "PENDING",
+                        "reviewComment": None,
+                    }
+                ],
+            }
+        ],
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         """两种查询独立返回，不在Tool内拼接成同一快照。"""
@@ -455,7 +583,9 @@ async def test_legacy_detail_and_pending_review_are_returned_without_inventing_b
     try:
         registry = create_rework_read_tool_registry(ReworkHttpClient(shared))
         detail = await registry.get("get_rework_detail").execute(RESOURCE, context())
-        effective = await registry.get("get_effective_rework_reviews").execute({"task_id": TASK}, context())
+        effective = await registry.get("get_effective_rework_reviews").execute(
+            {"task_id": TASK}, context()
+        )
         assert detail.success and detail.data is not None
         assert detail.data.model_dump(mode="json", by_alias=True) == legacy
         assert effective.success and effective.data is not None
@@ -478,7 +608,8 @@ async def test_retries_stop_at_two_attempts_and_can_be_disabled() -> None:
     try:
         client = ReworkHttpClient(shared)
         retrying = create_rework_read_tool_registry(
-            client, retry_policy=RetryPolicy(max_retries=1, initial_backoff_seconds=0.001),
+            client,
+            retry_policy=RetryPolicy(max_retries=1, initial_backoff_seconds=0.001),
         ).get("get_rework_detail")
         failed = await retrying.execute(RESOURCE, context())
         assert failed.error is not None and failed.error.code == ToolErrorCode.UPSTREAM_UNAVAILABLE
@@ -503,10 +634,13 @@ async def test_total_timeout_includes_retry_backoff() -> None:
     shared = shared_client(httpx.MockTransport(handler))
     try:
         registry = create_rework_read_tool_registry(
-            ReworkHttpClient(shared), timeout=0.02,
+            ReworkHttpClient(shared),
+            timeout=0.02,
             retry_policy=RetryPolicy(max_retries=1, initial_backoff_seconds=1.0),
         )
-        result = await asyncio.wait_for(registry.get("get_rework_detail").execute(RESOURCE, context()), 2.0)
+        result = await asyncio.wait_for(
+            registry.get("get_rework_detail").execute(RESOURCE, context()), 2.0
+        )
         assert result.error is not None and result.error.code == ToolErrorCode.TOOL_TIMEOUT
         assert calls == 1
     finally:
@@ -570,7 +704,9 @@ async def test_registry_is_explicit_low_risk_and_does_not_change_old_seven_tools
         with pytest.raises(DuplicateToolRegistrationError):
             registry.register(registry.get("get_rework_detail"))
         with pytest.raises(ValueError):
-            create_rework_read_tool_registry(ReworkHttpClient(shared), retry_policy=RetryPolicy(max_retries=2))
+            create_rework_read_tool_registry(
+                ReworkHttpClient(shared), retry_policy=RetryPolicy(max_retries=2)
+            )
         assert calls == 0
     finally:
         await shared.aclose()

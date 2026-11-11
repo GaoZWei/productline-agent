@@ -1,10 +1,10 @@
-# M8返工生命周期契约 v1（M8.1～M8.3已验收，T819～T822 Java/Python及内部只读Tool待验收）
+# M8返工生命周期契约 v1（M8.1～M8.4已验收，T821/T822 Python契约及内部只读Tool离线验收通过）
 
 ## 1. 适用范围与实现边界
 
 本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
 T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入；T810完成本组跨操作一致性验收，T811/T812接通POST R/results成果及R/inspections人工检查登记，T813/T814完成更新材料与检查通过原子性验收，T815接通成果修订/检查历史GET并完成M8.3验收，T816接通任务级有效复核及本返工复核历史GET，T817/T818接通复核POST的通过关闭和退回OPEN分支。
-T819已开发受控首轮POST B及后继POST R/next-round，T820已开发订单级只读交付条件查询，均待项目电脑验收，详见第23/24节。T821独立Python契约及T822内部只读Tool已开发待验收，详见第25/26节；新Tool尚未生产装配，其余新增Java路径、新写Tool、独立Approval及前端接线尚未实现，不能描述为完整人工确认闭环。
+T819受控首轮POST B及后继POST R/next-round、T820订单级只读交付条件查询均已通过本机验收，详见第23/24节。T821独立Python契约及T822内部只读Tool已通过离线验收，详见第25/26节；新Tool尚未生产装配，其余新增Java路径、新写Tool、独立Approval及前端接线尚未实现，不能描述为完整人工确认闭环。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
 约束范围为人工修正成果、登记处理证据、人工检查、再次复核及下一轮返工；不执行自动生产重跑或自动成果检查，不推进订单或交付状态。
@@ -197,7 +197,7 @@ Python只读Tool仅对明确瞬时错误有限重试，400/401/403/404/409或响
 
 ## 7. 存量兼容与创建边界
 
-本节由T819实现首轮/后继创建和旧入口防绕过，尚待项目电脑验收；T804冻结和T805迁移本身未改变旧创建行为。
+本节由T819实现首轮/后继创建和旧入口防绕过，已通过本机验收；T804冻结和T805迁移本身未改变旧创建行为。
 旧`POST /api/tasks/{taskId}/rework`继续接受sourceIssueId、reason、expectedVersion，并返回原reworkTask/taskVersion结构，
 其记录保持旧生命周期，不自动补轮次；新受控首轮显式调用`POST /api/tasks/{taskId}/reworks`，返回第4节新回执。
 旧复核写入仍只追加记录，不能通过旧接口伪装成M8问题关闭。新生命周期复核必须使用第4节新路径和独立确认。
@@ -365,7 +365,7 @@ M8.3已验收：登记→失败检查→更新修订→通过检查仅到本轮C
 追加本返工全部绑定下的连续reviewSequence，复核身份由Java生成、reviewedBy取实际请求人、reviewedAt取服务端UTC。复核、来源问题CLOSED、一次共享版本递增、幂等完成、审计及固定12字段成功回执同事务提交；每步要求实际影响一行，异常、零行或COMMIT失败全量回滚，不能出现已关问题但缺审计/原回执的成功。
 请求摘要绑定operation、任务/返工、原expectedVersion、processingRevision、inspectionId、status和原样reviewComment，实际用户另与幂等记录核对。相同请求只重放首次成功JSON，后来版本或其他问题变化不重建旧结果；换人/目标/操作/材料/版本或说明均不能借用同键，失败不自动换键重试。
 本轮返工与原生产仍COMPLETED，原始原因、开始元数据、全部成果/检查、旧复核及旧回执保留，其他问题不被一并关闭。任务级有效复核和本轮历史可查询新APPROVED，旧review/overview接口与Python诊断保持，不自动推进订单或交付。
-无新迁移、依赖、独立Approval/写Tool或页面接线，Header不是人工确认凭证，本Java接口不构成三端确认闭环；退回由T818接通，创建由T819开发待验收，其他交付条件查询仍待后续。M8.4尚未整体验收。
+无新迁移、依赖、独立Approval/写Tool或页面接线，Header不是人工确认凭证，本Java接口不构成三端确认闭环；退回由T818接通，T819创建及T820交付条件查询已验收，M8.4已在停止线收口。
 
 ## 22. T818未通过复核与问题退回实现边界
 
@@ -375,8 +375,8 @@ M8.3已验收：登记→失败检查→更新修订→通过检查仅到本轮C
 本轮仍COMPLETED，原生产不回退，创建原因、开始信息、成果、检查、旧复核及旧回执完整保留；只退回来源问题，不改其他问题、订单或交付，不自动创建返工、不重跑生产。
 当前有效复核和完整历史输出真实REJECTED/REWORK_REQUIRED；详情允许动作表达下一轮的事实前提，也是T819写入时必须重新检查的条件，不是人工确认或权限凭证。
 幂等绑定仍覆盖实际用户、操作、任务/返工、原版本、修订、检查、结论及原样说明；重放旧退回请求只返回首次OPEN回执，后继轮后来关闭问题也不被旧请求重新打开，新键不能在OPEN或CLOSED状态再次退回旧轮。
-T818真实HTTP验收覆盖两种退回的完整处理链路、通过/退回/两种退回争同版本、同键重放、逐写入点和提交失败、提交前读取；该批次第二轮状态使用明确隔离SQL夹具，不代表验证过创建API。T819新编写的完整两轮HTTP用例尚未执行，不能用T818结果代替其验收。
-没有Python独立Approval/写Tool、确认界面或诊断切换；T819创建已开发待项目电脑验收，其他交付条件检查留给T820，M8.4尚未整体验收。
+T818真实HTTP验收覆盖两种退回的完整处理链路、通过/退回/两种退回争同版本、同键重放、逐写入点和提交失败、提交前读取；该批次第二轮状态使用明确隔离SQL夹具，不代表验证过创建API。T819完整两轮HTTP用例现已独立通过本机验收，不能用此前T818结果代替本轮实际结果。
+没有Python独立Approval/写Tool、确认界面或诊断切换；T819创建及T820交付条件查询现已通过本机验收，M8.4已收口。
 
 ## 23. T819受控首轮与下一轮创建实现边界
 
@@ -392,7 +392,7 @@ T818真实HTTP验收覆盖两种退回的完整处理链路、通过/退回/两�
 
 旧POST /api/tasks/{taskId}/rework继续使用旧请求/响应结构，增加相同父任务锁及受控链检查，防止新旧创建并发绕过轮次；匹配成功重放先于新状态校验，仍返回首次PENDING及原taskVersion。现有Python旧写Tool不切换新路径，旧记录不补造生命周期。独立Approval/Tool、确认界面和诊断消费新事实留待M8.5～M8.7。
 
-代码和`ReworkCreationApiIntegrationTest`已编写并纳入`make test-java-write`，包括真实两轮HTTP、新旧入口及幂等并发、逐写入点/提交失败和事务外读取；本机按用户要求未执行编译、测试或质量检查，全部待项目电脑验收，不宣称用例通过或完整闭环已验收。未新增迁移、依赖或修改固定数据；下一业务任务T820，M8.4尚未整体验收。
+`ReworkCreationApiIntegrationTest`已通过本机定向及make test-java-write验收，覆盖真实两轮HTTP、新旧入口及幂等并发、逐写入点/提交失败和事务外读取。未新增迁移、依赖或修改固定数据，T820及完整Java回归也已通过，M8.4在停止线收口；不宣称三端确认或页面闭环已验收。
 
 ## 24. T820订单交付条件查询及关闭并发边界
 
@@ -422,11 +422,11 @@ blockers每项固定code、taskId、resourceId、status四字段，无法适用�
 
 hasBlockers由本次blockers是否非空确定。没有已知阻塞不等于完整交付资格或人工授权；订单/交付仍返回真实原状态，不把QUALITY_CHECKING改成READY_FOR_DELIVERY，不自动交付，不新增完整交付状态机。其他问题、未完成生产、活动返工或实际交付BLOCKED都不能因关闭来源问题而被清除。旧overview、review、delivery等HTTP响应和Python诊断继续原行为，M8.5消费新事实前不能声称线上诊断已修复。
 
-`DeliveryConditionsApiIntegrationTest`已编写并加入`make test-java-contract`：受控旧失败后当前通过、当前绑定变化与存量兼容、其他生产/问题/交付阻塞、订单隔离、真实后继轮通过、两问题HTTP关闭争共享版本、回执提交前HTTP读取及真实关闭穿过读取过程时的只读快照。全部尚未编译或运行；T819/T820及M8.4整体仍待项目电脑验收，不将用例代码或历史通过结果视为本轮通过。未新增迁移、依赖、固定资料修改或Python/前端接线，不自动进入M8.5。
+`DeliveryConditionsApiIntegrationTest`已编写并加入`make test-java-contract`：受控旧失败后当前通过、当前绑定变化与存量兼容、其他生产/问题/交付阻塞、订单隔离、真实后继轮通过、两问题HTTP关闭争共享版本、回执提交前HTTP读取及真实关闭穿过读取过程时的只读快照。本轮已在本机编译并通过定向及完整查询/写入/固定数据验收，M8.4已在停止线收口，不以历史通过结果代替本次执行。未新增迁移、依赖、固定资料修改或Python/前端接线，不自动进入M8.5。
 
 ## 25. T821 Python Schema与HTTP Client开发边界
 
-按用户明确继续开发要求接续独立Python契约层，不将前置M8.4待验收改为已验收。`app.schemas.rework`提供严格、禁止额外字段且不strip的M8模型，`app.schemas.rework_delivery`提供T820事实结构；不复用或放宽旧`ReworkWriteResponseData`固定PENDING状态。新受控复核仅接收最终结论，存量PENDING/null说明保留在独立旧复核结构。
+初次按用户继续开发要求接续独立Python契约层时，保留前置M8.4待验收；本轮已独立补齐Java验收。`app.schemas.rework`提供严格、禁止额外字段且不strip的M8模型，`app.schemas.rework_delivery`提供T820事实结构；不复用或放宽旧`ReworkWriteResponseData`固定PENDING状态。新受控复核仅接收最终结论，存量PENDING/null说明保留在独立旧复核结构。
 
 版本为严格JSON安全整数，序号为正安全整数，业务ID最多64位并完整匹配；nullable字段仍为必填键，不能把缺字段悄悄补成null。说明、成果版本和引用原样保留，按Java UTF-16单元及isBlank/strip空白语义校验，拒绝NUL和无法无损UTF-8保存的代理项；不strip、不改大小写、不把成果版本转数字。时间保留Java原始UTC字符串及纳秒精度，不接受自报人员/时间进入写请求。
 
@@ -449,7 +449,7 @@ hasBlockers由本次blockers是否非空确定。没有已知阻塞不等于完�
 
 写入网络/超时等不确定结果不允许自动重试，也不描述为确定未写入；仅保留明确错误分类，确认/恢复与结果核对还需后续接线。GET B列表和POST B/operations/query尚无Java实现，Client不暴露伪造空结果或假成功方法，现有公共Client只读POST白名单不放宽；必须补齐Java能力后才能实现对应核对。只读有界重试属于后续Tool层，不能叠加到当前Client。
 
-T821交付时仅内部传输层，无lifespan装配、新Tool/权限/Approval、诊断规则、自然语言入口或页面变更，Python不直连业务表。代码和MockTransport/纯Schema用例已编写，并纳入`make test-agent-client`及`make test-tools`；本机按要求未运行pytest、类型、格式或其他检查，格式整理与质量结果也待项目电脑执行。离线用例不代表真实Java联调、完整人工确认或M8.4/M8.5验收通过；T822内部只读Tool开发见下一节。
+T821交付时仅内部传输层，无lifespan装配、新Tool/权限/Approval、诊断规则、自然语言入口或页面变更，Python不直连业务表。代码和MockTransport/纯Schema用例已编写，并纳入`make test-agent-client`及`make test-tools`；本轮已在本机通过pytest、mypy及相关格式/lint，修正测试标注并完成代码格式整理，历史相邻序号校验等价使用pairwise。离线用例不代表真实Python→Java联调或完整人工确认；M8.4的Java验收已独立通过，M8.5仍待写Tool及诊断接线，T822见下一节。
 
 ## 26. T822内部只读Tool与调用策略边界
 
@@ -472,4 +472,4 @@ T821交付时仅内部传输层，无lifespan装配、新Tool/权限/Approval、
 
 逻辑调用指纹包含Tool名、资源及分页默认值，snake_case/别名和显式默认参数归一后得到同一指纹。同Run重复返回DUPLICATE_CALL而非缓存旧数据，显式force_refresh才再次获取；不同游标是不同逻辑调用，内部重试不重复登记逻辑调用，不把网络重试误拦为Agent循环。仍保留原进程内去重边界，不新增跨实例缓存或持久账本。
 
-新增`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集纳入待验收，覆盖Tool→Client→MockTransport的权限/输入/真实GET、归属/Trace/格式拒绝、有限重试/总预算/取消、分页/存量/空历史、去重/刷新及独立注册表。用例尚未运行，不计通过数量，不代替真实Java/数据库或完整链路验收；前置M8.4、T821及本轮均待项目电脑验收，无写Tool、Approval、诊断切换或页面接线，下一开发任务T823，不自动开始。
+新增`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集纳入待验收，覆盖Tool→Client→MockTransport的权限/输入/真实GET、归属/Trace/格式拒绝、有限重试/总预算/取消、分页/存量/空历史、去重/刷新及独立注册表。本轮用例与正式Client/Tool入口、类型及相关格式/lint均已通过，实际结果见STATUS；Tool→Client→MockTransport不代替真实Python→Java/数据库联调或完整链路验收。前置M8.4已验收，无新写Tool、Approval、诊断切换或页面接线，下一最小任务T823，不自动开始。

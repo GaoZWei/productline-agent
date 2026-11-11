@@ -6,7 +6,7 @@
 状态字符串。当前已实现9个只读端点（含V4扩充后的订单列表），M0.5已实现提交复核和创建返工两个写端点，
 M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
 KB-02.1新增无写入的知识管理授权查询`POST /api/knowledge/authorize`，详见[知识管理授权契约](../knowledge/KNOWLEDGE_AUTHORIZATION.md)。
-M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809及T811/T812已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`、`/resume`、`/results`及`/inspections`，T815已接通同一返工路径下`GET /results`及`/inspections`历史分页，T816已接通本返工`GET /reviews`及任务级`GET /api/tasks/{taskId}/effective-reviews`，T817/T818已接通同一返工路径`POST /review`的通过关闭和退回OPEN分支。T819已开发受控首轮及下一轮创建，T820已开发`GET /api/orders/{orderId}/delivery-conditions`，均待项目电脑验收；其他新增路径及三端确认仍待开发。
+M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809及T811/T812已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`、`/resume`、`/results`及`/inspections`，T815已接通同一返工路径下`GET /results`及`/inspections`历史分页，T816已接通本返工`GET /reviews`及任务级`GET /api/tasks/{taskId}/effective-reviews`，T817/T818已接通同一返工路径`POST /review`的通过关闭和退回OPEN分支。T819已开发受控首轮及下一轮创建，T820已开发`GET /api/orders/{orderId}/delivery-conditions`，均已通过本机Java验收；其他新增路径及三端确认仍待开发。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -579,7 +579,7 @@ T816新增[当前有效复核与复核历史](REWORK_CONTRACT.md#20-t816当前�
 
 T817新增[复核通过与来源问题关闭](REWORK_CONTRACT.md#21-t817复核通过与问题关闭实现边界)，重新绑定当前修订及当前PASSED检查，只允许COMPLETED/RESOLVED；复核、关闭、版本、幂等、审计及原回执原子提交，失败/零行/提交失败全部回滚，旧材料和原始回执保持。T818已接通退回状态；独立确认、诊断切换和页面尚未接通，不自动推进订单/交付。
 T818新增[未通过复核与问题退回](REWORK_CONTRACT.md#22-t818未通过复核与问题退回实现边界)，REJECTED/REWORK_REQUIRED沿用同一严格请求及当前绑定重验，原子保存结论并将来源问题置OPEN，本轮及原生产仍COMPLETED；不自动创建下一轮或修改历史材料，原始回执可稳定重放。
-T819新增[受控首轮与下一轮创建](REWORK_CONTRACT.md#23-t819受控首轮与下一轮创建实现边界)，首轮接收sourceIssueId/expectedVersion/reason，后继接收expectedVersion/reason；Java重新核对OPEN问题、活动返工与前轮当前退回复核，生成新PENDING及真实连续轮次，不继承材料。新旧创建入口共用父任务锁防止绕过受控链，原成功重放保持原状态及版本；代码与用例已编写，尚待项目电脑实际验收。
-T820新增[订单交付条件查询](REWORK_CONTRACT.md#24-t820订单交付条件查询及关闭并发边界)，`GET /api/orders/{orderId}/delivery-conditions`在同一独立只读快照输出全部任务及版本、步骤、问题/有效复核、活动返工、交付记录和已知阻塞；受控复核只看当前绑定，存量保留旧规则，不改变既有查询或Python诊断。hasBlockers不构成交付授权，不自动推进状态；代码与关闭并发用例待项目电脑验收，M8.4尚未整体验收。
-T821新增[独立Python Schema与HTTP Client](REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)，保留原值与Java UTF-16规则，支持新完整状态、历史及原回执，旧PENDING创建响应不放宽；只包装已实现端点并核对资源/Trace/操作/版本及副作用，不重试写入，不注册Tool或接入确认/诊断。Java列表及操作回执查询尚未实现，不能用空结果代替；本轮代码及离线用例待项目电脑验收。
-T822新增[六个内部只读Tool及独立注册表](REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)，统一REWORK_READ上下文门禁，复用BaseTool总预算、逻辑去重及最多一次瞬时重试；单页读取不挑选有效结论、不改变业务状态。旧七Tool和生产装配、角色映射、诊断保持，代码与MockTransport用例待项目电脑验收，不代表完整Agent链路已启用。
+T819新增[受控首轮与下一轮创建](REWORK_CONTRACT.md#23-t819受控首轮与下一轮创建实现边界)，首轮接收sourceIssueId/expectedVersion/reason，后继接收expectedVersion/reason；Java重新核对OPEN问题、活动返工与前轮当前退回复核，生成新PENDING及真实连续轮次，不继承材料。新旧创建入口共用父任务锁防止绕过受控链，原成功重放保持原状态及版本；本轮已通过真实Java HTTP、并发、原子性及固定数据验收。
+T820新增[订单交付条件查询](REWORK_CONTRACT.md#24-t820订单交付条件查询及关闭并发边界)，`GET /api/orders/{orderId}/delivery-conditions`在同一独立只读快照输出全部任务及版本、步骤、问题/有效复核、活动返工、交付记录和已知阻塞；受控复核只看当前绑定，存量保留旧规则，不改变既有查询或Python诊断。hasBlockers不构成交付授权，不自动推进状态；本轮已通过关闭并发及完整查询/写入/固定数据验收，M8.4已收口。
+T821新增[独立Python Schema与HTTP Client](REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)，保留原值与Java UTF-16规则，支持新完整状态、历史及原回执，旧PENDING创建响应不放宽；只包装已实现端点并核对资源/Trace/操作/版本及副作用，不重试写入，不注册Tool或接入确认/诊断。Java列表及操作回执查询尚未实现，不能用空结果代替；本轮离线用例、类型和相关格式/lint已在本机通过，真实Python→Java联调及生产装配仍待后续。
+T822新增[六个内部只读Tool及独立注册表](REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)，统一REWORK_READ上下文门禁，复用BaseTool总预算、逻辑去重及最多一次瞬时重试；单页读取不挑选有效结论、不改变业务状态。旧七Tool和生产装配、角色映射、诊断保持，代码与MockTransport用例已通过离线验收，不代表真实Python→Java联调或完整Agent链路已启用。

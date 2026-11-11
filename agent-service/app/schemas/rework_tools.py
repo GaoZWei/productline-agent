@@ -20,7 +20,7 @@ def _safe_cursor(value: str) -> str:
 
 
 class ReworkHistoryInput(ReworkResource):
-    """一次只读一页历史；没有轮次、权限、自报状态或任意过滤参数。"""
+    """一次只读一页历史。没有轮次、权限、自报状态或任意过滤参数。"""
 
     limit: Annotated[int, Field(ge=1, le=100)] = 20
     cursor: Annotated[str, Field(min_length=1), AfterValidator(_safe_cursor)] | None = None

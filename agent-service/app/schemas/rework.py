@@ -20,7 +20,9 @@ _JAVA_WHITESPACE = frozenset(
 )
 
 
-def _text(maximum: int | None, *, trimmed: bool = False, allow_blank: bool = False) -> Callable[[str], str]:
+def _text(
+    maximum: int | None, *, trimmed: bool = False, allow_blank: bool = False
+) -> Callable[[str], str]:
     """按Java UTF-16及isBlank/strip语义检查，原样返回，不改变绑定值。"""
 
     def validate(value: str) -> str:
@@ -76,8 +78,13 @@ References = Annotated[list[EvidenceReference], Field(min_length=1, max_length=2
 type InspectionResult = Literal["PASSED", "FAILED"]
 type FinalReviewStatus = Literal["APPROVED", "REJECTED", "REWORK_REQUIRED"]
 type ReworkAction = Literal[
-    "START_REWORK", "BLOCK_REWORK", "FAIL_REWORK", "RESUME_REWORK",
-    "REGISTER_REWORK_RESULT", "REGISTER_REWORK_INSPECTION", "SUBMIT_REWORK_REVIEW",
+    "START_REWORK",
+    "BLOCK_REWORK",
+    "FAIL_REWORK",
+    "RESUME_REWORK",
+    "REGISTER_REWORK_RESULT",
+    "REGISTER_REWORK_INSPECTION",
+    "SUBMIT_REWORK_REVIEW",
     "CREATE_NEXT_REWORK",
 ]
 type ReworkOperation = Literal["CREATE_LIFECYCLE_REWORK"] | ReworkAction
@@ -87,8 +94,13 @@ class ReworkSchema(BaseModel):
     """M8专用严格基类，避免旧ToolSchema自动strip导致请求内容与审查值不同。"""
 
     model_config = ConfigDict(
-        extra="forbid", strict=True, frozen=True, populate_by_name=True,
-        str_strip_whitespace=False, revalidate_instances="always", hide_input_in_errors=True,
+        extra="forbid",
+        strict=True,
+        frozen=True,
+        populate_by_name=True,
+        str_strip_whitespace=False,
+        revalidate_instances="always",
+        hide_input_in_errors=True,
     )
 
 
@@ -109,12 +121,16 @@ class ReworkPageQuery(ReworkSchema):
 class ReworkArtifact(ReworkSchema):
     """成果标识和版本是外部原始字符串，不能套业务ID或数字转换。"""
 
-    artifact_id: Annotated[str, AfterValidator(_text(256, trimmed=True))] = Field(alias="artifactId")
-    artifact_version: Annotated[str, AfterValidator(_text(128, trimmed=True))] = Field(alias="artifactVersion")
+    artifact_id: Annotated[str, AfterValidator(_text(256, trimmed=True))] = Field(
+        alias="artifactId"
+    )
+    artifact_version: Annotated[str, AfterValidator(_text(128, trimmed=True))] = Field(
+        alias="artifactVersion"
+    )
 
 
 class ReworkInspectionItem(ReworkSchema):
-    """真实人工检查项；不执行引用、不代表自动检查。"""
+    """真实人工检查项。不执行引用、不代表自动检查。"""
 
     check_item: Annotated[str, AfterValidator(_text(128))] = Field(alias="checkItem")
     result: InspectionResult
@@ -220,7 +236,7 @@ class ReworkReview(ReworkSchema):
 
 
 class ReworkDetail(ReworkSchema):
-    """读取快照中的当前材料；允许动作来自Java，不是写入授权。"""
+    """读取快照中的当前材料。允许动作来自Java，不是写入授权。"""
 
     rework_task: ReworkTask = Field(alias="reworkTask")
     issue_status: QualityIssueStatus | None = Field(alias="issueStatus")
@@ -241,21 +257,32 @@ class ReworkDetail(ReworkSchema):
         if len(set(self.allowed_actions)) != len(self.allowed_actions):
             raise ValueError("allowed actions must be unique")
         if self.round_number is None:
-            if any(value is not None for value in (
-                self.previous_rework_task_id, self.processing, self.inspection, self.review,
-            )) or self.allowed_actions:
+            if (
+                any(
+                    value is not None
+                    for value in (
+                        self.previous_rework_task_id,
+                        self.processing,
+                        self.inspection,
+                        self.review,
+                    )
+                )
+                or self.allowed_actions
+            ):
                 raise ValueError("legacy rework must not invent lifecycle or evidence")
         elif self.rework_task.source_issue_id is None or (
             (self.round_number == 1) != (self.previous_rework_task_id is None)
         ):
             raise ValueError("round predecessor or source is invalid")
         if self.inspection is not None and (
-            self.processing is None or self.inspection.round_number != self.round_number
+            self.processing is None
+            or self.inspection.round_number != self.round_number
             or self.inspection.processing_revision != self.processing.processing_revision
         ):
             raise ValueError("inspection does not bind current processing")
         if self.review is not None and (
-            self.inspection is None or self.inspection.result != "PASSED"
+            self.inspection is None
+            or self.inspection.result != "PASSED"
             or self.review.round_number != self.round_number
             or self.review.processing_revision != self.inspection.processing_revision
             or self.review.inspection_id != self.inspection.inspection_id
@@ -277,7 +304,9 @@ class LegacyReview(ReworkSchema):
     review_id: BusinessId = Field(alias="reviewId")
     issue_id: BusinessId = Field(alias="issueId")
     status: ReviewStatus
-    review_comment: Annotated[str, AfterValidator(_text(1000, allow_blank=True))] | None = Field(alias="reviewComment")
+    review_comment: Annotated[str, AfterValidator(_text(1000, allow_blank=True))] | None = Field(
+        alias="reviewComment"
+    )
 
 
 class EffectiveReworkReview(ReworkSchema):
@@ -296,7 +325,15 @@ class EffectiveReworkReview(ReworkSchema):
         """拒绝错轮次、错材料或混入存量的响应，不自行决定哪个复核有效。"""
 
         if self.round_number is None:
-            if any(value is not None for value in (self.rework_task_id, self.processing_revision, self.inspection_id, self.review)):
+            if any(
+                value is not None
+                for value in (
+                    self.rework_task_id,
+                    self.processing_revision,
+                    self.inspection_id,
+                    self.review,
+                )
+            ):
                 raise ValueError("legacy issue must not invent controlled binding")
         elif self.rework_task_id is None or self.legacy_reviews:
             raise ValueError("controlled issue requires a rework and no legacy records")

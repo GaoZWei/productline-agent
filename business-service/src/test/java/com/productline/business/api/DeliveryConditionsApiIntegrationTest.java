@@ -149,7 +149,7 @@ class DeliveryConditionsApiIntegrationTest extends PostgresIntegrationTestSuppor
     @ParameterizedTest
     @ValueSource(strings = {"NO-REVIEW", "REJECTED", "REWORK_REQUIRED", "NEW-REVISION", "NEW-FAILED", "NEW-PASSED", "OLD-BINDING"})
     void historicalApprovalCannotAuthorizeTheCurrentBinding(String condition) {
-        String id = "BIND-" + condition; ready(id);
+        String id = "BIND-" + condition.replace('_', '-'); ready(id);
         if (!condition.equals("NO-REVIEW")) review(id, 1, 1, 1, "APPROVED");
         jdbc.update("UPDATE quality_issues SET status='CLOSED' WHERE issue_id=?", issue(id));
         switch (condition) {
@@ -168,7 +168,7 @@ class DeliveryConditionsApiIntegrationTest extends PostgresIntegrationTestSuppor
     @ParameterizedTest
     @ValueSource(strings = {"PENDING", "REJECTED", "REWORK_REQUIRED", "NONE", "APPROVED"})
     void legacyIssuesExplicitlyKeepTheirExistingRules(String status) {
-        String id = "LEGACY-" + status; fixture(id);
+        String id = "LEGACY-" + status.replace('_', '-'); fixture(id);
         jdbc.update("INSERT INTO quality_issues VALUES (?,?,'COORDINATE_SYSTEM','RESOLVED','旧问题')", issue(id), task(id));
         if (!status.equals("NONE")) jdbc.update("INSERT INTO review_records VALUES (?,?,?,'旧意见')", "REVIEW-T820-" + id, issue(id), status);
         if (List.of("PENDING", "REJECTED", "REWORK_REQUIRED").contains(status)) jdbc.update("INSERT INTO review_records VALUES (?,?,'APPROVED','另有旧通过')", "REVIEW-T820-" + id + "-PASS", issue(id));
@@ -203,7 +203,7 @@ class DeliveryConditionsApiIntegrationTest extends PostgresIntegrationTestSuppor
     @ParameterizedTest
     @ValueSource(strings = {"NOT_READY", "BLOCKED", "FAILED", "READY", "DELIVERING", "DELIVERED"})
     void deliveryRecordsAreReportedWithoutAdvancingTheirStatuses(String status) {
-        String id = "DELIVERY-" + status; fixture(id); jdbc.update("UPDATE delivery_records SET status=? WHERE order_id=?", status, order(id));
+        String id = "DELIVERY-" + status.replace('_', '-'); fixture(id); jdbc.update("UPDATE delivery_records SET status=? WHERE order_id=?", status, order(id));
         var before = facts(); var response = read(id);
         assertThat(codes(response)).containsExactlyElementsOf(List.of("NOT_READY", "BLOCKED", "FAILED").contains(status) ? List.of("DELIVERY_NOT_READY") : List.of());
         assertThat(response.path("deliveryRecords").get(0).path("status").asText()).isEqualTo(status); assertThat(facts()).isEqualTo(before);
