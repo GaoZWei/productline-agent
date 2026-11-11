@@ -1,10 +1,10 @@
-# M8返工生命周期契约 v1（M8.1～M8.3已验收，T819/T820 Java与T821 Python契约待验收）
+# M8返工生命周期契约 v1（M8.1～M8.3已验收，T819～T822 Java/Python及内部只读Tool待验收）
 
 ## 1. 适用范围与实现边界
 
 本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
 T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入；T810完成本组跨操作一致性验收，T811/T812接通POST R/results成果及R/inspections人工检查登记，T813/T814完成更新材料与检查通过原子性验收，T815接通成果修订/检查历史GET并完成M8.3验收，T816接通任务级有效复核及本返工复核历史GET，T817/T818接通复核POST的通过关闭和退回OPEN分支。
-T819已开发受控首轮POST B及后继POST R/next-round，T820已开发订单级只读交付条件查询，均待项目电脑验收，详见第23/24节。T821独立Python Schema/HTTP Client已开发待验收，详见第25节；其余新增Java路径、新Tool、独立Approval及前端接线尚未实现，不能描述为完整人工确认闭环。
+T819已开发受控首轮POST B及后继POST R/next-round，T820已开发订单级只读交付条件查询，均待项目电脑验收，详见第23/24节。T821独立Python契约及T822内部只读Tool已开发待验收，详见第25/26节；新Tool尚未生产装配，其余新增Java路径、新写Tool、独立Approval及前端接线尚未实现，不能描述为完整人工确认闭环。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
 约束范围为人工修正成果、登记处理证据、人工检查、再次复核及下一轮返工；不执行自动生产重跑或自动成果检查，不推进订单或交付状态。
@@ -28,7 +28,7 @@ Java JSON使用camelCase；Python内部使用snake_case并显式绑定别名，�
 | 人员与时间 | 写入人从实际请求身份确定，写入时间由Java生成UTC ISO-8601字符串；请求不得提交inspectorId、reviewedBy或登记时间 |
 | Header | 新端点要求非空白且最多128位、无CR/LF的X-User-Id和精确REVIEWER角色；写入还要求1～128位`^[A-Za-z0-9._:-]+$`的Idempotency-Key |
 
-以下为确定性权限映射，已接通的M8 Java读取及开始/异常/恢复/成果/检查/通过复核端点均落实REVIEWER角色校验；M8 Python权限与独立Approval仍待接线。新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
+以下为确定性权限映射，已接通的M8 Java读取及写入端点均落实REVIEWER角色校验；T822内部只读Tool落实REWORK_READ上下文门禁，生产角色映射、新写Tool及独立Approval仍待接线。新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
 
 | operation | Python权限 | 独立人工确认 |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ Java Header或请求中的approval_id不是人工确认的证明；新Java业务
 | GET R/results | taskId、reworkTaskId、records处理修订数组、nextCursor | T815已实现，按processingRevision升序 |
 | GET R/inspections | taskId、reworkTaskId、records检查数组、nextCursor | T815已实现，按inspectionSequence升序 |
 | GET R/reviews | taskId、reworkTaskId、records复核数组、nextCursor | T816已实现，按reviewSequence升序 |
-| GET /api/tasks/{taskId}/effective-reviews | taskId、taskVersion、issues有效复核分组数组 | T816已实现，Python消费留待M8.5 |
+| GET /api/tasks/{taskId}/effective-reviews | taskId、taskVersion、issues有效复核分组数组 | T816已实现，T821/T822提供Python契约及内部只读Tool，诊断消费未装配 |
 | GET /api/orders/{orderId}/delivery-conditions | order、tasks、deliveryRecords、blockers、hasBlockers | T820已开发待验收，字段及条件见第24节；无查询参数 |
 | POST B/operations/query | 规划请求仅idempotencyKey；data为found及receipt（未见回执时null） | Java当前未实现，Python也未包装；供后续结果未知核对，不得用伪造found=false替代真实查询 |
 
@@ -449,4 +449,27 @@ hasBlockers由本次blockers是否非空确定。没有已知阻塞不等于完�
 
 写入网络/超时等不确定结果不允许自动重试，也不描述为确定未写入；仅保留明确错误分类，确认/恢复与结果核对还需后续接线。GET B列表和POST B/operations/query尚无Java实现，Client不暴露伪造空结果或假成功方法，现有公共Client只读POST白名单不放宽；必须补齐Java能力后才能实现对应核对。只读有界重试属于后续Tool层，不能叠加到当前Client。
 
-当前只是内部传输层，无lifespan装配、新Tool/权限/Approval、诊断规则、自然语言入口或页面变更，Python不直连业务表。代码和MockTransport/纯Schema用例已编写，并纳入`make test-agent-client`及`make test-tools`；本机按要求未运行pytest、类型、格式或其他检查，格式整理与质量结果也待项目电脑执行。离线用例不代表真实Java联调、完整人工确认或M8.4/M8.5验收通过；下一开发任务T822，不自动开始。
+T821交付时仅内部传输层，无lifespan装配、新Tool/权限/Approval、诊断规则、自然语言入口或页面变更，Python不直连业务表。代码和MockTransport/纯Schema用例已编写，并纳入`make test-agent-client`及`make test-tools`；本机按要求未运行pytest、类型、格式或其他检查，格式整理与质量结果也待项目电脑执行。离线用例不代表真实Java联调、完整人工确认或M8.4/M8.5验收通过；T822内部只读Tool开发见下一节。
+
+## 26. T822内部只读Tool与调用策略边界
+
+新增`app.schemas.rework_tools`和`app.tools.rework_readonly`，显式调用`create_rework_read_tool_registry(ReworkHttpClient)`才创建六个内部Tool；构造、注册及枚举不访问Java，也不创建或关闭HTTP连接池。独立注册表不修改原`READ_TOOL_NAMES`七Tool、lifespan、生产Agent动作白名单、调试HTTP入口或服务端角色映射；当前代码可供后续编排使用，不表示生产已接线。
+
+| Tool名称 | 输入 | 输出/调用 |
+| --- | --- | --- |
+| get_rework_detail | task_id、rework_task_id | ReworkDetail，GET R |
+| get_rework_results | task_id、rework_task_id、limit/cursor | 一页处理修订，GET R/results |
+| get_rework_inspections | 同上 | 一页人工检查，GET R/inspections，保留失败记录 |
+| get_rework_reviews | 同上 | 一页受控复核历史，GET R/reviews，不选择有效结论 |
+| get_effective_rework_reviews | task_id | Java当前绑定及独立存量记录，GET effective-reviews |
+| get_delivery_conditions | order_id | 同一订单快照的已知条件，GET delivery-conditions，不构成交付授权 |
+
+六Tool全部LOW风险，统一要求服务端`ToolContext.permissions`含REWORK_READ；请求身份、角色和Trace只取上下文，不从输入中获取。额外字段（包括自报角色、权限、确认、状态或过滤器）拒绝；身份角色及资源归属仍由Java最终校验，Python权限门禁不替代Java角色或当作确认凭证。
+
+复用BaseTool的权限检查、严格输入、Run内指纹、总超时、重试及输出校验。默认总预算5秒覆盖HTTP、退避及输出校验，最多额外重试一次，支持显式`RetryPolicy(max_retries=0)`；只允许既有策略白名单中retryable=true的TOOL_TIMEOUT/UPSTREAM_UNAVAILABLE瞬时错误。参数、权限、404、409、响应格式/归属/Trace错误以及Java明确retryable=false的500不重试；Client每次只发一次GET，不叠加策略，取消向上传播而不留下后台重试。
+
+历史默认limit=20、范围1～100，cursor是原值不透明字符串；拒绝空字符串、NUL/CR/LF及不可无损UTF-8编码的代理项，先于公共指纹计算处理。当前页使用同一组资源/参数重试，不自动翻页、合并不同读取快照、过滤失败或补造历史；重试可读到新快照，只返回最终完整成功结果，不能把多次尝试拼成同一事实。
+
+逻辑调用指纹包含Tool名、资源及分页默认值，snake_case/别名和显式默认参数归一后得到同一指纹。同Run重复返回DUPLICATE_CALL而非缓存旧数据，显式force_refresh才再次获取；不同游标是不同逻辑调用，内部重试不重复登记逻辑调用，不把网络重试误拦为Agent循环。仍保留原进程内去重边界，不新增跨实例缓存或持久账本。
+
+新增`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集纳入待验收，覆盖Tool→Client→MockTransport的权限/输入/真实GET、归属/Trace/格式拒绝、有限重试/总预算/取消、分页/存量/空历史、去重/刷新及独立注册表。用例尚未运行，不计通过数量，不代替真实Java/数据库或完整链路验收；前置M8.4、T821及本轮均待项目电脑验收，无写Tool、Approval、诊断切换或页面接线，下一开发任务T823，不自动开始。

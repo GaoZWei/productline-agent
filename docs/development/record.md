@@ -2548,3 +2548,22 @@ Java新增的完整返工状态、当前材料和原成功回执不能直接套�
 - 新Schema严格限制安全整数、业务ID、显式null和枚举；说明、成果版本和证据按Java UTF-16及空白语义原样传递，新完整状态与存量PENDING/null说明分开，旧创建响应不放宽。
 - 类型化调用已有六类GET和九类POST，核对Trace、资源、历史序号/分页及写操作、原版本递增和状态/材料副作用，不按后来GET重建原成功回执。
 - Client每次只发一次请求，借用外层生命周期的连接池，不注册Tool、不管理人工确认、不切换诊断或直接访问业务表；写入结果不确定时禁止自动重发，未实现的Java查询不伪造空结果。
+
+## 2026-11-11 T822 M8.5 内部只读Tool及统一调用门禁
+
+### 核心解决的问题
+
+新Java事实只有HTTP适配器时，后续编排还缺少统一的参数、权限、超时和重复调用边界，若逐处直接调用也容易叠加重试或把历史当作当前结论。
+新增独立只读Tool注册表，复用公共调用门禁并保持新旧Tool隔离，让后续编排按资源和明确分页获取Java事实。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/rework_tools.py`：`ReworkHistoryInput`、`ReworkTaskInput`、`ReworkOrderInput`及`_safe_cursor`，限定资源/分页并在指纹前拒绝不可无损编码游标。
+- `agent-service/app/tools/rework_readonly.py`：`_ReworkReadTool`统一LOW/REWORK_READ与总预算，六个具体Tool调用T821只读方法，`create_rework_read_tool_registry`显式创建独立注册表。
+
+### 实现的核心功能
+
+- 详情、三类历史、有效复核和交付条件六个只读Tool只从服务端上下文取得身份、权限和Trace，Java继续最终校验资源归属与角色；不把允许动作或无阻塞当作写入授权。
+- 公共BaseTool统一严格输入、逻辑去重、总预算内至多一次瞬时重试及输出校验，Client不叠加策略；Java明确拒绝及错误事实不重试，取消向上传播。
+- 历史只读一页并保留原值、失败/退回记录、存量及显式null，不自动翻页或猜测有效结论；同Run重复不返回旧缓存，显式刷新才重新读取。
+- 独立注册表构造不访问Java，不改变原七只读Tool、生产Agent/诊断、角色映射、写操作或人工确认链路。

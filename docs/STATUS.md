@@ -1,8 +1,15 @@
 # 当前开发状态
 
-- 当前里程碑：M8人工返工执行与再次复核闭环（M8.1～M8.3已验收，M8.4待验收，M8.5已开发T821契约层）；M7已完成并通过既有验收。
-- 当前子阶段：按用户本轮“继续开发”指令，接续T821 Python Schema/HTTP Client，代码和离线用例已编写、待项目电脑验收；未把T819/T820或M8.4标为已验收，未接通Tool/Approval/诊断或页面。下一开发任务T822只读Tool，未自动启动；项目电脑仍须先完成Java及本轮契约验收，后续装配不能以代码已编写替代验证。知识库保留KB-03.10，KB-03.11继续待办，不切源或启动KB-04。
+- 面试整理（2026-11-11）：题库Q02保留自然问法，按用户认可版本更新答案的30秒回答、完整回答和记忆主线，以数据产线前端经历、实际业务痛点、对话及受限Agent取证探索说明后端能力成长；明确方案探索与工程验证定位，保留原追问，同步优化清单既有项目描述条目且不重复追加，既有边界及验证待办保持。仅文档同步，未运行测试或质量检查，遵循本机环境约定；无新增Agent面试关注点或本轮遗留项，后续可按新主线练习口述，不推进开发任务。
+- 当前里程碑：M8人工返工执行与再次复核闭环（M8.1～M8.3已验收，M8.4待验收，M8.5已开发T821契约及T822内部只读Tool）；M7已完成并通过既有验收。
+- 当前子阶段：T822六个内部只读Tool及独立注册表已开发，代码和离线用例待项目电脑验收；前置T819～T821与M8.4的待验收状态保留。新Tool尚未装配到lifespan/生产Agent或诊断，不涉及新写Tool、Approval或页面；下一开发任务T823写Tool映射，未自动启动。知识库保留KB-03.10，KB-03.11继续待办，不切源或启动KB-04。
 - 环境约定（用户本轮最新要求，2026-11-11）：项目环境在另一台电脑，本机仅开发，不执行测试、质量检查或启动数据库；本约定替代下面历史记录中的本机验收安排。本轮未编译、运行测试或检查，不将已编写用例或历史通过结果记为本轮验收通过。
+- T822开发（2026-11-11）：新增`schemas/rework_tools.py`与`tools/rework_readonly.py`，独立提供get_rework_detail、get_rework_results、get_rework_inspections、get_rework_reviews、get_effective_rework_reviews及get_delivery_conditions六个LOW风险Tool，统一要求服务端ToolContext的REWORK_READ；身份和Trace只取上下文，Java仍最终校验角色/归属。Tool只调用T821 GET，不下载引用、选择有效复核、推进状态或模拟未实现Java查询。见[只读Tool边界](api/REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)。
+- T822执行策略：独立`create_rework_read_tool_registry`不发请求、不加入原七Tool或生产动作白名单。复用BaseTool权限→严格输入→Run内指纹去重→总预算→受限重试→输出校验；默认总预算5秒、最多额外重试一次，支持显式关闭重试，Client仍每次只发一次GET。仅retryable=true的网络/超时等既有瞬时错误允许重试，Java明确拒绝、500/retryable=false、错归属/Trace及Schema错误均不重试；翻页只传同一页参数，不自动合并不同快照。
+- T822输入与重复调用：历史仅接受资源及limit/cursor，默认20、范围1～100，原值游标先拒绝空串、NUL/换行及不可无损UTF-8的代理项，避免编码错误逃出公共指纹边界。相同资源/页在同一Run返回DUPLICATE_CALL而非缓存事实，显式force_refresh才重新GET；不同游标是独立逻辑调用，null/空历史及旧PENDING复核不补造绑定。
+- T822用例与实际结果：新增`tests/integration/tools/test_rework_read_tools.py`，覆盖六Tool实际GET路径/上下文/原值、权限与自报字段拒绝、Java错误/错资源/Trace/格式不重试、瞬时错误最多一次重试、分页/空历史/存量、默认参数规范化去重和显式刷新、总预算含退避及取消传播、独立注册表和旧七Tool保持。均为Tool→Client→MockTransport离线用例，未执行、无通过数字，不代表真实Java/数据库或生产装配验收。
+- 项目电脑T822待执行：在agent-service执行`uv run --frozen pytest -q tests/integration/tools/test_rework_read_tools.py tests/test_rework_contract.py tests/test_retry_policy.py tests/test_tool_call_deduplication.py tests/test_write_tools.py tests/test_diagnosis_rules.py`，再执行`uv run --frozen mypy app tests`及本轮两份运行模块/新测试的Ruff格式整理、格式检查和lint；现有`make test-tools`按目录收集新用例，尚未执行。基础脚本、shell语法、diff和文档链接检查亦未运行，前置Java及M8.4验收仍须在项目电脑补齐。
+- T822保护与停止线：仅新增两份运行模块及一份测试，Make只更新入口说明，同步契约、导航、规划及核心开发记录；公共BaseTool/RetryPolicy/Client、旧七Tool、生产装配/角色映射/诊断、Java、迁移、固定数据/语料、前端和依赖不变。未读取.env、启动数据库、调用模型、部署、提交或推送；未完成项是本轮类型/格式/测试与真实联调和前置验收，运行结果未知，无产品临时替代方案。复用既有M1.5～M1.7及T821事实/权限/重试边界，无新增独立Agent面试关注点，不修改面试记录、成熟答案或优化清单；本轮停在T822，不自动开始T823。
 - T821开发（2026-11-11）：新增独立`schemas/rework.py`及`schemas/rework_delivery.py`，同步详情、处理/检查/复核历史、有效复核、交付条件、九类写请求及固定12字段原回执。严格类型/安全整数/业务ID/必填null/当前绑定校验；文本保留原值，按Java UTF-16长度及isBlank/strip语义校验，成果版本和证据不转数字或strip。新完整状态及受控复核与旧PENDING创建/旧PENDING或null说明复核明确分开，旧Schema不放宽。
 - T821 Client：`ReworkHttpClient`借用现有`BusinessHttpClient`连接池，支持已实现的六类GET和九类POST，透传身份、Trace和原幂等键；逐请求核对响应资源/Trace、历史序号及页大小、写操作/任务/原版本+1及实际状态副作用。每次只发一次请求，写入不确定结果禁止自动重试；不按后来GET重建原回执，不直接读Java表，不推断有效复核。未实现的列表/operations-query没有伪造方法，现有只读POST白名单保持。
 - T821未装配边界：仅内部传输能力，不注册Tool、不改lifespan/路由、权限、Approval、诊断或前端；调用Client的方法不等于人已确认。新只读有限重试留给T822，写Tool只从已确认快照取参留给T823，结果未知核对与端到端联调仍待后续；Java列表和操作回执查询尚未实现，不声称可查询超时写结果。

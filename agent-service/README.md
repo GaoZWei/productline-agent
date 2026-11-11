@@ -226,6 +226,12 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 Client每次只发一次请求，写入超时或无法确认回执时不允许自动重发，也不宣称未写入；原成功重放仍应使用原请求/原键。当前没有列表或操作回执查询方法，Java未实现端点不以空结果代替；只读POST白名单未放宽。有限只读重试、Tool权限和写Tool确认快照、超时核对及生产装配留待T822～T824，诊断仍使用旧事实与规则。
 本轮没有修改lifespan、注册新Tool、开放HTTP路由或接入Approval/页面；代码存在不代表生产已启用。`tests/test_rework_contract.py`使用纯Schema和MockTransport，不代替真实Java或整链验收；按用户要求本机未运行pytest、类型/格式或其他检查。项目电脑执行`make test-agent-client test-tools`及[STATUS](../docs/STATUS.md)列出的局部回归，M8.4及T821仍待验收。完整字段和边界见[契约第二十五节](../docs/api/REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)。
 
+## T822 M8内部只读Tool（开发完成，待项目电脑验收）
+
+`app.tools.rework_readonly.create_rework_read_tool_registry`显式创建独立六Tool注册表：get_rework_detail、get_rework_results、get_rework_inspections、get_rework_reviews、get_effective_rework_reviews和get_delivery_conditions。全部LOW风险并要求ToolContext中的REWORK_READ；输入只接受资源ID及适用的分页参数，身份/角色、权限和Trace不从Tool参数读取。Java仍最终裁决角色、归属及业务事实。
+六Tool复用T821 GET和BaseTool公共门禁，默认总预算5秒、最多额外一次重试，仅既有白名单中retryable=true的瞬时错误可重试；Java拒绝及不自洽响应不重试，Client不叠加策略。历史每次只读一页，保留原始说明、失败检查、退回意见、显式null与存量记录，不挑历史通过或自动翻页。游标在指纹前拒绝不可无损编码字符；同Run相同页拒绝重复，显式force_refresh才重新获取事实，不复用缓存结果。
+注册表不加入lifespan、原七只读Tool、生产Agent动作或诊断；服务端角色权限映射、新写Tool、Approval和页面仍待后续，不把内部能力描述为已启用。`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集纳入待验收，覆盖实际MockTransport、权限/归属、重试/去重/超时/取消等；本机按用户要求未运行任何测试或质量检查，项目电脑命令见[STATUS](../docs/STATUS.md)，边界见[契约第二十六节](../docs/api/REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)。
+
 ## KB-02.2 知识授权Client
 
 `KnowledgeAuthorizationClient.authorize`复用应用lifespan管理的`BusinessHttpClient`连接池，调用

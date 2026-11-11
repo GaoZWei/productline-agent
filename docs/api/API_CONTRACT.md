@@ -582,3 +582,4 @@ T818新增[未通过复核与问题退回](REWORK_CONTRACT.md#22-t818未通过�
 T819新增[受控首轮与下一轮创建](REWORK_CONTRACT.md#23-t819受控首轮与下一轮创建实现边界)，首轮接收sourceIssueId/expectedVersion/reason，后继接收expectedVersion/reason；Java重新核对OPEN问题、活动返工与前轮当前退回复核，生成新PENDING及真实连续轮次，不继承材料。新旧创建入口共用父任务锁防止绕过受控链，原成功重放保持原状态及版本；代码与用例已编写，尚待项目电脑实际验收。
 T820新增[订单交付条件查询](REWORK_CONTRACT.md#24-t820订单交付条件查询及关闭并发边界)，`GET /api/orders/{orderId}/delivery-conditions`在同一独立只读快照输出全部任务及版本、步骤、问题/有效复核、活动返工、交付记录和已知阻塞；受控复核只看当前绑定，存量保留旧规则，不改变既有查询或Python诊断。hasBlockers不构成交付授权，不自动推进状态；代码与关闭并发用例待项目电脑验收，M8.4尚未整体验收。
 T821新增[独立Python Schema与HTTP Client](REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)，保留原值与Java UTF-16规则，支持新完整状态、历史及原回执，旧PENDING创建响应不放宽；只包装已实现端点并核对资源/Trace/操作/版本及副作用，不重试写入，不注册Tool或接入确认/诊断。Java列表及操作回执查询尚未实现，不能用空结果代替；本轮代码及离线用例待项目电脑验收。
+T822新增[六个内部只读Tool及独立注册表](REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)，统一REWORK_READ上下文门禁，复用BaseTool总预算、逻辑去重及最多一次瞬时重试；单页读取不挑选有效结论、不改变业务状态。旧七Tool和生产装配、角色映射、诊断保持，代码与MockTransport用例待项目电脑验收，不代表完整Agent链路已启用。
