@@ -2567,3 +2567,23 @@ Java新增的完整返工状态、当前材料和原成功回执不能直接套�
 - 公共BaseTool统一严格输入、逻辑去重、总预算内至多一次瞬时重试及输出校验，Client不叠加策略；Java明确拒绝及错误事实不重试，取消向上传播。
 - 历史只读一页并保留原值、失败/退回记录、存量及显式null，不自动翻页或猜测有效结论；同Run重复不返回旧缓存，显式刷新才重新读取。
 - 独立注册表构造不访问Java，不改变原七只读Tool、生产Agent/诊断、角色映射、写操作或人工确认链路。
+
+## 2026-11-12 T823 M8.5 内部写Tool与确认执行快照隔离
+
+### 核心解决的问题
+
+返工HTTP适配器不能直接成为模型的写入口，否则调用者可能替换已审查的目标、版本或材料，也可能把请求超时当作业务失败后重复写入。
+新增独立高风险写Tool映射，业务参数只从受信确认执行快照读取，保留Java原回执并将结果保存绑定完整快照。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/rework_write_tools.py`：`ReworkWriteInput`、`ReworkExecutionSnapshot`和`ReworkWriteOutput`，限定输入并校验操作/版本/轮次/材料绑定。
+- `agent-service/app/services/rework_execution.py`：`ReworkExecutionStore`定义读取确认执行快照及完整快照CAS保存原结果的端口，无默认生产实现。
+- `agent-service/app/tools/rework_write.py`：`ReworkWriteTool`核对确认身份与执行条件，`_dispatch`固定调用九类Client方法，`_check_receipt`补充轮次/材料校验，`create_rework_write_tool_registry`独立注册。
+
+### 实现的核心功能
+
+- 首轮、开始、阻塞、失败、恢复、成果、检查、复核及下一轮九个HIGH风险Tool，复核要求REVIEW_WRITE，其余要求REWORK_WRITE；身份和Trace来自服务端上下文。
+- 输入只含确认单ID和原幂等键，执行前复制并校验完整确认快照，阻止自报确认、替换目标/版本/正文及借用可变材料引用。
+- 单次提交Java并核对原回执，失败检查和退回复核保留真实状态；结果交回Store时携带完整预期快照，保存冲突不声称Java回滚，不覆盖首次结果。
+- 全部错误禁止自动重试，取消向上传播；不生成确认、不取得执行权，不改变旧Approval或生产装配，实际确认及持久化仍由后续适配完成。

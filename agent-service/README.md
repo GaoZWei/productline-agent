@@ -223,14 +223,20 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 
 `app.schemas.rework`独立同步M8详情、历史、有效复核、完整返工状态、写请求及原回执；`app.schemas.rework_delivery`同步订单交付条件及已有归属字段。新基类不继承旧ToolSchema的自动strip，原因、说明、成果版本和证据按原值保留；字符串按Java UTF-16长度与空白语义检查，版本/序号限制安全整数，null必须显式存在，旧PENDING创建响应和存量复核契约保持。
 `app.clients.rework.ReworkHttpClient`借用lifespan已有`BusinessHttpClient`，构造不发请求，连接池仍由外层关闭。支持详情、三类材料历史、有效复核和交付条件GET，以及首轮/开始/异常/恢复/成果/检查/复核/后继九类POST；校验请求资源、身份格式及响应的Trace/资源/操作/版本和本动作副作用，分页只读一页，不拼接快照或重新选有效复核。
-Client每次只发一次请求，写入超时或无法确认回执时不允许自动重发，也不宣称未写入；原成功重放仍应使用原请求/原键。当前没有列表或操作回执查询方法，Java未实现端点不以空结果代替；只读POST白名单未放宽。有限只读重试、Tool权限和写Tool确认快照、超时核对及生产装配留待T822～T824，诊断仍使用旧事实与规则。
-本轮没有修改lifespan、注册新Tool、开放HTTP路由或接入Approval/页面；代码存在不代表生产已启用。`tests/test_rework_contract.py`使用纯Schema和MockTransport，不代替真实Java或整链验收；本轮已通过本机pytest、mypy及相关模块Ruff格式/lint，真实Python→Java联调仍待后续。可执行`make test-agent-client test-tools`及[STATUS](../docs/STATUS.md)列出的局部回归，M8.4及T821仍待验收。完整字段和边界见[契约第二十五节](../docs/api/REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)。
+Client每次只发一次请求，写入超时或无法确认回执时不允许自动重发，也不宣称未写入；原成功重放仍应使用原请求/原键。当前没有列表或操作回执查询方法，Java未实现端点不以空结果代替；只读POST白名单未放宽。T822/T823已补内部读写Tool，超时核对及生产装配仍待后续，诊断仍使用旧事实与规则。
+本轮没有修改lifespan、注册新Tool、开放HTTP路由或接入Approval/页面；代码存在不代表生产已启用。`tests/test_rework_contract.py`使用纯Schema和MockTransport，不代替真实Java或整链验收；本轮已通过本机pytest、mypy及相关模块Ruff格式/lint，真实Python→Java联调仍待后续。可执行`make test-agent-client test-tools`及[STATUS](../docs/STATUS.md)列出的局部回归，M8.4及T821离线契约已验收。完整字段和边界见[契约第二十五节](../docs/api/REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)。
 
 ## T822 M8内部只读Tool（离线验收通过，未生产装配）
 
 `app.tools.rework_readonly.create_rework_read_tool_registry`显式创建独立六Tool注册表：get_rework_detail、get_rework_results、get_rework_inspections、get_rework_reviews、get_effective_rework_reviews和get_delivery_conditions。全部LOW风险并要求ToolContext中的REWORK_READ；输入只接受资源ID及适用的分页参数，身份/角色、权限和Trace不从Tool参数读取。Java仍最终裁决角色、归属及业务事实。
 六Tool复用T821 GET和BaseTool公共门禁，默认总预算5秒、最多额外一次重试，仅既有白名单中retryable=true的瞬时错误可重试；Java拒绝及不自洽响应不重试，Client不叠加策略。历史每次只读一页，保留原始说明、失败检查、退回意见、显式null与存量记录，不挑历史通过或自动翻页。游标在指纹前拒绝不可无损编码字符；同Run相同页拒绝重复，显式force_refresh才重新获取事实，不复用缓存结果。
-注册表不加入lifespan、原七只读Tool、生产Agent动作或诊断；服务端角色权限映射、新写Tool、Approval和页面仍待后续，不把内部能力描述为已启用。`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集并完成离线验收，覆盖实际MockTransport、权限/归属、重试/去重/超时/取消等；本机已通过正式Client/Tool入口、类型及相关文件格式/lint检查，实际结果见[STATUS](../docs/STATUS.md)，边界见[契约第二十六节](../docs/api/REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)。
+注册表不加入lifespan、原七只读Tool、生产Agent动作或诊断；服务端角色权限映射、Approval和页面仍待后续，不把内部能力描述为已启用。`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集并完成离线验收，覆盖实际MockTransport、权限/归属、重试/去重/超时/取消等；本机已通过正式Client/Tool入口、类型及相关文件格式/lint检查，实际结果见[STATUS](../docs/STATUS.md)，边界见[契约第二十六节](../docs/api/REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)。
+
+## T823 M8内部写Tool（离线验收通过，未生产装配）
+
+`app.tools.rework_write.create_rework_write_tool_registry`显式接收Client和`ReworkExecutionStore`端口，独立注册九个HIGH风险Tool。输入只接受approval_id和idempotency_key，目标、版本、轮次及完整材料来自服务端已确认的执行快照；核对用户/Run、确认人/有效期、EXECUTING状态、操作与原键后，仅调用一次Java，详情见[契约第二十七节](../docs/api/REWORK_CONTRACT.md#27-t823内部写tool与确认执行边界)。
+Client与Tool共同核对Java原回执的资源/版本/操作/轮次及材料绑定，再以完整快照交给Store保存；保存冲突不覆盖首次结果，不宣称Java回滚。全部错误不可自动重试，取消向上传播。失败检查、退回复核和关闭后的其他交付阻塞均由Java决定，不因Tool成功就推进订单交付。
+Store仅定义受信接口，无默认生产实现；独立确认、执行权、提交前最新事实重校验及持久化适配待M8.6，写结果未知核对待T824。没有修改旧Approval表/枚举、公共BaseTool、角色映射或生产装配；测试FakeStore与MockTransport只验证映射和端口约束。可执行`make test-tools`，实际本机验收见[STATUS](../docs/STATUS.md)。
 
 ## KB-02.2 知识授权Client
 

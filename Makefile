@@ -36,7 +36,7 @@ test-agent-errors: ## 验证 M1.3 标准 Tool 错误模型和跨服务错误映�
 test-agent-tool-protocol: ## 验证 M1.4 Tool 基础协议、执行门禁和注册表
 	cd agent-service && uv run --frozen pytest -q tests/test_tool_protocol.py
 
-test-tools: test-agent-tool-protocol ## 验证Tool协议、调用策略、M8只读Tool和开发调试API
+test-tools: test-agent-tool-protocol ## 验证Tool协议、调用策略、M8内部读写Tool和开发调试API
 	cd agent-service && uv run --frozen pytest -q tests/test_retry_policy.py tests/test_tool_call_deduplication.py tests/test_rework_contract.py tests/integration/tools tests/integration/test_tool_debug_api.py
 
 test-agent-persistence: ## 在隔离 PostgreSQL 上验证 M2.1-M2.5 运行记录持久化

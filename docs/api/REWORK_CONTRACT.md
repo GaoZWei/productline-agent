@@ -472,4 +472,30 @@ T821交付时仅内部传输层，无lifespan装配、新Tool/权限/Approval、
 
 逻辑调用指纹包含Tool名、资源及分页默认值，snake_case/别名和显式默认参数归一后得到同一指纹。同Run重复返回DUPLICATE_CALL而非缓存旧数据，显式force_refresh才再次获取；不同游标是不同逻辑调用，内部重试不重复登记逻辑调用，不把网络重试误拦为Agent循环。仍保留原进程内去重边界，不新增跨实例缓存或持久账本。
 
-新增`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集纳入待验收，覆盖Tool→Client→MockTransport的权限/输入/真实GET、归属/Trace/格式拒绝、有限重试/总预算/取消、分页/存量/空历史、去重/刷新及独立注册表。本轮用例与正式Client/Tool入口、类型及相关格式/lint均已通过，实际结果见STATUS；Tool→Client→MockTransport不代替真实Python→Java/数据库联调或完整链路验收。前置M8.4已验收，无新写Tool、Approval、诊断切换或页面接线，下一最小任务T823，不自动开始。
+新增`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集完成离线验收，覆盖Tool→Client→MockTransport的权限/输入/真实GET、归属/Trace/格式拒绝、有限重试/总预算/取消、分页/存量/空历史、去重/刷新及独立注册表。本轮用例与正式Client/Tool入口、类型及相关格式/lint均已通过，实际结果见STATUS；Tool→Client→MockTransport不代替真实Python→Java/数据库联调或完整链路验收。T822未接写Tool、Approval、诊断或页面，后续T823内部映射见下节。
+
+## 27. T823内部写Tool与确认执行边界
+
+`create_rework_write_tool_registry(ReworkHttpClient, ReworkExecutionStore)`仅创建独立注册表，两个依赖必须显式注入，构造不发请求；不改旧写Tool、Approval表/动作枚举、lifespan、角色映射、Agent白名单或诊断。全部HIGH风险，默认总预算10秒，复核要求REVIEW_WRITE，其余要求REWORK_WRITE。
+
+| Tool | Java操作 |
+| --- | --- |
+| create_lifecycle_rework | CREATE_LIFECYCLE_REWORK |
+| start_rework | START_REWORK |
+| block_rework | BLOCK_REWORK |
+| fail_rework | FAIL_REWORK |
+| resume_rework | RESUME_REWORK |
+| register_rework_result | REGISTER_REWORK_RESULT |
+| register_rework_inspection | REGISTER_REWORK_INSPECTION |
+| submit_rework_review | SUBMIT_REWORK_REVIEW |
+| create_next_rework | CREATE_NEXT_REWORK |
+
+严格`ReworkWriteInput`只有approval_id和idempotency_key，额外的目标、正文、角色或confirmed字段均拒绝。`ReworkExecutionSnapshot`保存用户/Run、确认人/时间/有效期、EXECUTING状态、固定操作/原键、任务/原版本/来源问题、轮次/前驱、材料指针及明确请求Schema；请求类型、版本、首轮空绑定和复核材料须自洽。执行前复制并重新校验嵌套材料，防止可变列表借用Store引用；核对实际上下文身份、Run、确认人、时间、操作与键，缺失或冲突时零HTTP。
+
+通过门禁后仅调用T821对应POST一次，身份/Trace只取上下文，业务参数只取捕获的确认快照。Client核对原回执资源、操作、版本+1、状态及请求材料，Tool补充确认轮次/前驱、成果修订递增及新检查/复核ID绑定；输出保留Java原回执及Trace，不重新GET拼造原结果。失败检查仍可返回RUNNING/PROCESSING，复核退回仍可返回COMPLETED/OPEN，不等同最终验收通过。
+
+`ReworkExecutionStore`当前只有Protocol，无生产实现。未来确认服务负责独立人工确认、唯一执行权、权限/最新事实重校验和持久化；接口要求按EXECUTING及完整预期快照CAS保存结果，首次回执不可覆盖，同原请求重放只接受相同业务回执并保留首次Trace。Tool不临时生成确认、不取得执行权、不自行修改Approval终态；保存冲突发生在Java响应后，不能声称业务失败或回滚。
+
+全部错误标为不可自动重试，包含Client网络错误和BaseTool外层预算超时；取消继续向上传播，不启动后台请求。默认同Run重复受既有指纹门禁拦截；显式force_refresh仍必须使用同确认快照和原键，不能换键或修订请求。超时、响应不匹配或结果保存失败都不证明Java未提交，结果未知核对留待T824；没有伪造Java尚未实现的操作查询。
+
+`tests/integration/tools/test_rework_write_tools.py`通过`make test-tools`收集，使用MockTransport和明确的测试FakeStore验证九种路径/正文、权限/确认门禁、材料复制/完整快照保存冲突、回执绑定、失败检查/退回复核、多轮绑定、去重/原键重放/超时/取消和旧注册表隔离。已通过离线验收，不代表真实Java、数据库确认CAS、生产装配或三端确认已实现。
