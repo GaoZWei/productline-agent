@@ -49,7 +49,7 @@ Java Header或请求中的approval_id不是人工确认的证明；新Java业务
 
 ## 3. 读取接口与缺失历史
 
-下表GET R由T806实现，GET R/results及R/inspections由T815实现，GET R/reviews及任务级effective-reviews由T816实现，订单级delivery-conditions由T820开发待验收，其余读取路径仍待实现；`B=/api/tasks/{taskId}/reworks`，`R=B/{reworkTaskId}`。查询只返回Java事实，每次响应内部使用一致读取快照。
+下表GET R由T806实现，GET R/results及R/inspections由T815实现，GET R/reviews及任务级effective-reviews由T816实现，订单级delivery-conditions由T820实现并验收；T824前置已补齐operations/query的Java查询和Python Schema，列表仍待实现。`B=/api/tasks/{taskId}/reworks`，`R=B/{reworkTaskId}`；查询只返回Java事实，每次响应内部使用一致读取快照。
 
 | 方法与路径 | data内容 | 对应后续实现 |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Java Header或请求中的approval_id不是人工确认的证明；新Java业务
 | GET R/reviews | taskId、reworkTaskId、records复核数组、nextCursor | T816已实现，按reviewSequence升序 |
 | GET /api/tasks/{taskId}/effective-reviews | taskId、taskVersion、issues有效复核分组数组 | T816已实现，T821/T822提供Python契约及内部只读Tool，诊断消费未装配 |
 | GET /api/orders/{orderId}/delivery-conditions | order、tasks、deliveryRecords、blockers、hasBlockers | T820已开发待验收，字段及条件见第24节；无查询参数 |
-| POST B/operations/query | 规划请求仅idempotencyKey；data为found及receipt（未见回执时null） | Java当前未实现，Python也未包装；供后续结果未知核对，不得用伪造found=false替代真实查询 |
+| POST B/operations/query | 请求仅idempotencyKey；data固定为found及receipt（未见回执时显式null） | T824 Java/Client/独立只读核对Tool已验收，含真实查询联调；不恢复确认终态，见第28～29节 |
 
 列表/历史分页参数仅cursor和limit，limit默认20、最大100；cursor由服务端生成，绑定用户、任务、返工/历史类型及首屏序号上界，
 后续页面按该上界读取，不能将cursor当权限凭证。非法/不匹配cursor为400；结束时nextCursor=null，空集合为[]。
@@ -447,7 +447,7 @@ hasBlockers由本次blockers是否非空确定。没有已知阻塞不等于完�
 
 所有调用只发一次请求，沿用六字段信封、身份/Trace/幂等Header及现有错误码；成功还必须绑定本次Trace、任务/返工或订单。历史页核对真实序号严格递增、页大小、轮次及记录身份，无自动翻页。写入核对操作、目标、原expectedVersion+1、创建前驱和本操作的状态/材料副作用；检查失败仍RUNNING/PROCESSING，通过才COMPLETED/RESOLVED，复核通过CLOSED而退回OPEN。旧成功回执不按后来GET重建，原请求/原键重放仍保留其原版本和状态。
 
-写入网络/超时等不确定结果不允许自动重试，也不描述为确定未写入；仅保留明确错误分类，确认/恢复与结果核对还需后续接线。GET B列表和POST B/operations/query尚无Java实现，Client不暴露伪造空结果或假成功方法，现有公共Client只读POST白名单不放宽；必须补齐Java能力后才能实现对应核对。只读有界重试属于后续Tool层，不能叠加到当前Client。
+写入网络/超时等不确定结果不允许自动重试，也不描述为确定未写入；GET B列表尚无Java实现，不暴露伪造空结果或假成功方法。T824现已提供原回执查询Client及独立只读核对Tool，公共Client只读POST仅增加合法任务下固定operations/query路径；遵守第28～29节边界，不把只读有界重试叠加到写Client，生产确认及终态恢复留待后续。
 
 T821交付时仅内部传输层，无lifespan装配、新Tool/权限/Approval、诊断规则、自然语言入口或页面变更，Python不直连业务表。代码和MockTransport/纯Schema用例已编写，并纳入`make test-agent-client`及`make test-tools`；本轮已在本机通过pytest、mypy及相关格式/lint，修正测试标注并完成代码格式整理，历史相邻序号校验等价使用pairwise。离线用例不代表真实Python→Java联调或完整人工确认；M8.4的Java验收已独立通过，M8.5仍待写Tool及诊断接线，T822见下一节。
 
@@ -499,3 +499,40 @@ T821交付时仅内部传输层，无lifespan装配、新Tool/权限/Approval、
 全部错误标为不可自动重试，包含Client网络错误和BaseTool外层预算超时；取消继续向上传播，不启动后台请求。默认同Run重复受既有指纹门禁拦截；显式force_refresh仍必须使用同确认快照和原键，不能换键或修订请求。超时、响应不匹配或结果保存失败都不证明Java未提交，结果未知核对留待T824；没有伪造Java尚未实现的操作查询。
 
 `tests/integration/tools/test_rework_write_tools.py`通过`make test-tools`收集，使用MockTransport和明确的测试FakeStore验证九种路径/正文、权限/确认门禁、材料复制/完整快照保存冲突、回执绑定、失败检查/退回复核、多轮绑定、去重/原键重放/超时/取消和旧注册表隔离。已通过离线验收，不代表真实Java、数据库确认CAS、生产装配或三端确认已实现。
+
+## 28. T824原写入回执查询前置能力
+
+`POST /api/tasks/{taskId}/reworks/operations/query`是无副作用的查询，要求当前REVIEWER身份、合法任务ID、application/json及严格的`{"idempotencyKey":"原键"}`正文，不需要写入Idempotency-Key Header。原键完整匹配1～128个字母/数字/点/下划线/冒号/连字符，保留原值；拒绝类型强转、额外/重复字段、尾随JSON及任何URL查询参数，不接受自报用户、操作或确认。
+
+`ReworkOperationQueryService`先校验身份/角色与参数，再开启独立REPEATABLE READ READ ONLY事务；父任务不存在404，在同一快照按父任务、实际用户和原键查询`rework_operation_receipts`。他人、其他任务或没有成功回执均返回同样的`{"found":false,"receipt":null}`，不泄露其他结果存在与否；旧写入仅有旧幂等记录时也不伪造M8回执。
+
+命中时返回`{"found":true,"receipt":固定12字段原回执}`，核对存储元数据和正文的操作、日志ID、任务/返工、轮次、版本及材料存在关系；损坏回执作为服务端错误，不退化为found=false，不输出原始键、请求摘要或数据库材料。原回执不包含原请求全文，不能据此证明另一个草稿或不同材料已经提交；后续核对仍须绑定原确认快照、操作、资源及原键。
+
+查询不读取当前状态拼造旧结果、不预留幂等键、不加写锁、不修改业务、审计或Approval。found=false只表示当前快照未见可见成功回执，写事务可能仍在进行或刚在快照之后提交；不是业务失败、未提交证明、重发授权或切换幂等键的依据。found=true也不表示成果仍为当前版本、仍有写权限或已完成独立人工确认。
+
+`ReworkOperationQueryApiIntegrationTest`使用独占schema和真实HTTP验证九动作、失败检查/退回复核/下一轮后的原结果、实际用户/任务隔离、非法输入、旧写入、失败事务及ORDER-003保持；通过只读事务内父任务查询后独立HTTP写入提交，验证本次仍可found=false而后一次查询能命中。损坏存储绑定用显式测试仓储注入验证，不修改数据库约束。
+
+Python新增`app.schemas.rework_operation_query`，严格同步原键及found/receipt必须自洽、null必填，`make test-agent-client`收集纯Schema用例；Java前置及Schema已验收，后续完成的Python Client/只读核对Tool及真实查询联调见第29节。生产Agent、确认服务及前端未接入，不声称自动恢复。
+
+## 29. T824 Python只读核对与错误边界
+
+`ReworkHttpClient.query_operation`单次只读POST，身份/Trace来自服务端上下文；请求仅原idempotencyKey，不发送写入Idempotency-Key Header。共享Client的新增只读白名单完整匹配`/api/tasks/TASK-合法ID/reworks/operations/query`，任务ID最大64字符；拒绝其他动作、编码、片段、查询参数、路径绕过及外部URL，普通写POST强制幂等键的行为保持。
+
+`create_rework_operation_query_tool_registry`只注册独立`query_rework_operation`，LOW风险且要求REWORK_READ，不加入原七Tool、六个M8只读Tool、九写Tool、生产白名单或lifespan。严格输入只有approval_id/idempotency_key；原任务、操作、版本、轮次及材料从受信Store快照读取，核对原确认单、实际用户/Run、确认人/时间、原键和EXECUTING/SUCCEEDED/FAILED执行记录。尚未执行的确认状态拒绝，已确认执行记录过期仍可只读核对，但不发放写权限。
+
+查询前复制校验嵌套材料，返回前再次读取并比较完整快照；原快照丢失、修改或归属变化时拒绝迟到结果。命中时共用写回执的操作/任务/返工/原版本+1/状态副作用和确认轮次/前驱/材料指针校验，输出approval_id、MATCHED_RECEIPT、原receipt及本次查询java_trace_id；未见成功回执输出UNKNOWN及显式null。Trace不是首次写请求Trace；回执不含完整原请求，不能据此证明不同正文已经提交，也不证明成果仍当前有效或订单可交付。
+
+| 情况 | 核对结果/错误 | 行为 |
+| --- | --- | --- |
+| Java返回found=false | UNKNOWN，receipt=null | 不轮询、不重发写入、不生成失败事实 |
+| 原回执与原快照可见绑定相符 | MATCHED_RECEIPT | 只读返回，不保存结果或推进Approval终态 |
+| 输入/资源/权限/业务冲突 | 原有PARAM_VALIDATION_ERROR/RESOURCE_NOT_FOUND/PERMISSION_DENIED/BUSINESS_CONFLICT | 不重试，不伪装UNKNOWN |
+| Java信封/Trace/资源/材料错误 | RESPONSE_VALIDATION_ERROR | 不重试，不把错误当未写入 |
+| 查询网络/超时等明确瞬时错误 | TOOL_TIMEOUT/UPSTREAM_UNAVAILABLE | 仅只读Tool在总预算内最多额外一次重试，仍沿用原键 |
+| 写入超时、响应丢失或结果保存冲突 | 写Tool原错误分类，retryable=false | 不自动调用写入或核对，不改变业务/确认终态；上层可显式调用核对 |
+
+默认总预算5秒覆盖确认读取、HTTP、退避及最终快照校验；Client不叠加重试，Java明确retryable=false错误不重试，取消向上传播。同Run相同确认单/键拒绝重复逻辑调用；显式force_refresh才重新查询，不复用旧结果，不切换键。
+
+`make test-tools`覆盖九动作回执、白名单/归属/确认门禁、错误矩阵、未知不轮询、读重试与写不重试、总预算/取消和迟到结果。`make test-rework-query-e2e`使用独占PostgreSQL、本机Java及真实HTTP，测试传输层在Java提交且返回完整回执之后丢弃响应，再验证只读核对找回原事实；另验证Java成功但FakeStore保存冲突、后来状态变化、他人查询缺失、UNKNOWN、实际写请求/业务/审计计数及ORDER-003保持。SQL仅作隔离测试准备与断言，产品Python不访问Java表；脚本清理本次Java进程、容器和临时目录，不读取.env或运行库。
+
+T824内部查询/核对已验收，但Store只有接口、确认仍为明确测试替身；持久化确认服务、Run/Step接线、独立人工确认、终态恢复及页面属于M8.6/M8.7，不在此Tool中补建。下一最小任务T825，不自动开始。

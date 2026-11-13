@@ -228,6 +228,11 @@ T817接通APPROVED分支，T818已接通REJECTED/REWORK_REQUIRED并将问题回�
 仍检查同订单其他问题、生产/步骤、活动返工及实际交付记录；缺任务/步骤/交付记录显式列出，订单BLOCKED及交付NOT_READY/BLOCKED/FAILED保持阻塞。hasBlockers=false只说明列出的已知条件未发现阻塞，不代表完整交付资格或授权，不写订单/交付状态；旧HTTP和Python诊断不变。
 `DeliveryConditionsApiIntegrationTest`加入`make test-java-contract`，包含真实复核关闭期间的快照/提交前读取、两个问题争共享版本及后继轮通过；本轮已在本机通过定向及完整分组验收，M8.4已在停止线收口；接口、字段和代码清单见[契约第二十四节](../docs/api/REWORK_CONTRACT.md#24-t820订单交付条件查询及关闭并发边界)。
 
+### T824 原写入回执查询前置（Java已验收）
+
+`POST /api/tasks/{taskId}/reworks/operations/query`只接收原idempotencyKey，不要求写幂等Header，不接受URL参数或自报身份/确认；当前REVIEWER身份与父任务存在性仍须校验。`ReworkOperationQueryService`使用独立只读可重复读事务，`ReworkOperationQueryRepository.find`按实际用户、任务及原键读取首次成功回执，不读取后来状态重建结果，不写幂等/审计或业务表。
+命中返回found=true及固定12字段原回执；未见成功回执返回found=false及显式null，不证明未提交、不授权重发。错误身份/归属范围不可越过，旧写接口没有M8回执时保持缺失；损坏的存储绑定拒绝，不泄露原材料。`ReworkOperationQueryApiIntegrationTest`已纳入`make test-java-contract`并通过真实HTTP/隔离库验收，含查询快照期间独立写入提交的场景；字段及未来Python接入边界见[契约第二十八节](../docs/api/REWORK_CONTRACT.md#28-t824原写入回执查询前置能力)。T824现已补齐Python只读查询和独立核对Tool，新增查询通过真实Python→Java联调；不重发写入或修改确认终态，未接持久化确认或页面，详见[契约第二十九节](../docs/api/REWORK_CONTRACT.md#29-t824-python只读核对与错误边界)。
+
 本机无Docker时，Java集成测试支持显式指定已准备好的隔离PostgreSQL，例如：
 
 ```bash

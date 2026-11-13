@@ -34,6 +34,10 @@ from app.schemas.rework import (
     TaskId,
 )
 from app.schemas.rework_delivery import DeliveryConditions
+from app.schemas.rework_operation_query import (
+    ReworkOperationQueryRequest,
+    ReworkOperationQueryResponse,
+)
 
 
 class ReworkHttpClient:
@@ -168,6 +172,34 @@ class ReworkHttpClient:
             f"/api/orders/{order}/delivery-conditions", DeliveryConditions, identity, trace
         )
         self._ensure(response.data.order.order_id == order, trace)
+        return response
+
+    async def query_operation(
+        self,
+        task_id: str,
+        request: ReworkOperationQueryRequest,
+        *,
+        identity: BusinessIdentity,
+        trace_id: str | None = None,
+    ) -> BusinessResponse[ReworkOperationQueryResponse]:
+        """单次只读POST查询原回执，未见回执不证明未提交，不重发任何写入。"""
+
+        trace = self._context(identity, trace_id)
+        try:
+            task = TypeAdapter[str](TaskId).validate_python(task_id, strict=True)
+        except ValidationError:
+            self._invalid(trace)
+        validated = self._parse(ReworkOperationQueryRequest, request, trace)
+        response = await self._business.post_readonly(
+            f"/api/tasks/{task}/reworks/operations/query",
+            ReworkOperationQueryResponse,
+            json_body=validated.model_dump(mode="json", by_alias=True),
+            identity=identity,
+            trace_id=trace,
+        )
+        self._ensure(response.trace_id == trace, trace)
+        if response.data.receipt is not None:
+            self._ensure(response.data.receipt.task_id == task, trace)
         return response
 
     async def create_first(
@@ -481,22 +513,8 @@ class ReworkHttpClient:
                 trace_id=trace,
                 idempotency_key=key,
             )
-            data = response.data
-            self._ensure(
-                response.trace_id == trace
-                and data.operation == operation
-                and data.task_id == task
-                and data.task_version == validated.expected_version + 1,
-                trace,
-            )
-            if operation == "CREATE_NEXT_REWORK":
-                self._ensure(
-                    data.previous_rework_task_id == rework_id and data.rework_task_id != rework_id,
-                    trace,
-                )
-            elif operation != "CREATE_LIFECYCLE_REWORK":
-                self._ensure(data.rework_task_id == rework_id, trace)
-            self._write_binding(operation, validated, data, trace)
+            self._ensure(response.trace_id == trace, trace)
+            self.check_write_receipt(task, rework_id, operation, validated, response.data, trace)
             return response
         except ToolException as exc:
             if exc.retryable:
@@ -508,6 +526,33 @@ class ReworkHttpClient:
                     status_code=exc.status_code,
                 ) from None
             raise
+
+    def check_write_receipt(
+        self,
+        task_id: str,
+        rework_id: str | None,
+        operation: ReworkOperation,
+        request: ReworkVersionRequest,
+        receipt: ReworkWriteReceipt,
+        trace: str,
+    ) -> None:
+        """写响应与只读核对共用原回执校验，只检查可见字段，不证明原请求全文。"""
+
+        self._ensure(
+            receipt.operation == operation
+            and receipt.task_id == task_id
+            and receipt.task_version == request.expected_version + 1,
+            trace,
+        )
+        if operation == "CREATE_NEXT_REWORK":
+            self._ensure(
+                receipt.previous_rework_task_id == rework_id
+                and receipt.rework_task_id != rework_id,
+                trace,
+            )
+        elif operation != "CREATE_LIFECYCLE_REWORK":
+            self._ensure(receipt.rework_task_id == rework_id, trace)
+        self._write_binding(operation, request, receipt, trace)
 
     def _write_binding(
         self,

@@ -2587,3 +2587,46 @@ Java新增的完整返工状态、当前材料和原成功回执不能直接套�
 - 输入只含确认单ID和原幂等键，执行前复制并校验完整确认快照，阻止自报确认、替换目标/版本/正文及借用可变材料引用。
 - 单次提交Java并核对原回执，失败检查和退回复核保留真实状态；结果交回Store时携带完整预期快照，保存冲突不声称Java回滚，不覆盖首次结果。
 - 全部错误禁止自动重试，取消向上传播；不生成确认、不取得执行权，不改变旧Approval或生产装配，实际确认及持久化仍由后续适配完成。
+
+## 2026-11-13 T824 M8.5 原写入回执查询Java前置
+
+### 核心解决的问题
+
+写请求超时后只有当前返工详情，无法区分原操作的首次结果和后来状态，也不能证明查无回执就是没有提交。
+补齐按实际用户、父任务及原幂等键读取不可覆盖成功回执的Java接口，为后续Python结果未知核对提供可信事实。
+
+### 实现的核心代码
+
+- `business-service/src/main/java/com/productline/business/api/ReworkOperationQueryController.java`及`api/dto/ReworkOperationQueryRequest.java`：严格解析无副作用查询，限定正文、Content-Type和无URL参数。
+- `business-service/src/main/java/com/productline/business/application/ReworkOperationQueryService.java`：`query`校验身份与父任务，在独立只读快照查询；`decode`核对存储绑定并输出原回执。
+- `business-service/src/main/java/com/productline/business/domain/repository/ReworkOperationQueryRepository.java`：`find`按实际用户/任务/原键限定回执SQL。
+- `agent-service/app/schemas/rework_operation_query.py`：严格查询键和found/receipt存在关系，不引入Python查询调用或自动恢复。
+
+### 实现的核心功能
+
+- 当前REVIEWER查询自己的任务范围成功回执，返回固定found/receipt；他人、其他任务或未见成功回执保持相同显式缺失，不泄露回执存在性。
+- 返回首次成功的固定12字段JSON语义，不读取后来状态重建结果，损坏元数据或材料绑定拒绝且错误不含原始内容。
+- 使用独立REPEATABLE READ READ ONLY事务，不改业务、幂等、审计或Approval；未见回执保留结果未知，不作为重发授权。
+- 旧写入没有M8回执时不伪造成功记录，失败事务不留下可见回执；Python同步Schema，确认服务和生产调用入口保持隔离。
+
+## 2026-11-13 T824 M8.5 Python只读原回执核对与未知结果隔离
+
+### 核心解决的问题
+
+Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写入，或拿别的操作、轮次和材料的回执恢复成功。
+增加绑定原确认快照的独立只读核对Tool，区分匹配原回执、结果仍未知和查询错误，保留不自动重发写入的边界。
+
+### 实现的核心代码
+
+- `agent-service/app/clients/business.py`：`post_readonly`仅增加合法任务下固定回执查询路径；`clients/rework.py`的`query_operation`单次查询，`check_write_receipt`与写响应共用可见回执绑定校验。
+- `agent-service/app/schemas/rework_operation_query.py`：`ReworkOperationLookupInput`和`ReworkOperationResolution`限定原确认单/原键与MATCHED_RECEIPT/UNKNOWN的回执存在关系。
+- `agent-service/app/services/rework_receipts.py`：`validate_rework_receipt_binding`供写Tool及核对Tool共用确认轮次、前驱和材料指针规则。
+- `agent-service/app/tools/rework_operation_query.py`：`QueryReworkOperationTool._snapshot/_execute`校验身份/确认并在查询前后比较完整快照，独立注册表不接生产动作。
+- `scripts/test-rework-query-e2e.sh`：创建独占环回PostgreSQL及本机Java，负责本次进程/容器/临时目录生命周期，不读取本机.env或继承运行库地址。
+
+### 实现的核心功能
+
+- LOW/REWORK_READ只读核对参数仅为原确认单ID/原键，目标和材料来自受信快照；校验实际用户/Run、曾确认时间和执行记录，过期只允许查询，不恢复写权限。
+- 共用原操作/资源/原版本+1/状态副作用及轮次/材料校验；匹配返回原回执，未见成功返回UNKNOWN，HTTP/格式/归属和确认变化保留错误，不伪装成业务失败事实。
+- 查询前后复制重验完整快照，拒绝迟到结果；默认总预算与最多一次明确瞬时读重试，未知不轮询，显式刷新仍使用原键。
+- 不重发业务写入、不保存核对结果或改变Approval终态；本次查询Trace与首次写Trace明确区分，生产持久化确认及终态恢复保持未装配边界。

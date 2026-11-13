@@ -27,6 +27,7 @@ from app.schemas.rework_write_tools import (
     ReworkWriteOutput,
 )
 from app.services.rework_execution import ReworkExecutionStore
+from app.services.rework_receipts import validate_rework_receipt_binding
 from app.tools.base import BaseTool, ToolRiskLevel
 from app.tools.models import ToolContext, ToolResult
 from app.tools.registry import ToolRegistry
@@ -244,34 +245,7 @@ class ReworkWriteTool(BaseTool[ReworkWriteInput, ReworkWriteOutput]):
     ) -> None:
         """补齐Client无法获知的轮次、前驱及原材料指针，不能重建Java事实。"""
 
-        if approval.operation == "CREATE_LIFECYCLE_REWORK":
-            return  # Client已经核对首轮1及空材料、空前驱。
-        expected_round = approval.round_number
-        if approval.operation == "CREATE_NEXT_REWORK":
-            valid = expected_round is not None and receipt.round_number == expected_round + 1
-        else:
-            valid = (
-                receipt.round_number == expected_round
-                and receipt.previous_rework_task_id == approval.previous_rework_task_id
-            )
-        if approval.operation == "REGISTER_REWORK_RESULT":
-            valid = valid and receipt.processing_revision == (approval.processing_revision or 0) + 1
-        elif approval.operation in {"START_REWORK", "BLOCK_REWORK", "FAIL_REWORK", "RESUME_REWORK"}:
-            valid = valid and (
-                receipt.processing_revision,
-                receipt.inspection_id,
-                receipt.review_id,
-            ) == (approval.processing_revision, approval.inspection_id, approval.review_id)
-        elif approval.operation == "REGISTER_REWORK_INSPECTION":
-            valid = valid and receipt.inspection_id != approval.inspection_id
-        elif approval.operation == "SUBMIT_REWORK_REVIEW":
-            valid = valid and receipt.review_id != approval.review_id
-        if not valid:
-            self._raise(
-                ToolErrorCode.RESPONSE_VALIDATION_ERROR,
-                "Java receipt differs from confirmed bindings",
-                context,
-            )
+        validate_rework_receipt_binding(approval, receipt, context.trace_id)
 
     @staticmethod
     def _raise(

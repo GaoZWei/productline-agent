@@ -28,7 +28,7 @@ test-agent-foundation: ## 验证 M1.1 FastAPI、数据库、Alembic 和结构化
 	cd agent-service && uv run --frozen pytest -q tests/test_health.py tests/test_database.py tests/test_observability.py tests/test_alembic.py
 
 test-agent-client: ## 验证Java共享HTTP Client及M8返工Schema与端点绑定
-	cd agent-service && uv run --frozen pytest -q tests/test_business_client.py tests/test_rework_contract.py
+	cd agent-service && uv run --frozen pytest -q tests/test_business_client.py tests/test_rework_contract.py tests/test_rework_operation_query_contract.py
 
 test-agent-errors: ## 验证 M1.3 标准 Tool 错误模型和跨服务错误映射
 	cd agent-service && uv run --frozen pytest -q tests/test_tool_errors.py
@@ -267,6 +267,10 @@ test-approval: ## 验证 M6 Approval生命周期、确认执行、安全边界�
 test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证诊断、写Tool及M6.6确认执行
 	./scripts/test-agent-e2e.sh
 
+.PHONY: test-rework-query-e2e
+test-rework-query-e2e: ## 使用独占PostgreSQL和本机Java验证M8写结果未知只读核对
+	sh ./scripts/test-rework-query-e2e.sh
+
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查
 	cd agent-service && uv run --frozen ruff check .
 	cd agent-service && uv run --frozen mypy app tests
@@ -284,9 +288,9 @@ test-business-data: ## 验证 M0.3 固定数据映射和业务状态组合
 		-Dtest=DemoDataIntegrityIntegrationTest,DemoMigrationUpgradeIntegrationTest,ReworkPersistenceIntegrationTest,BusinessStateConsistencyValidatorTest \
 		test
 
-test-java-contract: ## 验证Java只读查询及M8详情、有效复核、历史与订单交付条件
+test-java-contract: ## 验证Java只读查询及M8详情、有效复核、历史、交付条件与原回执查询
 	mvn --file business-service/pom.xml \
-		-Dtest=BusinessQueryApiIntegrationTest,ReworkQueryApiIntegrationTest,ReworkHistoryApiIntegrationTest,EffectiveReviewApiIntegrationTest,DeliveryConditionsApiIntegrationTest \
+		-Dtest=BusinessQueryApiIntegrationTest,ReworkQueryApiIntegrationTest,ReworkHistoryApiIntegrationTest,EffectiveReviewApiIntegrationTest,DeliveryConditionsApiIntegrationTest,ReworkOperationQueryApiIntegrationTest \
 		test
 
 test-java-write: ## 验证Java写接口及M8返工、完成/复核关闭原子性与实际写入行数

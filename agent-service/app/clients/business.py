@@ -22,6 +22,7 @@ from app.settings import Settings
 DataT = TypeVar("DataT")
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _READONLY_POST_PATHS = frozenset({"/api/knowledge/authorize"})
+_REWORK_QUERY_PATH = re.compile(r"/api/tasks/TASK-[A-Z0-9][A-Z0-9-]{0,58}/reworks/operations/query")
 _JAVA_ERROR_MAPPING: dict[int, tuple[str, ToolErrorCode]] = {
     400: ("PARAM_VALIDATION_ERROR", ToolErrorCode.PARAM_VALIDATION_ERROR),
     401: ("PERMISSION_DENIED", ToolErrorCode.PERMISSION_DENIED),
@@ -40,8 +41,9 @@ class BusinessResponseValidationError(ValueError):
         self.status_code = status_code
         self.reason = reason
 
+
 # 第三层：受控 HTTP 调用
-# Client 构造过程: BusinessHttpClient 持有一个共享 httpx.AsyncClient 
+# Client 构造过程: BusinessHttpClient 持有一个共享 httpx.AsyncClient
 class BusinessHttpClient:
     """共享一个带连接池的 httpx 客户端并严格校验每个响应。"""
 
@@ -142,7 +144,10 @@ class BusinessHttpClient:
         """只为显式白名单中的无副作用POST查询复用连接池，不放宽写入契约。"""
 
         validated_path = self._validate_path(path)
-        if validated_path not in _READONLY_POST_PATHS:
+        if (
+            validated_path not in _READONLY_POST_PATHS
+            and _REWORK_QUERY_PATH.fullmatch(validated_path) is None
+        ):
             raise ValueError("path is not an approved read-only POST endpoint")
         headers = self._build_headers(identity=identity, trace_id=trace_id)
         try:
@@ -176,9 +181,7 @@ class BusinessHttpClient:
             headers["X-User-Id"] = identity.user_id
             headers["X-User-Role"] = identity.role
             if identity.token is not None:
-                headers["Authorization"] = (
-                    f"Bearer {identity.token.get_secret_value()}"
-                )
+                headers["Authorization"] = f"Bearer {identity.token.get_secret_value()}"
         return headers
 
     @staticmethod
@@ -216,7 +219,7 @@ class BusinessHttpClient:
             )
         # 进入成功响应校验
         return cls._validate_success_response(response, response_type, request_trace_id)
-    
+
     # Java错误响应映射
     @classmethod
     def _raise_java_error(
@@ -238,11 +241,7 @@ class BusinessHttpClient:
         mapping = _JAVA_ERROR_MAPPING.get(response.status_code)
         response_trace_id = response.headers.get("X-Trace-Id")
         # 三项一致性检查
-        if (
-            mapping is None
-            or envelope.code != mapping[0]
-            or response_trace_id != envelope.trace_id
-        ):
+        if mapping is None or envelope.code != mapping[0] or response_trace_id != envelope.trace_id:
             cls._raise_response_validation_error(
                 response.status_code,
                 request_trace_id,
@@ -256,6 +255,7 @@ class BusinessHttpClient:
             trace_id=envelope.trace_id,
             status_code=response.status_code,
         )
+
     # 成功响应校验: 校验最外层和最内层 Schema。（http client的校验）
     @staticmethod
     def _validate_success_response(
@@ -289,6 +289,7 @@ class BusinessHttpClient:
             trace_id=envelope.trace_id,
             message=envelope.message,
         )
+
     # JSON、信封、data 和 Trace 异常统一转换为 RESPONSE_VALIDATION_ERROR。
     # 异常文案中不泄露原始响应体。
     @staticmethod

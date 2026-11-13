@@ -581,7 +581,9 @@ T817新增[复核通过与来源问题关闭](REWORK_CONTRACT.md#21-t817复核�
 T818新增[未通过复核与问题退回](REWORK_CONTRACT.md#22-t818未通过复核与问题退回实现边界)，REJECTED/REWORK_REQUIRED沿用同一严格请求及当前绑定重验，原子保存结论并将来源问题置OPEN，本轮及原生产仍COMPLETED；不自动创建下一轮或修改历史材料，原始回执可稳定重放。
 T819新增[受控首轮与下一轮创建](REWORK_CONTRACT.md#23-t819受控首轮与下一轮创建实现边界)，首轮接收sourceIssueId/expectedVersion/reason，后继接收expectedVersion/reason；Java重新核对OPEN问题、活动返工与前轮当前退回复核，生成新PENDING及真实连续轮次，不继承材料。新旧创建入口共用父任务锁防止绕过受控链，原成功重放保持原状态及版本；本轮已通过真实Java HTTP、并发、原子性及固定数据验收。
 T820新增[订单交付条件查询](REWORK_CONTRACT.md#24-t820订单交付条件查询及关闭并发边界)，`GET /api/orders/{orderId}/delivery-conditions`在同一独立只读快照输出全部任务及版本、步骤、问题/有效复核、活动返工、交付记录和已知阻塞；受控复核只看当前绑定，存量保留旧规则，不改变既有查询或Python诊断。hasBlockers不构成交付授权，不自动推进状态；本轮已通过关闭并发及完整查询/写入/固定数据验收，M8.4已收口。
-T821新增[独立Python Schema与HTTP Client](REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)，保留原值与Java UTF-16规则，支持新完整状态、历史及原回执，旧PENDING创建响应不放宽；只包装已实现端点并核对资源/Trace/操作/版本及副作用，不重试写入，不注册Tool或接入确认/诊断。Java列表及操作回执查询尚未实现，不能用空结果代替；本轮离线用例、类型和相关格式/lint已在本机通过，真实Python→Java联调及生产装配仍待后续。
+T821新增[独立Python Schema与HTTP Client](REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)，保留原值与Java UTF-16规则，支持新完整状态、历史及原回执，旧PENDING创建响应不放宽；只包装已实现端点并核对资源/Trace/操作/版本及副作用，不重试写入，不注册Tool或接入确认/诊断。Java列表尚未实现，T824已补齐原回执查询Client和独立只读核对Tool，列表未实现时仍不能用空结果代替；本轮离线用例、类型和相关格式/lint已在本机通过，真实Python→Java联调及生产装配仍待后续。
 T822新增[六个内部只读Tool及独立注册表](REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)，统一REWORK_READ上下文门禁，复用BaseTool总预算、逻辑去重及最多一次瞬时重试；单页读取不挑选有效结论、不改变业务状态。旧七Tool和生产装配、角色映射、诊断保持，代码与MockTransport用例已通过离线验收，不代表真实Python→Java联调或完整Agent链路已启用。
 
 T823新增[九个内部写Tool及确认执行快照端口](REWORK_CONTRACT.md#27-t823内部写tool与确认执行边界)，输入仅含确认单ID/原幂等键，业务正文来自受信快照，单次调用Java并核对原回执；Store尚无生产适配，独立确认、执行权和最新事实重校验待M8.6。离线验收不改变Java HTTP契约，也不开放新的生产Agent写入口。
+
+T824前置新增[原回执只读查询](REWORK_CONTRACT.md#28-t824原写入回执查询前置能力)：`POST /api/tasks/{taskId}/reworks/operations/query`只接收原idempotencyKey，当前用户/任务限定，返回found及原receipt或显式null；未见回执不证明未提交、不授权重发。Java真实HTTP/隔离库及Python Schema已验收，现已接通[独立Python只读核对Tool](REWORK_CONTRACT.md#29-t824-python只读核对与错误边界)，按原确认快照区分MATCHED_RECEIPT和UNKNOWN，错误不伪装成缺失；新增查询通过真实Python→Java联调，不重发写入、不保存结果或恢复Approval终态，无前端或Agent HTTP字段变化。
