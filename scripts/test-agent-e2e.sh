@@ -15,15 +15,19 @@ export BUSINESS_SERVICE_PORT=0
 export DEMO_FAULTS_ENABLED=true
 export DEMO_FAULT_TIMEOUT_DELAY_MS=500
 
+e2e_compose() {
+  docker compose --env-file /dev/null "$@"
+}
+
 cleanup() {
-  docker compose down --volumes --remove-orphans --rmi local >/dev/null 2>&1 || true
+  e2e_compose down --volumes --remove-orphans --rmi local >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
-docker compose up --build --detach business-service
+e2e_compose up --build --detach business-service
 
-postgres_port="$(docker compose port postgres 5432 | sed -n 's/.*://p' | head -n 1)"
-business_port="$(docker compose port business-service 8080 | sed -n 's/.*://p' | head -n 1)"
+postgres_port="$(e2e_compose port postgres 5432 | sed -n 's/.*://p' | head -n 1)"
+business_port="$(e2e_compose port business-service 8080 | sed -n 's/.*://p' | head -n 1)"
 if [ -z "${postgres_port}" ] || [ -z "${business_port}" ]; then
   echo "无法解析 M2.10 E2E 服务端口" >&2
   exit 1
@@ -34,7 +38,7 @@ until curl --fail --silent "http://127.0.0.1:${business_port}/health" >/dev/null
   attempt=$((attempt + 1))
   if [ "${attempt}" -ge 60 ]; then
     echo "M2.10 business-service 未在预期时间内就绪" >&2
-    docker compose logs business-service >&2
+    e2e_compose logs business-service >&2
     exit 1
   fi
   sleep 1

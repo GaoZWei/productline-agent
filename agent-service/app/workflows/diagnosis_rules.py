@@ -1,5 +1,6 @@
 """基于已加载 Java 事实计算订单阻塞阶段的确定性规则。"""
 
+from app.schemas.diagnosis_reviews import DiagnosisReviewResult, review_snapshot_matches
 from app.schemas.tools import QualityIssue, ReviewRecord
 from app.schemas.workflow import BlockingStage, OrderDiagnosisState, RuleDecision
 
@@ -27,7 +28,7 @@ def evaluate_dynamic_diagnosis_rules(state: OrderDiagnosisState) -> RuleDecision
 
     stage = (
         BlockingStage.INSUFFICIENT_INFORMATION
-        if state["errors"] or state["information_gaps"]
+        if state["errors"] or state["information_gaps"] or not _review_snapshots_match(state)
         else _evaluate_loaded_facts(state)
     )
     return RuleDecision(order_id=state["order_id"], blocking_stage=stage)
@@ -41,7 +42,13 @@ def _has_complete_facts(state: OrderDiagnosisState) -> bool:
     tasks = state["tasks"]
     delivery = state["delivery"]
     # 检查关键对象是否存在
-    if state["errors"] or order is None or not tasks or delivery is None:
+    if (
+        state["errors"]
+        or order is None
+        or not tasks
+        or delivery is None
+        or not _review_snapshots_match(state)
+    ):
         return False
     # 检查父订单ID是否一致
     if order.order_id != state["order_id"] or delivery.order_id != state["order_id"]:
@@ -104,7 +111,7 @@ def _evaluate_loaded_facts(state: OrderDiagnosisState) -> BlockingStage:
         if result is not None
         for review in result.reviews
     ]
-    if _requires_review(issues, reviews):
+    if _controlled_review_required(state) or _requires_review(issues, reviews):
         return BlockingStage.REVIEW
     # 交付和无阻塞规则
     delivery = state["delivery"]
@@ -129,3 +136,32 @@ def _requires_review(
     return any(
         issue.status == "RESOLVED" and issue.issue_id not in approved_issue_ids for issue in issues
     )
+
+
+def _review_snapshots_match(state: OrderDiagnosisState) -> bool:
+    """不把跨任务版本或不同问题集合的有效快照拼成可放行结论。"""
+
+    return all(
+        review_snapshot_matches(task, state["quality_issues"].get(task.task_id), review)
+        for task in state["tasks"]
+        if (review := state["reviews"].get(task.task_id)) is not None
+    )
+
+
+def _controlled_review_required(state: OrderDiagnosisState) -> bool:
+    """受控问题必须关闭且有Java当前绑定的通过，历史不参与选取。"""
+
+    for task in state["tasks"]:
+        result = state["reviews"].get(task.task_id)
+        if not isinstance(result, DiagnosisReviewResult):
+            continue
+        issues = {row.issue_id: row for row in state["quality_issues"].get(task.task_id, [])}
+        for current in result.effective_reviews.issues:
+            if current.round_number is not None and (
+                current.issue_id not in issues
+                or issues[current.issue_id].status != "CLOSED"
+                or current.review is None
+                or current.review.status != "APPROVED"
+            ):
+                return True
+    return False

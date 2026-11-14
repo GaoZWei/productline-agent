@@ -536,3 +536,47 @@ Python新增`app.schemas.rework_operation_query`，严格同步原键及found/re
 `make test-tools`覆盖九动作回执、白名单/归属/确认门禁、错误矩阵、未知不轮询、读重试与写不重试、总预算/取消和迟到结果。`make test-rework-query-e2e`使用独占PostgreSQL、本机Java及真实HTTP，测试传输层在Java提交且返回完整回执之后丢弃响应，再验证只读核对找回原事实；另验证Java成功但FakeStore保存冲突、后来状态变化、他人查询缺失、UNKNOWN、实际写请求/业务/审计计数及ORDER-003保持。SQL仅作隔离测试准备与断言，产品Python不访问Java表；脚本清理本次Java进程、容器和临时目录，不读取.env或运行库。
 
 T824内部查询/核对已验收，但Store只有接口、确认仍为明确测试替身；持久化确认服务、Run/Step接线、独立人工确认、终态恢复及页面属于M8.6/M8.7，不在此Tool中补建。下一最小任务T825，不自动开始。
+
+## 30. T825 诊断有效复核视图与历史隔离
+
+Java HTTP和旧ReviewResult契约不变。应用lifespan改用`create_diagnosis_read_tool_registry`，仍是七个既有只读名称和原权限，get_review_result沿用REVIEW_READ，身份/角色由Java最终校验，不增加模型动作或写权限；独立M8六只读/九写/核对注册表不整体装入生产。
+
+诊断专用`GetDiagnosisReviewResultTool`在同一逻辑调用总预算内依次读取旧/review及M8/effective-reviews，返回强类型`DiagnosisReviewResult`。两个GET是独立读取快照，不声称全链路事务一致；当前结论只来自后者，历史只用于展示。默认总预算5秒和至多一次明确瞬时重试沿用既有只读策略，整体读取可重试但不叠加Client重试；有效查询失败、错Trace/归属或格式错误不退回旧记录推断成功。
+
+| 字段 | 内容及用途 |
+| --- | --- |
+| task_id | 与原输入、旧历史及有效快照一致的任务 |
+| reviews | 仅投影Java当前受控review及未纳管legacy_reviews，缺复核不制造PENDING；沿用旧标量记录格式供现有规则/Evidence使用 |
+| history_reviews | 旧/review接口的完整历史记录，受控问题的旧记录不参与决策 |
+| effective_reviews | 保留Java任务版本、全部问题、轮次/成果/检查/当前复核绑定及原样M8材料 |
+
+Python只做投影，不按时间/序号从历史挑通过；投影必须与Java快照一致，历史不能混入其他问题。完整M8多轮复核历史仍由既有/reworks/{id}/reviews及get_rework_reviews提供，不把history_reviews描述为所有新轮次历史。旧标量投影的既有文本规范化不修改effective_reviews中的原样M8字段，也不是待人工确认的写草稿。
+
+固定诊断及动态缺口检测比对已加载任务版本和问题集合，不一致给信息不足或保留缺口，不合并为可放行结论。复核场景看到有效快照包含问题时必须读取问题状态；受控问题要求CLOSED且Java当前review为APPROVED，RESOLVED仍需完成复核，旧成果的通过不能代替当前缺复核。未纳管问题继续使用Javalegacy_reviews和既有旧规则，旧离线/历史ReviewResult仍兼容；生产新Tool的有效快照为必填，不提供错误后的降级路径。
+
+诊断HTTP的DiagnosisResult、BlockingStage和Evidence结构不变，Tool名称仍为get_review_result；当前复核缺失时可引用`effective_reviews.issues[index].review`且value=null，其余状态证据可引用投影的reviews[index].status。前端和Run历史保留证据原值，不回查新状态重算既有诊断；当前APPROVED也不直接标记订单可交付或已交付，仍检查其他既有阻塞。
+
+T825已通过离线规则/错误路径、固定/动态Workflow回归、确认安全/隔离持久化、真实Agent/Java及新增两轮返工诊断验收，M8.5在停止线收口。`make test-rework-diagnosis-e2e`复用独占本机Java/PostgreSQL脚本，以确定性动作模型验证Java两轮真实写入：第一轮退回、第二轮待复核、通过关闭后旧拒绝不阻塞、旧历史/M8历史仍可读取、交付阻塞保留及ORDER-003原结论；不调用真实模型、不接入新写入确认或页面。下一最小任务T826未启动，不自动跨入M8.6。
+
+## 31. T826 独立审批草稿与审查契约
+
+本节新增内部Python/前端契约，不新增Java或Agent HTTP接口。九个M8 operation与第2节一致，按operation判别为明确草稿类型并复用T821 Java请求Schema；旧SUBMIT_REVIEW/CREATE_REWORK不作为新动作别名，旧ReviewDraft、旧ORM枚举和旧确认API保持原样，新草稿不能送入旧确认请求或作为T823已确认执行快照。
+
+| 草稿字段 | 内容与边界 |
+| --- | --- |
+| operation | 首轮、开始、阻塞、失败、恢复、成果登记、人工检查、再次复核、后继创建九类固定动作 |
+| target.task_id/task_version/source_issue_id | 本次审查目标、原版本与来源问题，不能编辑换目标或自行重置版本 |
+| target.rework_task_id/round_number/previous_rework_task_id | 首轮全部null，既有轮次要求真实资源与自洽前驱；不补造存量轮次 |
+| target.processing_revision/artifact | 当前成果修订与成果标识/版本必须同时存在或同时null；不是本次待登记的新成果 |
+| target.inspection_id/review_id | 检查须绑定当前成果，复核须有检查；后继草稿必须保留前轮复核身份 |
+| request | 对应Java动作的完整严格正文，序列化用Java camelCase；expectedVersion与目标版本一致 |
+
+所有目标字段必填，缺失值必须显式null。首轮请求sourceIssueId与目标问题一致且不能继承已有轮次；检查/复核请求processingRevision与目标一致，再次复核inspectionId与目标一致。这里只检查结构和自洽，不能证明这些资源真的存在、是最新材料、检查已经通过或用户具有权限，事实读取/动作前提与确认前重校验分别待T827/T828。
+
+`parse_rework_approval_draft`复制后校验，保留说明/证据/成果版本原值及Java UTF-16长度、严格类型和安全整数约束。`validate_rework_draft_edit`允许修改本次请求材料后再次审查，但operation及整个target不可替换；同时改目标版本与expectedVersion也不能绕过，不允许将新轮/新成果身份偷偷拼入旧审查。草稿不接收confirmed、approval_id、用户、幂等键或待执行Tool等自报授权字段，也不接受整体passed/检查人/作业调度信息来代替完整人工检查项。
+
+`review_rework_approval_draft`纯函数生成`ReworkDraftReview`，包含完整draft、固定pending_tool、所需权限类别、effect_semantics=EXPECTED_IF_JAVA_ACCEPTS和expected_effects；元数据必须与动作匹配，不能隐藏副作用。pending_tool/required_permission不是执行授权，原生产的预期状态始终COMPLETED；登记说明后仍RUNNING/PROCESSING，人工检查任一FAILED仍RUNNING/PROCESSING，全部PASSED预期COMPLETED/RESOLVED而非最终验收。再次复核APPROVED预期COMPLETED/CLOSED并仅RECHECK_ONLY交付条件，REJECTED/REWORK_REQUIRED预期COMPLETED/OPEN，不自动创建下一轮、标记订单可交付或已交付。
+
+审查包只描述Java接受请求时的条件性影响，没有确认人、确认时间、执行状态或唯一执行权；函数不读Java、不创建/持久化Approval、不调用Tool。新M8持久化适配及确认执行服务仍待后续，不能因Schema通过就声称已完成独立人工确认。前端`types/reworkApproval.ts`同步九动作判别联合、材料绑定、Tool/权限与审查包类型，仅提供编译期契约；运行时输入解码、确认卡片、HTTP/Agent接线和真实执行仍未实现。
+
+T826已通过新Schema/编辑/影响边界与旧确认兼容测试、前端类型检查及类型契约、既有确认持久化/Tool/黄金诊断回归。`make test-approval`收集新增Python和前端契约用例，不将这些用例描述为真实新审批执行或数据库迁移验收；Java、固定数据、旧ORM/确认服务及写Tool保持。下一最小任务T827，不自动开始。

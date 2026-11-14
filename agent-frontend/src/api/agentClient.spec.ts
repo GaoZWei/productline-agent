@@ -16,6 +16,20 @@ const mock = new MockAdapter(agentHttpClient);
 afterEach(() => mock.reset());
 
 describe("agent API client", () => {
+  it("保留Java当前复核缺失的null证据，不转换为通过或历史结论", async () => {
+    const payload = goldenResponse();
+    const evidence = {
+      source_type: "TOOL", tool_name: "get_review_result",
+      field_path: "effective_reviews.issues[0].review", value: null,
+      description: "当前成果缺少有效复核",
+    };
+    mock.onPost("/api/agent/order-diagnosis").reply(200, {
+      ...payload, diagnosis: { ...payload.diagnosis, blocking_stage: "REVIEW", evidence: [evidence] },
+    });
+    const result = await requestOrderDiagnosis({ order_id: "ORDER-003", user_message: "复核进度",
+      page_context: orderPageContext() });
+    expect(result.diagnosis.evidence).toEqual([evidence]);
+  });
   it("提交订单与问题并校验完整诊断响应", async () => {
     mock.onPost("/api/agent/order-diagnosis").reply(200, goldenResponse());
 

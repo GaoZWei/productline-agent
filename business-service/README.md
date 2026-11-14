@@ -72,7 +72,7 @@ T804冻结[返工生命周期契约v1](../docs/api/REWORK_CONTRACT.md)：列明�
 独立人工确认、任务共享版本、原始幂等回执、当前检查/复核选择及存量只读边界。
 检查通过与完成返工合并为一次明确确认的原子写入，不另设complete接口；下一轮必须独立确认创建。
 当前T806详情、T807～T809开始/阻塞/失败/恢复、T811/T812成果/检查登记及T815对应历史GET及T816有效复核/复核历史GET、T817复核POST的APPROVED分支已实现，其他新增路径仍为契约要求；未装配Python Client/Tool或前端类型，不能把旧接口回归当作其他新HTTP已实现。
-T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3已完成T811～T815成果/检查登记、更新一致性、完成原子性及历史查询验收，M8.4已接通T816有效复核/历史及T817/T818全部最终复核结论。T819受控创建和T820交付条件查询已完成本机验收，M8.4已验收；T821独立Python契约层及T822内部只读Tool已通过离线验收，新Tool/确认和诊断尚未装配。
+T805已完成V5增量存储和隔离升级验证；M8.2已验收，M8.3已完成T811～T815成果/检查登记、更新一致性、完成原子性及历史查询验收，M8.4已接通T816有效复核/历史及T817/T818全部最终复核结论。T819受控创建和T820交付条件查询已完成本机验收，M8.4已验收；T821独立Python契约层及T822内部只读Tool已通过离线验收，T825现已装配固定/动态诊断的有效复核只读消费，新返工写Tool及独立确认仍未装配。
 
 V5由Flyway在未来Java启动时执行，本轮只在隔离测试库应用；不改V1～V4、种子或运行库，不自动生成历史轮次/证据。
 
@@ -190,7 +190,7 @@ ReworkRound内部轮次由int对齐为long并限制正安全整数，与既有JS
 
 `GET /api/tasks/{taskId}/effective-reviews`要求REVIEWER身份且不接受查询参数，返回taskId、taskVersion和按issueId稳定排序的issues；缺任务404，非法ID/参数400。
 每个问题选最大真实受控轮次，再选当前修订及其最大检查序号；只有该检查PASSED时才取相同绑定下最大reviewSequence的复核。最新失败检查返回自身inspectionId及review=null，新轮或新材料不继承旧通过，旧失败也不自动推翻后来同绑定的新通过。
-没有生命周期时绑定保持null，legacyReviews返回原ReviewRecordDto数组；有生命周期时legacyReviews为空，旧表复核不参与新有效判断。旧`GET /api/tasks/{taskId}/review`和overview保持原样，Python诊断尚未消费新事实。
+没有生命周期时绑定保持null，legacyReviews返回原ReviewRecordDto数组；有生命周期时legacyReviews为空，旧表复核不参与新有效判断。旧`GET /api/tasks/{taskId}/review`和overview保持原样，T825现由应用诊断视图消费该Java快照，旧历史单独保留，不在Python选历史通过。
 `GET /api/tasks/{taskId}/reworks/{reworkTaskId}/reviews`返回完整9字段复核记录，按reviewSequence升序保留旧轮次/修订/检查的历史；复用T815严格参数、归属校验、签名游标及单实例重启失效边界。
 任务版本、问题分组及当前绑定在同一独立只读可重复读快照中读取，两个接口不写状态、幂等或审计、不执行确认或关闭问题；权限仍每次重验。
 详见[契约第二十节](../docs/api/REWORK_CONTRACT.md#20-t816当前有效复核与复核历史实现边界)。`make test-java-contract`包含多轮/材料变化、旧数据兼容、历史完整性及快照一致性验收。
@@ -201,7 +201,7 @@ ReworkRound内部轮次由int对齐为long并限制正安全整数，与既有JS
 T817接通APPROVED分支，T818已接通REJECTED/REWORK_REQUIRED并将问题回到OPEN；PENDING或非法枚举400。要求REVIEWER身份和安全Idempotency-Key，Header不证明人工确认。
 持有父任务锁后重新校验归属、受控轮次无后继、共享版本、原生产COMPLETED、本轮COMPLETED/问题RESOLVED及明确当前修订和当前PASSED检查。重建完整材料后执行领域REVIEW约束，不能沿用旧修订、旧通过或越过最新失败关闭问题。
 同一事务追加复核序号、实际请求人及服务端UTC时间，关闭来源问题、递增一次任务版本，保存幂等完成、审计及固定12字段原成功JSON；所有写入实际影响一行，异常/零行或提交失败全部回滚。同请求重放原回执，不重新关闭或从后来状态重建结果。
-原生产和本轮仍COMPLETED，开始信息、成果/检查、旧复核及其他问题保持；不自动改变订单/交付，不执行自动成果检查或三端确认。Python仍使用原诊断规则，未宣称线上阻塞判断已切换。
+原生产和本轮仍COMPLETED，开始信息、成果/检查、旧复核及其他问题保持；不自动改变订单/交付，不执行自动成果检查或三端确认。T825现已更新应用级诊断规则消费当前有效复核，未部署线上或接入新写入确认。
 详见[契约第二十一节](../docs/api/REWORK_CONTRACT.md#21-t817复核通过与问题关闭实现边界)，`make test-java-write`纳入真实HTTP、版本/材料拒绝、并发、逐写入点及提交原子性验收。
 
 ### T818 未通过复核与问题退回

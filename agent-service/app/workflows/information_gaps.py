@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from app.schemas.diagnosis_reviews import DiagnosisReviewResult, review_snapshot_matches
 from app.schemas.specification import SpecificationQaResult
 from app.schemas.workflow import InformationGap, OrderDiagnosisState
 
 _PRODUCTION_ORDER_STATUSES = frozenset({"PRODUCING"})
 _QUALITY_ORDER_STATUSES = frozenset({"QUALITY_CHECKING"})
 _REVIEW_ORDER_STATUSES = frozenset({"REVIEWING"})
+
 
 # 检查信息缺口：有效订单、关联任务、交付状态、规范问答结果（写明的判断逻辑，固定下来的规则）
 class InformationGapDetector:
@@ -83,6 +85,22 @@ class InformationGapDetector:
             )
         # 质检场景规则
         quality_task_ids = task_ids if order.status in _QUALITY_ORDER_STATUSES else []
+        # 有效复核需要和当前问题状态一起判断，复核场景不能跳过问题读取。
+        quality_task_ids = list(
+            dict.fromkeys(
+                [
+                    *quality_task_ids,
+                    *(
+                        task_id
+                        for task_id in task_ids
+                        if isinstance(
+                            (review := state["reviews"].get(task_id)), DiagnosisReviewResult
+                        )
+                        and review.effective_reviews.issues
+                    ),
+                ]
+            )
+        )
         missing_quality = [
             task_id
             for task_id in quality_task_ids
@@ -165,6 +183,11 @@ class InformationGapDetector:
     def _has_valid_review(state: OrderDiagnosisState, task_id: str) -> bool:
         review = state["reviews"].get(task_id)
         if review is None or review.task_id != task_id:
+            return False
+        task = next((task for task in state["tasks"] if task.task_id == task_id), None)
+        if task is None or not review_snapshot_matches(
+            task, state["quality_issues"].get(task_id), review
+        ):
             return False
         if task_id not in state["quality_issues"]:
             return True

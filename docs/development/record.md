@@ -2630,3 +2630,44 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 - 共用原操作/资源/原版本+1/状态副作用及轮次/材料校验；匹配返回原回执，未见成功返回UNKNOWN，HTTP/格式/归属和确认变化保留错误，不伪装成业务失败事实。
 - 查询前后复制重验完整快照，拒绝迟到结果；默认总预算与最多一次明确瞬时读重试，未知不轮询，显式刷新仍使用原键。
 - 不重发业务写入、不保存核对结果或改变Approval终态；本次查询Trace与首次写Trace明确区分，生产持久化确认及终态恢复保持未装配边界。
+
+## 2026-11-14 T825 M8.5 诊断当前复核与历史隔离
+
+### 核心解决的问题
+
+诊断若把任意历史未通过当成永久阻塞，会忽略后来已通过的新轮成果；反过来，旧成果上的通过也不能放行当前缺复核的成果。
+应用级复核读取保留历史，并只把Java当前有效复核投影交给固定和动态诊断，版本或问题集合不一致时停止推断。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/diagnosis_reviews.py`：`DiagnosisReviewResult`、`project_java_reviews`和`review_snapshot_matches`分离历史/当前视图并验证快照归属。
+- `agent-service/app/tools/diagnosis_reviews.py`：`GetDiagnosisReviewResultTool`读取历史和Java有效快照，`create_diagnosis_read_tool_registry`仅替换既有复核动作；`app/main.py`装配该只读注册表。
+- `agent-service/app/workflows/diagnosis_rules.py`、`information_gaps.py`：检查任务版本和问题集合，受控问题要求关闭且当前通过，动态复核场景不能跳过问题状态。
+- `agent-service/app/workflows/diagnosis_generation.py`：保留旧标量证据路径，当前缺复核可定位有效快照的null字段，并输出当前返工需复核的规则说明。
+
+### 实现的核心功能
+
+- 七个只读动作名称和权限不变，reviews仅投影Java当前受控复核或未纳管记录，history_reviews保留旧接口历史，effective_reviews保留当前完整绑定及原样材料。
+- 不按历史时间或序号在Python选通过；有效查询失败不退回旧历史，任务版本/问题集合变化不合并为可放行结论，旧裸Tool工厂及Java契约保持兼容。
+- 历史拒绝不再永久阻塞已关闭且当前通过的受控问题，旧通过不能替代当前缺失或退回；未纳管问题沿用旧规则，其他交付阻塞继续保留。
+- 固定和动态诊断共用视图/规则，前端保留当前缺复核的null证据；旧Run诊断不按新事实重算，新返工写入确认及页面执行入口保持未接入边界。
+
+## 2026-11-14 T826 M8.6 独立返工审批草稿与审查影响
+
+### 核心解决的问题
+
+旧复核/创建草稿不足以表达开始、检查或再次复核的完整对象和材料，简单复用确认也容易允许更换目标、版本或轮次。
+新增九类独立草稿及审查包，把当前目标绑定、可编辑请求和条件性副作用分开，不把格式校验当成已经人工确认。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/rework_approval.py`：`ReworkApprovalTarget`和九类`ReworkApprovalDraft`绑定目标与明确Java请求，`parse_rework_approval_draft`复制校验材料，`validate_rework_draft_edit`限制编辑范围。
+- 同模块`ReworkDraftReview`、`expected_rework_effects`及`review_rework_approval_draft`固定操作与Tool/权限类别映射，生成Java接受请求时的预期状态影响。
+- `agent-frontend/src/types/reworkApproval.ts`：独立动作/材料判别联合及审查包类型，不扩容旧确认入口或旧卡片。
+
+### 实现的核心功能
+
+- 九类操作各用明确请求类型，首轮与既有轮次分离，目标绑定任务/问题/版本、轮次/前驱、当前成果标识/版本/修订、检查及复核，缺失字段必须显式null。
+- 用户本次材料修改可重新进入审查，但不能替换动作、目标或重置版本/轮次，说明/证据按原值及Java UTF-16规则保留，不借用原材料的可变引用。
+- 审查包固定本动作Tool和权限类别，登记不等于检查通过、检查通过不等于最终验收，复核关闭只重查交付条件；元数据不能伪造或隐藏副作用。
+- 契约不含确认凭证、不读写业务或审批表、不发放执行权，旧ReviewDraft/ORM及确认接口保持隔离；前端只有类型契约，没有运行时解码、页面或HTTP接线。

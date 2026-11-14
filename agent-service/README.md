@@ -223,7 +223,7 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 
 `app.schemas.rework`独立同步M8详情、历史、有效复核、完整返工状态、写请求及原回执；`app.schemas.rework_delivery`同步订单交付条件及已有归属字段。新基类不继承旧ToolSchema的自动strip，原因、说明、成果版本和证据按原值保留；字符串按Java UTF-16长度与空白语义检查，版本/序号限制安全整数，null必须显式存在，旧PENDING创建响应和存量复核契约保持。
 `app.clients.rework.ReworkHttpClient`借用lifespan已有`BusinessHttpClient`，构造不发请求，连接池仍由外层关闭。支持详情、三类材料历史、有效复核和交付条件GET，以及首轮/开始/异常/恢复/成果/检查/复核/后继九类POST；校验请求资源、身份格式及响应的Trace/资源/操作/版本和本动作副作用，分页只读一页，不拼接快照或重新选有效复核。
-Client每次只发一次请求，写入超时或无法确认回执时不允许自动重发，也不宣称未写入；原成功重放仍应使用原请求/原键。列表仍无Java/Client实现，不以空结果代替；T824已补回执只读查询Client及独立核对Tool，共享只读POST仅额外允许合法任务下固定查询路径，普通写POST仍强制幂等键。T822/T823内部读写Tool未生产装配，诊断仍使用旧事实与规则。
+Client每次只发一次请求，写入超时或无法确认回执时不允许自动重发，也不宣称未写入；原成功重放仍应使用原请求/原键。列表仍无Java/Client实现，不以空结果代替；T824已补回执只读查询Client及独立核对Tool，共享只读POST仅额外允许合法任务下固定查询路径，普通写POST仍强制幂等键。T822/T823独立注册表未整体生产装配，T825已单独把有效复核消费接入现有诊断只读动作，新写入仍不开放。
 本轮没有修改lifespan、注册新Tool、开放HTTP路由或接入Approval/页面；代码存在不代表生产已启用。`tests/test_rework_contract.py`使用纯Schema和MockTransport，不代替真实Java或整链验收；本轮已通过本机pytest、mypy及相关模块Ruff格式/lint，真实Python→Java联调仍待后续。可执行`make test-agent-client test-tools`及[STATUS](../docs/STATUS.md)列出的局部回归，M8.4及T821离线契约已验收。完整字段和边界见[契约第二十五节](../docs/api/REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)。
 
 ## T822 M8内部只读Tool（离线验收通过，未生产装配）
@@ -244,6 +244,18 @@ Store仅定义受信接口，无默认生产实现；独立确认、执行权、
 `ReworkHttpClient.query_operation`单次调用已验证Java查询，不携带写幂等Header；公共Client仅额外允许完整匹配合法TASK-ID的固定operations/query只读路径，不接受其他动作、查询参数、片段、编码或路径绕过。`QueryReworkOperationTool`及独立注册表要求REWORK_READ，输入只有原确认单ID/原键，实际用户/Run、曾确认时间和已执行状态由受信快照校验；查询后重验完整快照，迟到结果不得覆盖新确认。
 命中时共用写入回执绑定校验，返回MATCHED_RECEIPT及原回执；未见回执返回UNKNOWN，查询错误保留分类，不假装业务失败。默认总预算5秒、最多一次明确瞬时查询重试，UNKNOWN不触发轮询或写入，显式force_refresh仍沿用原键。核对不保存结果、不改变Approval终态，过期执行记录只可查询，不能恢复写权限；Trace是本次查询Trace，不伪造首次写入Trace。完整边界见[契约第二十九节](../docs/api/REWORK_CONTRACT.md#29-t824-python只读核对与错误边界)。
 `make test-agent-client test-tools`收集Schema/错误矩阵，`make test-rework-query-e2e`以缓存的postgres:16-alpine独占容器及本机JDK21/Maven启动真实Java，不读.env或运行库；在真实提交后丢弃响应，并验证保存冲突、原结果与当前状态分离、未知结果和ORDER-003保持。Store仍为明确Fake，没有生产适配、确认服务/页面或自动恢复；下一最小任务T825。
+
+## T825 诊断消费Java有效复核（M8.5已验收，停在停止线）
+
+lifespan使用`create_diagnosis_read_tool_registry`保留七个动作名称/权限，只替换`get_review_result`实现。`GetDiagnosisReviewResultTool`读取旧/review历史及M8有效快照，输出`DiagnosisReviewResult`：reviews只投影Java当前受控复核和未纳管旧记录，history_reviews保留旧接口历史，effective_reviews保留Java完整当前绑定和原样材料；完整M8轮次历史仍通过既有get_rework_reviews读取。两个GET不是同一SQL快照，历史不参与当前复核选择；旧裸Tool工厂保持兼容，不作为新诊断装配入口。
+固定规则和动态缺口检测比对任务版本及问题集合，受控问题必须CLOSED且当前复核APPROVED；历史拒绝不能永久阻塞当前通过，旧通过不能代替当前缺失/退回。错版本/缺问题/查询错误均保留缺口或停止，不退回旧历史，动态复核场景不能跳过问题状态。未纳管问题保持原规则，NONE仍不构成交付授权或状态推进；完整边界见[契约第三十节](../docs/api/REWORK_CONTRACT.md#30-t825-诊断有效复核视图与历史隔离)。
+诊断结果HTTP字段及七个Evidence Tool名称不变，当前缺复核可输出`effective_reviews.issues[index].review=null`字段证据，前端保留null。`make test-rework-diagnosis-e2e`使用原独占Java/PostgreSQL脚本验证真实两轮返工、固定/动态诊断及ORDER-003，新增入口不读取.env或调用真实模型。M8.5门禁已通过，下一最小任务T826未启动，新写入仍需M8.6独立确认及持久化适配。
+
+## T826 M8独立审批草稿契约（已验收，未接确认或执行）
+
+`app.schemas.rework_approval`定义九类以operation区分的草稿，复用既有Java请求模型；`ReworkApprovalTarget`绑定任务/问题/原版本、轮次/前驱、当前成果标识/版本/修订、检查和复核身份，缺失字段必须显式null。首轮不能继承已有轮次，检查/复核必须绑定当前材料，后继须绑定前轮复核；这里只证明结构一致，业务状态与实际权限仍待T827/T828从Java读取校验。
+`parse_rework_approval_draft`复制并校验嵌套材料，`validate_rework_draft_edit`允许本次请求材料进入最终审查，但禁止换动作、目标、版本、轮次或当前材料。`review_rework_approval_draft`返回固定Tool/所需权限及EXPECTED_IF_JAVA_ACCEPTS影响，登记说明不等于检查通过，本轮完成不等于最终验收，关闭问题仅重查交付条件；它是纯函数，不查询Java、不持久化确认、不发放执行权，详见[契约第三十一节](../docs/api/REWORK_CONTRACT.md#31-t826-独立审批草稿与审查契约)。
+旧ReviewDraft、旧ORM操作/Tool枚举、确认接口及执行服务不扩容为新动作，避免把新草稿误送旧写路径。前端`src/types/reworkApproval.ts`提供独立判别联合和审查包类型，只有编译期契约，没有运行时解码、页面或HTTP接线；`make test-approval`纳入新Python/前端契约用例，前端还需`npm run typecheck`验证类型约束。下一最小任务T827，持久化与确认执行按后续阶段接入。
 
 ## KB-02.2 知识授权Client
 

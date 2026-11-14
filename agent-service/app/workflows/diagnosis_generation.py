@@ -7,6 +7,7 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
+from app.schemas.diagnosis_reviews import DiagnosisReviewResult
 from app.schemas.tools import QualityIssue, ReviewRecord
 from app.schemas.workflow import (
     BlockingStage,
@@ -33,6 +34,7 @@ class DiagnosisNarrativeModel(Protocol):
 
 class InvalidDiagnosisNarrativeError(ValueError):
     """模型文案没有通过 Schema 或稳定代码一致性校验。"""
+
 
 # 规则诊断结果生成, 只负责生成文案
 def generate_rule_diagnosis(state: OrderDiagnosisState) -> DiagnosisResult:
@@ -65,14 +67,15 @@ def generate_rule_diagnosis(state: OrderDiagnosisState) -> DiagnosisResult:
         confidence=confidence,
     )
 
+
 # 仅保护模型输出中的自然语言字段, 不修改业务事实
 def apply_model_narrative(
     rule_result: DiagnosisResult,
     raw_output: object,
 ) -> DiagnosisResult:
     """校验模型结构及稳定代码后, 仅覆盖规则结果中的自然语言字段。"""
-    # 第一层层是 Pydantic Schema 校验   
-    try:  
+    # 第一层层是 Pydantic Schema 校验
+    try:
         narrative = DiagnosisNarrative.model_validate(raw_output)
     except ValidationError as exc:
         raise InvalidDiagnosisNarrativeError("model narrative schema validation failed") from exc
@@ -201,6 +204,7 @@ def _production_blocked_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
         1.0,
     )
 
+
 # 生成诊断(四条字段级证据)
 def _quality_review_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
     issues = _indexed_issues(state, statuses=_QUALITY_UNRESOLVED)
@@ -312,6 +316,56 @@ def _review_diagnosis(state: OrderDiagnosisState) -> DiagnosisParts:
                 ],
                 1.0,
             )
+    for task in state["tasks"]:
+        result = state["reviews"].get(task.task_id)
+        if not isinstance(result, DiagnosisReviewResult):
+            continue
+        issues = {row.issue_id: row for row in state["quality_issues"].get(task.task_id, [])}
+        for index, current in enumerate(result.effective_reviews.issues):
+            issue = issues.get(current.issue_id)
+            if current.round_number is not None and (
+                issue is None
+                or issue.status != "CLOSED"
+                or current.review is None
+                or current.review.status != "APPROVED"
+            ):
+                review_evidence = Evidence(
+                    source_type="TOOL",
+                    tool_name="get_review_result",
+                    field_path=f"effective_reviews.issues[{index}].review",
+                    value=None,
+                    description="Java当前受控成果没有有效复核",
+                )
+                if current.review is not None:
+                    issue_index = next(
+                        i
+                        for i, row in enumerate(state["quality_issues"][task.task_id])
+                        if row.issue_id == current.issue_id
+                    )
+                    review_evidence = Evidence(
+                        source_type="TOOL",
+                        tool_name="get_quality_issues",
+                        field_path=f"issues[{issue_index}].status",
+                        value=issue.status if issue is not None else None,
+                        description="受控问题必须关闭且当前成果复核通过",
+                    )
+                return (
+                    "订单阻塞在复核环节。",
+                    [
+                        RootCause(
+                            code="CURRENT_REWORK_REVIEW_REQUIRED",
+                            description="当前返工成果尚未通过复核并关闭问题",
+                        )
+                    ],
+                    [review_evidence],
+                    [
+                        Suggestion(
+                            action_type="SUBMIT_REVIEW",
+                            description="完成当前成果检查与复核，确认通过后关闭问题",
+                        )
+                    ],
+                    1.0,
+                )
     for _, issue_index, issue in _indexed_issues(state, statuses=frozenset({"RESOLVED"})):
         return (
             "订单阻塞在复核环节。",

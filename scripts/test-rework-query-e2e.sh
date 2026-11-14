@@ -56,6 +56,9 @@ while :; do
 done
 
 cd "${rework_query_root}/agent-service"
+case "${1:-}" in
+  ""|-*) set -- tests/e2e/test_rework_operation_query.py "$@" ;;
+esac
 AGENT_REWORK_QUERY_TEST_DATABASE_URL="postgresql://test:rework-query-e2e-only@127.0.0.1:${rework_query_port}/business_service_test_rework_query" \
 AGENT_REWORK_QUERY_TEST_BUSINESS_URL="http://127.0.0.1:${rework_query_business_port}" \
-  uv run --frozen pytest -q tests/e2e/test_rework_operation_query.py "$@"
+  uv run --frozen pytest -q "$@"

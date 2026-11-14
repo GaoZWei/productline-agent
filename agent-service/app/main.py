@@ -43,7 +43,8 @@ from app.services import (
 )
 from app.services.knowledge_management import KnowledgeManagementService
 from app.settings import Settings, get_settings
-from app.tools import create_read_tool_registry, create_write_tool_registry
+from app.tools import create_write_tool_registry
+from app.tools.diagnosis_reviews import create_diagnosis_read_tool_registry
 from app.versioning import build_run_version_snapshot
 
 logger = logging.getLogger("agent-service.lifecycle")
@@ -85,7 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.model_client = model_client
         application.state.run_event_service = RunEventService()
         # 使用同一个 Client 创建七个 Tool并放入 Registry 中, 共同使用连接池。
-        application.state.tool_registry = create_read_tool_registry(business_client)
+        application.state.tool_registry = create_diagnosis_read_tool_registry(business_client)
         embedding_provider: OpenAICompatibleEmbeddingProvider | None = None
         embedding_generator: EmbeddingBatchGenerator | None = None
         try:
@@ -104,9 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             database=database,
             tool_registry=application.state.tool_registry,
             model_client=model_client,
-            knowledge_capability_service=(
-                application.state.knowledge_index_capability_service
-            ),
+            knowledge_capability_service=(application.state.knowledge_index_capability_service),
             embedding_generator=embedding_generator,
             rerank_timeout_seconds=resolved_settings.rag_rerank_timeout_seconds,
         )

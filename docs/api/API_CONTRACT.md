@@ -587,3 +587,7 @@ T822新增[六个内部只读Tool及独立注册表](REWORK_CONTRACT.md#26-t822�
 T823新增[九个内部写Tool及确认执行快照端口](REWORK_CONTRACT.md#27-t823内部写tool与确认执行边界)，输入仅含确认单ID/原幂等键，业务正文来自受信快照，单次调用Java并核对原回执；Store尚无生产适配，独立确认、执行权和最新事实重校验待M8.6。离线验收不改变Java HTTP契约，也不开放新的生产Agent写入口。
 
 T824前置新增[原回执只读查询](REWORK_CONTRACT.md#28-t824原写入回执查询前置能力)：`POST /api/tasks/{taskId}/reworks/operations/query`只接收原idempotencyKey，当前用户/任务限定，返回found及原receipt或显式null；未见回执不证明未提交、不授权重发。Java真实HTTP/隔离库及Python Schema已验收，现已接通[独立Python只读核对Tool](REWORK_CONTRACT.md#29-t824-python只读核对与错误边界)，按原确认快照区分MATCHED_RECEIPT和UNKNOWN，错误不伪装成缺失；新增查询通过真实Python→Java联调，不重发写入、不保存结果或恢复Approval终态，无前端或Agent HTTP字段变化。
+
+T825新增[诊断有效复核视图](REWORK_CONTRACT.md#30-t825-诊断有效复核视图与历史隔离)，应用七只读动作名称和权限不变，get_review_result投影Java当前复核并分别保留旧历史/完整有效快照；固定和动态诊断比对任务版本、问题集合和受控CLOSED/当前APPROVED，错误不降级为历史结论。诊断HTTP结构不变，当前缺复核的字段级Evidence允许null，前端契约已验证；Java接口/固定数据不变，M8.5已在停止线验收，新写入确认仍待M8.6。
+
+T826新增[独立审批草稿与审查契约](REWORK_CONTRACT.md#31-t826-独立审批草稿与审查契约)：九类operation使用明确请求Schema，目标版本/轮次/当前成果/检查绑定不可被编辑替换；审查包固定Tool及Java接受时的预期影响，不含确认凭证或执行权。前端仅同步类型，旧ReviewDraft/ORM枚举/确认HTTP保持，未新增Java/Agent路由、持久化、页面或实际新确认执行；后续事实读取与草稿生成待T827。

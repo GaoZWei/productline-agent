@@ -136,7 +136,7 @@ test-workflow-nodes: ## 单独验证 M2.5 固定 Workflow 节点、合并与失�
 	cd agent-service && uv run --frozen pytest -q tests/test_order_diagnosis_workflow.py
 
 test-diagnosis-rules: ## 单独验证 M2.6 确定性诊断规则、信息完整性和优先级
-	cd agent-service && uv run --frozen pytest -q tests/test_diagnosis_rules.py
+	cd agent-service && uv run --frozen pytest -q tests/test_diagnosis_rules.py tests/test_effective_review_diagnosis.py
 
 test-diagnosis-generation: ## 单独验证 M2.7 规则文案、模型校验和失败回退
 	cd agent-service && uv run --frozen pytest -q tests/test_diagnosis_generation.py tests/test_order_diagnosis_workflow.py
@@ -260,9 +260,9 @@ eval-rag: ## 验证 RAG固定集、四策略、五项指标和失败样本
 	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_rag_eval.py tests/integration/rag
 
 test-approval: ## 验证 M6 Approval生命周期、确认执行、安全边界、操作日志和前端契约
-	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_review_draft_generation.py tests/test_write_tools.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_operation_log.py tests/test_operation_log_api.py
+	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_rework_approval_schemas.py tests/test_review_draft_generation.py tests/test_write_tools.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_operation_log.py tests/test_operation_log_api.py
 	./scripts/test-agent-persistence.sh -k "approval or review_draft_store or execution or confirmation or operation_log"
-	cd agent-frontend && npm test -- --run src/components/ReviewApprovalCard.spec.ts src/api/agentClient.spec.ts
+	cd agent-frontend && npm test -- --run src/components/ReviewApprovalCard.spec.ts src/api/agentClient.spec.ts src/types/reworkApproval.spec.ts
 
 test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证诊断、写Tool及M6.6确认执行
 	./scripts/test-agent-e2e.sh
@@ -270,6 +270,10 @@ test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证诊断、写Tool
 .PHONY: test-rework-query-e2e
 test-rework-query-e2e: ## 使用独占PostgreSQL和本机Java验证M8写结果未知只读核对
 	sh ./scripts/test-rework-query-e2e.sh
+
+.PHONY: test-rework-diagnosis-e2e
+test-rework-diagnosis-e2e: ## 使用真实Java验证两轮返工、有效复核与诊断消费
+	sh ./scripts/test-rework-query-e2e.sh tests/e2e/test_rework_diagnosis.py
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查
 	cd agent-service && uv run --frozen ruff check .
