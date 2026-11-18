@@ -580,3 +580,30 @@ T825已通过离线规则/错误路径、固定/动态Workflow回归、确认安
 审查包只描述Java接受请求时的条件性影响，没有确认人、确认时间、执行状态或唯一执行权；函数不读Java、不创建/持久化Approval、不调用Tool。新M8持久化适配及确认执行服务仍待后续，不能因Schema通过就声称已完成独立人工确认。前端`types/reworkApproval.ts`同步九动作判别联合、材料绑定、Tool/权限与审查包类型，仅提供编译期契约；运行时输入解码、确认卡片、HTTP/Agent接线和真实执行仍未实现。
 
 T826已通过新Schema/编辑/影响边界与旧确认兼容测试、前端类型检查及类型契约、既有确认持久化/Tool/黄金诊断回归。`make test-approval`收集新增Python和前端契约用例，不将这些用例描述为真实新审批执行或数据库迁移验收；Java、固定数据、旧ORM/确认服务及写Tool保持。下一最小任务T827，不自动开始。
+
+## 32. T827 只读取证与操作草稿生成
+
+新增内部`ReworkDraftWorkflow.ainvoke(command, context=ToolContext)`，没有新HTTP/前端输入或生产装配。命令按九类operation严格区分，接受task_id、适用的rework_task_id，以及本次人工说明/成果/证据/检查项/最终意见；只有首轮需要source_issue_id。不得提交expectedVersion、当前轮次/成果修订/检查身份、target、用户/权限、confirmed或approval_id；材料按T821原值和UTF-16规则解析并复制，不由模型补造。
+
+先要求上下文TASK_READ、REWORK_READ及本动作的REWORK_WRITE（再次复核为REVIEW_WRITE），再经固定LOW只读Tool取证。任务详情确定真实所属订单；订单交付条件提供同订单任务共享版本、问题、当前有效复核和活动返工；已有返工动作另读详情。目标只从Java生成，调用者没有传入已验证快照的入口；Tool失败保留错误分类且停止，不从页面、旧历史或用户命令补事实，误配的非LOW/不同输出契约Tool也拒绝。
+
+不同GET不是同一SQL原子快照。Workflow比较任务状态/共享版本、来源问题状态、Java选择的当前轮次/修订/检查/复核与详情，已有活动轮次还须在订单快照的同源活动列表中匹配；变化即BUSINESS_CONFLICT，不自动重试整段流程或把不同读取拼成同一事实。生成后仍可能变化，T827不代替T828确认前重读或Java最终写入校验。
+
+| 动作 | 生成草稿前的当前事实要求 |
+| --- | --- |
+| 全部 | 原生产COMPLETED，任务版本一致且可安全递增，资源归属明确 |
+| 受控首轮 | 来源问题OPEN，无受控链、无同源活动返工，不纳管存量历史 |
+| 开始 | 受控当前轮PENDING/问题OPEN |
+| 阻塞/失败/登记成果 | 当前轮RUNNING/问题PROCESSING |
+| 恢复 | 当前轮BLOCKED或FAILED/问题PROCESSING |
+| 人工检查 | 当前轮RUNNING/PROCESSING且已有真实当前成果，人工提供完整检查项 |
+| 再次复核 | 当前轮COMPLETED/RESOLVED，当前修订的当前检查PASSED |
+| 下一轮 | 当前轮COMPLETED/OPEN、当前检查PASSED且有效复核REJECTED或REWORK_REQUIRED，无同源活动返工，轮次可安全递增 |
+
+已有轮次同时要求Java allowedActions包含本动作；这只是事实前提，不构成权限或确认。旧轮次、无生命周期、当前材料缺失或最新失败检查不能借旧通过生成复核/后继草稿。expectedVersion、processingRevision和inspectionId由实际读取生成，用户只提交本次人工材料；登记新成果不会把新成果冒充当前已登记成果。
+
+返回`PreparedReworkDraft`：review为第31节完整审查包，order_id为实际订单，current_task为Java任务条件，current_rework为完整当前返工详情（首轮为显式null）。当前处理说明、成果标识/版本、证据引用和人工检查项保留原样，便于把已有材料与待登记项并列核对；仅保存引用不证明原件内容或真实自动检查。副作用始终EXPECTED_IF_JAVA_ACCEPTS，人工检查失败仍预期RUNNING/PROCESSING，全部通过仅预期COMPLETED/RESOLVED，最终复核通过才CLOSED并仅重查交付，退回不自动创建下一轮。
+
+默认15秒总预算覆盖全流程，现有只读Tool负责其有限瞬时重试，Workflow不另加重试循环；固定显式force_refresh读取，不拿同Run去重拒绝或缓存当作最新事实。超时、取消和读取失败均无业务写入；Workflow不接受Store或写Tool依赖，不创建/持久化/确认Approval、不授予执行权、不保存Run/Step/SSE，相关确认与观测留待T828～T830。
+
+`tests/test_rework_draft_workflow.py`已加入`make test-approval`收集，使用实际只读Tool/Client和MockTransport，包含九动作、版本/轮次/材料变化、首轮/后继边界、拒绝自报事实、权限/上游失败、人工检查/退回及材料复制、总预算等用例。本机按当前会话要求未运行pytest、类型/格式或任何质量检查；代码与用例已编写不代表T827验收、真实Java联调或完整确认链路通过，下一最小任务T828，未自动开始。

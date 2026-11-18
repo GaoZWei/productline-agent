@@ -253,9 +253,16 @@ lifespan使用`create_diagnosis_read_tool_registry`保留七个动作名称/权�
 
 ## T826 M8独立审批草稿契约（已验收，未接确认或执行）
 
-`app.schemas.rework_approval`定义九类以operation区分的草稿，复用既有Java请求模型；`ReworkApprovalTarget`绑定任务/问题/原版本、轮次/前驱、当前成果标识/版本/修订、检查和复核身份，缺失字段必须显式null。首轮不能继承已有轮次，检查/复核必须绑定当前材料，后继须绑定前轮复核；这里只证明结构一致，业务状态与实际权限仍待T827/T828从Java读取校验。
+`app.schemas.rework_approval`定义九类以operation区分的草稿，复用既有Java请求模型；`ReworkApprovalTarget`绑定任务/问题/原版本、轮次/前驱、当前成果标识/版本/修订、检查和复核身份，缺失字段必须显式null。首轮不能继承已有轮次，检查/复核必须绑定当前材料，后继须绑定前轮复核；契约本身只证明结构一致，T827取证流程已开发待验收，确认前校验仍待T828。
 `parse_rework_approval_draft`复制并校验嵌套材料，`validate_rework_draft_edit`允许本次请求材料进入最终审查，但禁止换动作、目标、版本、轮次或当前材料。`review_rework_approval_draft`返回固定Tool/所需权限及EXPECTED_IF_JAVA_ACCEPTS影响，登记说明不等于检查通过，本轮完成不等于最终验收，关闭问题仅重查交付条件；它是纯函数，不查询Java、不持久化确认、不发放执行权，详见[契约第三十一节](../docs/api/REWORK_CONTRACT.md#31-t826-独立审批草稿与审查契约)。
 旧ReviewDraft、旧ORM操作/Tool枚举、确认接口及执行服务不扩容为新动作，避免把新草稿误送旧写路径。前端`src/types/reworkApproval.ts`提供独立判别联合和审查包类型，只有编译期契约，没有运行时解码、页面或HTTP接线；`make test-approval`纳入新Python/前端契约用例，前端还需`npm run typecheck`验证类型约束。下一最小任务T827，持久化与确认执行按后续阶段接入。
+
+## T827 只读取证与操作草稿生成（开发完成，待项目电脑验收）
+
+`schemas/rework_draft.py`定义内部命令，只接受动作、定位资源和本次人工材料；期望版本、当前轮次/成果/检查、身份/权限及确认字段不能自报。`workflows/rework_draft.py`的`ReworkDraftWorkflow.ainvoke`依次调用任务详情、订单交付条件和适用的返工详情只读Tool，从Java取得真实订单、版本、问题、活动返工和当前绑定，再生成T826审查包。
+生成前检查上下文TASK_READ/REWORK_READ及本动作写权限类别、原生产完成/安全版本、来源归属、当前Java允许动作和明确状态/材料前提；跨GET版本、状态或有效绑定不同即停止，不把这些GET描述为同一SQL快照，不降级旧历史。默认15秒总预算覆盖全流程，重试只由只读Tool控制，显式刷新避免拿Run内旧读取结果当最新事实。
+返回`PreparedReworkDraft`，包括review、order_id、current_task和current_rework；完整当前处理说明/证据和检查项保留原值供人工核对，用户新材料复制后进入审查。结果只是草稿及Java接受时的预期影响，不生成确认单、执行快照或幂等写入；没有Store/写Tool/模型依赖，不改生产装配、HTTP或页面，确认前重读及失效仍待T828。
+`make test-approval`收集`tests/test_rework_draft_workflow.py`，用例为只读Tool→Client→MockTransport，不代替真实Java或确认验收。本机按用户要求未运行测试、类型/格式或其他检查，命令和当前边界见[STATUS](../docs/STATUS.md)与[契约第三十二节](../docs/api/REWORK_CONTRACT.md#32-t827-只读取证与操作草稿生成)。
 
 ## KB-02.2 知识授权Client
 

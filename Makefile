@@ -260,7 +260,7 @@ eval-rag: ## 验证 RAG固定集、四策略、五项指标和失败样本
 	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_rag_eval.py tests/integration/rag
 
 test-approval: ## 验证 M6 Approval生命周期、确认执行、安全边界、操作日志和前端契约
-	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_rework_approval_schemas.py tests/test_review_draft_generation.py tests/test_write_tools.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_operation_log.py tests/test_operation_log_api.py
+	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_rework_approval_schemas.py tests/test_rework_draft_workflow.py tests/test_review_draft_generation.py tests/test_write_tools.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_operation_log.py tests/test_operation_log_api.py
 	./scripts/test-agent-persistence.sh -k "approval or review_draft_store or execution or confirmation or operation_log"
 	cd agent-frontend && npm test -- --run src/components/ReviewApprovalCard.spec.ts src/api/agentClient.spec.ts src/types/reworkApproval.spec.ts
 
