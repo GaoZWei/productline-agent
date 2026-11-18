@@ -167,6 +167,13 @@ class ReworkWriteTool(BaseTool[ReworkWriteInput, ReworkWriteOutput]):
                 context,
                 409,
             )
+        if not await self._store.begin_submission(approval):
+            self._raise(
+                ToolErrorCode.BUSINESS_CONFLICT,
+                "execution submission is not available",
+                context,
+                409,
+            )
         response = await self._dispatch(approval, context)
         self._check_receipt(approval, response.data, context)
         output = ReworkWriteOutput(

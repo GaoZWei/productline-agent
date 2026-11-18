@@ -1,4 +1,4 @@
-"""M8写Tool与未来独立确认服务之间的受信执行接口，没有默认生产实现。"""
+"""M8写Tool与独立确认执行服务之间的受信接口。"""
 
 from typing import Protocol
 
@@ -22,4 +22,8 @@ class ReworkExecutionStore(Protocol):
         实现须核对用户、Run、操作、键、资源、版本和材料未变，首次结果不可覆盖。
         原请求重放仅可接受相同业务回执并保留首次Trace，不能据此发放新的执行权。
         """
+        ...
+
+    async def begin_submission(self, expected: ReworkExecutionSnapshot) -> bool:
+        """原子消费一次提交许可。重放、并发、到期或快照变化都不得再次发送Java。"""
         ...

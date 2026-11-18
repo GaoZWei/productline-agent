@@ -260,7 +260,7 @@ eval-rag: ## 验证 RAG固定集、四策略、五项指标和失败样本
 	cd agent-service && uv run --frozen pytest -q tests/evaluation/test_rag_eval.py tests/integration/rag
 
 test-approval: ## 验证 M6 Approval生命周期、确认执行、安全边界、操作日志和前端契约
-	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_rework_approval_schemas.py tests/test_rework_draft_workflow.py tests/test_review_draft_generation.py tests/test_write_tools.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_operation_log.py tests/test_operation_log_api.py
+	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_rework_approval_schemas.py tests/test_rework_draft_workflow.py tests/test_rework_confirmation.py tests/test_rework_execution.py tests/test_review_draft_generation.py tests/test_write_tools.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_operation_log.py tests/test_operation_log_api.py
 	./scripts/test-agent-persistence.sh -k "approval or review_draft_store or execution or confirmation or operation_log"
 	cd agent-frontend && npm test -- --run src/components/ReviewApprovalCard.spec.ts src/api/agentClient.spec.ts src/types/reworkApproval.spec.ts
 
@@ -274,6 +274,23 @@ test-rework-query-e2e: ## 使用独占PostgreSQL和本机Java验证M8写结果�
 .PHONY: test-rework-diagnosis-e2e
 test-rework-diagnosis-e2e: ## 使用真实Java验证两轮返工、有效复核与诊断消费
 	sh ./scripts/test-rework-query-e2e.sh tests/e2e/test_rework_diagnosis.py
+
+.PHONY: test-rework-confirmation
+test-rework-confirmation: ## 验证M8独立确认重读、失效与隔离PostgreSQL审查持久化
+	cd agent-service && uv run --frozen pytest -q tests/test_rework_confirmation.py
+	./scripts/test-agent-persistence.sh -k "rework_confirmation or alembic_creates or managed_knowledge_migration or managed_knowledge_downgrade"
+
+.PHONY: test-rework-confirmation-e2e
+test-rework-confirmation-e2e: ## 使用独占Java及分离Agent测试库验证真实成果变化使确认失效
+	sh ./scripts/test-rework-query-e2e.sh tests/e2e/test_rework_confirmation.py
+
+.PHONY: test-rework-execution
+test-rework-execution: ## 验证M8唯一执行、一次提交及原回执核对的隔离数据库链路
+	./scripts/test-agent-persistence.sh -k "rework_execution or rework_confirmation or alembic_creates or managed_knowledge_migration or managed_knowledge_downgrade"
+
+.PHONY: test-rework-execution-e2e
+test-rework-execution-e2e: ## 使用独占Java及分离Agent测试库验证九动作真实执行、两轮返工及原键恢复
+	sh ./scripts/test-rework-query-e2e.sh tests/e2e/test_rework_execution.py
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查
 	cd agent-service && uv run --frozen ruff check .

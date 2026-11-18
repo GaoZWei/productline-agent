@@ -49,6 +49,10 @@ async def managed_database() -> AsyncIterator[Database]:
         await admin.execute(f'CREATE DATABASE "{name}"')
         async with database.engine.begin() as connection:
             await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            # 0017引用0001已有Run身份。本夹具仍只模拟前序表，不冒充运行库集成。
+            await connection.execute(
+                text("CREATE TABLE agent_runs (run_id varchar(128) PRIMARY KEY)")
+            )
             await connection.execute(
                 text("CREATE TABLE knowledge_documents (document_id text PRIMARY KEY, body text)")
             )

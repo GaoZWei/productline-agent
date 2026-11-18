@@ -40,3 +40,5 @@ def test_alembic_configuration_points_to_migrations() -> None:
     assert (
         project_root / "migrations" / "versions" / "0016_managed_knowledge_state.py"
     ).is_file()
+    assert (project_root / "migrations" / "versions" / "0017_rework_confirmation.py").is_file()
+    assert (project_root / "migrations" / "versions" / "0018_rework_execution.py").is_file()

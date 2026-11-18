@@ -188,6 +188,14 @@ class FakeStore:
         self.saved.append(result)
         return True
 
+    async def begin_submission(self, expected: ReworkExecutionSnapshot) -> bool:
+        """模拟一次性提交。首次保存失败或响应丢失也不允许再发。"""
+
+        if self.snapshot != expected or getattr(self, "submitted", False):
+            return False
+        self.submitted = True
+        return True
+
 
 def context(
     permission: str = "REWORK_WRITE", *, user: str = "reviewer-test", run: str = RUN
@@ -575,9 +583,10 @@ async def test_refresh_keeps_original_key_and_receipt_while_default_duplicate_is
         first = await tool.execute(INPUT, ctx)
         duplicate = await tool.execute(INPUT, ctx)
         replay = await tool.execute(INPUT, ctx, force_refresh=True)
-        assert first.success and replay.data == first.data
+        assert first.success and replay.error is not None
+        assert replay.error.code is ToolErrorCode.BUSINESS_CONFLICT
         assert duplicate.error is not None and duplicate.error.code is ToolErrorCode.DUPLICATE_CALL
-        assert len(calls) == 2 and len(store.saved) == 1
+        assert len(calls) == 1 and len(store.saved) == 1
         assert all(r.headers["Idempotency-Key"] == KEY for r in calls)
     finally:
         await client.aclose()

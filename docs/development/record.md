@@ -2690,3 +2690,44 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 - 核对任务及详情版本、来源状态、Java当前轮次/成果/检查/复核和活动返工，跨GET变化即停止；首轮、开始、异常/恢复、成果、人工检查、再次复核及后继分别验证明确前提，不借旧通过放行新材料。
 - 原值复制后返回T826审查包及完整当前处理/检查材料，预期影响仍取决于Java接受，人工失败检查、退回和仅重查交付的边界保持。
 - 只读总预算覆盖完整流程，不创建或持久化Approval、不授予确认/执行权、不调用写Tool，不改变旧确认、生产装配或诊断规则。
+
+## 2026-11-18 T828 独立返工审查持久化与确认前重校验
+
+### 核心解决的问题
+
+待审草稿生成后，成果、检查、轮次或权限仍可能变化，重复确认或取消与确认竞争还可能覆盖用户决定。
+保存原始材料及归属/期限，独立人工确认时重新读取Java并比较原绑定，变化置为失效，确认事实与后续执行权分开。
+
+### 实现的核心代码
+
+- `agent-service/app/schemas/rework_confirmation.py`：`ReworkConfirmationRequest`和`ReworkConfirmationSnapshot`约束完整最终草稿、原材料及确认人/时间，不包含执行凭证。
+- `agent-service/app/services/rework_confirmation.py`：`ReworkConfirmationService.create/confirm/cancel`保存审查、重读取证和处理取消/到期，`_facts`比较本动作完整材料，`_finish`拒绝并发替换。
+- `agent-service/app/services/rework_confirmation_store.py`：`DatabaseReworkConfirmationStore`按真实Run/Session归属保存和完整比较更新，取锁后重新检查期限；`models/rework_confirmation.py`与`0017_rework_confirmation.py`定义隔离的Agent审查表。
+
+### 实现的核心功能
+
+- 每个返工动作独立保存原始PreparedReworkDraft、用户/Run及有效期，原始材料保留，最终人工编辑内容单独存储，不能改变目标、操作或原版本。
+- 确认时强制重读Java，比较原轮次/前驱、成果/修订、完整证据、检查及复核，变化或资源消失持久化STALE，读取故障保留分类并停止。
+- 取消、过期、权限撤销和跨用户/Run拒绝确认，完整快照及revision比较防止并发状态互相覆盖，锁等待跨过有效期亦拒绝保存确认。
+- 确认仅记录CONFIRMED与服务端确认人/时间，不发放执行键、不调用写Tool，不扩展旧确认接口或修改Java业务事实；Run/Step及生产入口保持隔离。
+
+## 2026-11-18 T829 内部唯一执行与原键回执关联
+
+### 核心解决的问题
+
+人工确认后多个执行者、强制刷新或不同Tool实例仍可能重复发送；网络丢响应或保存失败也不能证明业务未提交。
+以数据库原子领取和一次提交门禁固定执行对象，成功保存原回执，未知结果只读核对原键，防止重复写入或伪造失败事实。
+
+### 实现的核心代码
+
+- `agent-service/app/services/rework_execution_service.py`：`ReworkExecutionService.execute/reconcile`重校验原确认、领取后调用固定写Tool或查询原回执，不自动确认或重发。
+- `agent-service/app/services/rework_execution_store.py`：`claim/begin_submission`完整快照比较与一次提交，`save_execution_result/save_resolution`保留首次证据，`unknown`保留原执行状态与键。
+- `agent-service/app/schemas/rework_execution.py`：执行输入、报告及`ReworkReceiptEvidence`分离写/查询Trace；`schemas/rework_confirmation.py`和`0018_rework_execution.py`约束领取、提交时间、唯一键及成功证据。
+- `agent-service/app/tools/rework_write.py`与`services/rework_execution.py`：新增begin_submission端口，写Tool在HTTP前消费许可，不以force_refresh绕过。
+
+### 实现的核心功能
+
+- 原CONFIRMED必须再次读取Java并比较原版本/轮次/材料，完整快照和revision原子领取唯一键，写Tool再消费一次提交许可；重复或并发不能重新发送。
+- 首次成功回执和来源不可覆盖，写响应与原键查询竞争时保留已保存证据；未知结果保持EXECUTING及原键，不把没有回执当作未提交或授权重发。
+- 核对只要求返工读权限及归属，查询Trace不伪装成首次写Trace，审批到期不丢弃已提交成功证据或恢复写权限。
+- 独立审查表承载内部状态，旧确认接口、Java契约、固定数据及生产入口保持，已有执行记录拒绝降级；Run/Step及观测联动保持后续边界。

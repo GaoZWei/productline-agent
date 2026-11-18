@@ -236,7 +236,7 @@ Client每次只发一次请求，写入超时或无法确认回执时不允许�
 
 `app.tools.rework_write.create_rework_write_tool_registry`显式接收Client和`ReworkExecutionStore`端口，独立注册九个HIGH风险Tool。输入只接受approval_id和idempotency_key，目标、版本、轮次及完整材料来自服务端已确认的执行快照；核对用户/Run、确认人/有效期、EXECUTING状态、操作与原键后，仅调用一次Java，详情见[契约第二十七节](../docs/api/REWORK_CONTRACT.md#27-t823内部写tool与确认执行边界)。
 Client与Tool共同核对Java原回执的资源/版本/操作/轮次及材料绑定，再以完整快照交给Store保存；保存冲突不覆盖首次结果，不宣称Java回滚。全部错误不可自动重试，取消向上传播。失败检查、退回复核和关闭后的其他交付阻塞均由Java决定，不因Tool成功就推进订单交付。
-Store仅定义受信接口，无默认生产实现；独立确认、执行权、提交前最新事实重校验及持久化适配待M8.6，T824已补内部只读结果核对。没有修改旧Approval表/枚举、公共BaseTool、角色映射或生产装配；测试FakeStore与MockTransport只验证映射和端口约束。可执行`make test-tools`，实际本机验收见[STATUS](../docs/STATUS.md)。
+T823交付时Store仅定义受信接口；T829新增内部数据库执行适配及一次提交门禁，尚未生产装配，实际边界见后文T829及[契约第三十四节](../docs/api/REWORK_CONTRACT.md#34-t829-唯一执行一次提交与原键核对)。旧Approval表/枚举、公共BaseTool、角色映射及生产装配保持；FakeStore/MockTransport不代替真实Java，`make test-tools`实际结果见[STATUS](../docs/STATUS.md)。
 
 ## T824 原回执只读核对（内部能力及真实Java查询联调已验收）
 
@@ -257,12 +257,24 @@ lifespan使用`create_diagnosis_read_tool_registry`保留七个动作名称/权�
 `parse_rework_approval_draft`复制并校验嵌套材料，`validate_rework_draft_edit`允许本次请求材料进入最终审查，但禁止换动作、目标、版本、轮次或当前材料。`review_rework_approval_draft`返回固定Tool/所需权限及EXPECTED_IF_JAVA_ACCEPTS影响，登记说明不等于检查通过，本轮完成不等于最终验收，关闭问题仅重查交付条件；它是纯函数，不查询Java、不持久化确认、不发放执行权，详见[契约第三十一节](../docs/api/REWORK_CONTRACT.md#31-t826-独立审批草稿与审查契约)。
 旧ReviewDraft、旧ORM操作/Tool枚举、确认接口及执行服务不扩容为新动作，避免把新草稿误送旧写路径。前端`src/types/reworkApproval.ts`提供独立判别联合和审查包类型，只有编译期契约，没有运行时解码、页面或HTTP接线；`make test-approval`纳入新Python/前端契约用例，前端还需`npm run typecheck`验证类型约束。下一最小任务T827，持久化与确认执行按后续阶段接入。
 
-## T827 只读取证与操作草稿生成（开发完成，待项目电脑验收）
+## T827 只读取证与操作草稿生成（T828时补齐本机验收）
 
 `schemas/rework_draft.py`定义内部命令，只接受动作、定位资源和本次人工材料；期望版本、当前轮次/成果/检查、身份/权限及确认字段不能自报。`workflows/rework_draft.py`的`ReworkDraftWorkflow.ainvoke`依次调用任务详情、订单交付条件和适用的返工详情只读Tool，从Java取得真实订单、版本、问题、活动返工和当前绑定，再生成T826审查包。
 生成前检查上下文TASK_READ/REWORK_READ及本动作写权限类别、原生产完成/安全版本、来源归属、当前Java允许动作和明确状态/材料前提；跨GET版本、状态或有效绑定不同即停止，不把这些GET描述为同一SQL快照，不降级旧历史。默认15秒总预算覆盖全流程，重试只由只读Tool控制，显式刷新避免拿Run内旧读取结果当最新事实。
 返回`PreparedReworkDraft`，包括review、order_id、current_task和current_rework；完整当前处理说明/证据和检查项保留原值供人工核对，用户新材料复制后进入审查。结果只是草稿及Java接受时的预期影响，不生成确认单、执行快照或幂等写入；没有Store/写Tool/模型依赖，不改生产装配、HTTP或页面，确认前重读及失效仍待T828。
-`make test-approval`收集`tests/test_rework_draft_workflow.py`，用例为只读Tool→Client→MockTransport，不代替真实Java或确认验收。本机按用户要求未运行测试、类型/格式或其他检查，命令和当前边界见[STATUS](../docs/STATUS.md)与[契约第三十二节](../docs/api/REWORK_CONTRACT.md#32-t827-只读取证与操作草稿生成)。
+`make test-approval`收集`tests/test_rework_draft_workflow.py`，用例为只读Tool→Client→MockTransport，不代替真实Java或确认验收。T828已补齐本机定向/回归、类型及运行模块格式检查，T827取证行为保持，命令和当前边界见[STATUS](../docs/STATUS.md)与[契约第三十二节](../docs/api/REWORK_CONTRACT.md#32-t827-只读取证与操作草稿生成)。
+
+## T828 独立审查持久化与确认前重读（内部验收通过，未接执行）
+
+`ReworkConfirmationService.create`运行T827取证后，把原始PreparedReworkDraft与用户/Run、有效期存入独立Agent审查表；0017迁移不扩展旧ReviewDraft枚举或确认执行分支。明确人工确认提交完整最终草稿，`confirm`只允许编辑请求材料，再从Java读取原对象并比较原版本、轮次/前驱、成果身份/修订、完整证据、检查及复核；变化持久化STALE，取消/过期、越权或并发变动均拒绝确认。
+`DatabaseReworkConfirmationStore`只操作Agent表，验证真实Run/会话归属，以完整快照和revision比较更新，取行锁后重查有效期及会话；网络取证不持有数据库事务。原始prepared保持，确认人/时间及最终confirmed_draft由服务端保存，最多到CONFIRMED，没有执行键、EXECUTING或写Tool调用，不实现ReworkExecutionStore。唯一执行和回执恢复待T829，Run/Step/SSE待T830，HTTP/Agent/页面未接通。
+`make test-rework-confirmation`验证离线确认和隔离PostgreSQL迁移/持久化，`make test-rework-confirmation-e2e`验证独占Java成果变更后的真实STALE；Agent使用分离测试库，不读取运行库或调用模型，细节见[契约第三十三节](../docs/api/REWORK_CONTRACT.md#33-t828-独立审查持久化与确认前重读)。
+
+## T829 唯一执行与原键回执关联（已开发，待完整验收）
+
+`ReworkExecutionService`只接收approval_id，对原CONFIRMED草稿再读Java并比较原版本/完整材料，再经`DatabaseReworkExecutionStore.claim`原子进入EXECUTING、保存稳定唯一键。写Tool新增`begin_submission`消费一次提交许可，跨实例和force_refresh也不能重发；这扩展了T823 Store端口，既有FakeStore和强制刷新断言同步加强，Java幂等契约保持。0018迁移仅扩展M8独立审查表，不扩展旧确认枚举或生产路由。
+写Tool成功即保存SUCCEEDED与原回执，重复执行返回已存状态；超时、取消或保存冲突保留EXECUTING/原键，不推测未提交或自动释放执行权。`reconcile`只用原键查询，未见回执仍UNKNOWN，匹配才保存成功；WRITE保留原写Trace，LOOKUP的首次写Trace为null、仅记录实际查询Trace。核对只要求REWORK_READ及原用户/Run归属，不恢复写权限；领取/实际提交仍要求实时读写权限、有效Run/会话及未过期审批。
+`make test-rework-execution`已通过首轮隔离库验收；后续补充竞争处理、快照复制及读权限边界后，末次隔离库复验待执行。`make test-rework-execution-e2e`已实现真实Java九动作/两轮闭环及提交后丢响应核对，但自动审批服务因用量限制未完成审批，未执行，不视为已通过。当前本地回归/类型检查结果见[STATUS](../docs/STATUS.md)，完整边界见[契约第三十四节](../docs/api/REWORK_CONTRACT.md#34-t829-唯一执行一次提交与原键核对)。T829不接HTTP/Agent/页面，Run/Step/SSE/操作日志留待T830，先完成T829验收。
 
 ## KB-02.2 知识授权Client
 

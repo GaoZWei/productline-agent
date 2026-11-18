@@ -494,9 +494,9 @@ T821交付时仅内部传输层，无lifespan装配、新Tool/权限/Approval、
 
 通过门禁后仅调用T821对应POST一次，身份/Trace只取上下文，业务参数只取捕获的确认快照。Client核对原回执资源、操作、版本+1、状态及请求材料，Tool补充确认轮次/前驱、成果修订递增及新检查/复核ID绑定；输出保留Java原回执及Trace，不重新GET拼造原结果。失败检查仍可返回RUNNING/PROCESSING，复核退回仍可返回COMPLETED/OPEN，不等同最终验收通过。
 
-`ReworkExecutionStore`当前只有Protocol，无生产实现。未来确认服务负责独立人工确认、唯一执行权、权限/最新事实重校验和持久化；接口要求按EXECUTING及完整预期快照CAS保存结果，首次回执不可覆盖，同原请求重放只接受相同业务回执并保留首次Trace。Tool不临时生成确认、不取得执行权、不自行修改Approval终态；保存冲突发生在Java响应后，不能声称业务失败或回滚。
+T823交付时`ReworkExecutionStore`只有Protocol；T829的内部数据库适配及新增begin_submission门禁见[第三十四节](#34-t829-唯一执行一次提交与原键核对)，尚未生产装配。接口要求按EXECUTING及完整预期快照CAS保存结果，首次回执不可覆盖，相同原回执重复保存只保留首次Trace。Tool不临时生成确认、不领取执行权；保存冲突发生在Java响应后，不能声称业务失败或回滚。
 
-全部错误标为不可自动重试，包含Client网络错误和BaseTool外层预算超时；取消继续向上传播，不启动后台请求。默认同Run重复受既有指纹门禁拦截；显式force_refresh仍必须使用同确认快照和原键，不能换键或修订请求。超时、响应不匹配或结果保存失败都不证明Java未提交，结果未知核对留待T824；没有伪造Java尚未实现的操作查询。
+全部错误标为不可自动重试，包含Client网络错误和BaseTool外层预算超时；取消继续向上传播，不启动后台请求。默认同Run重复受既有指纹门禁拦截；T829起显式force_refresh也不能越过一次提交许可，只能使用同确认快照和原键，不能换键、修订请求或重发已消费许可的写入。超时、响应不匹配或保存失败都不证明Java未提交，T824只读核对保持，Java/Client原幂等契约不变。
 
 `tests/integration/tools/test_rework_write_tools.py`通过`make test-tools`收集，使用MockTransport和明确的测试FakeStore验证九种路径/正文、权限/确认门禁、材料复制/完整快照保存冲突、回执绑定、失败检查/退回复核、多轮绑定、去重/原键重放/超时/取消和旧注册表隔离。已通过离线验收，不代表真实Java、数据库确认CAS、生产装配或三端确认已实现。
 
@@ -607,3 +607,48 @@ T826已通过新Schema/编辑/影响边界与旧确认兼容测试、前端类�
 默认15秒总预算覆盖全流程，现有只读Tool负责其有限瞬时重试，Workflow不另加重试循环；固定显式force_refresh读取，不拿同Run去重拒绝或缓存当作最新事实。超时、取消和读取失败均无业务写入；Workflow不接受Store或写Tool依赖，不创建/持久化/确认Approval、不授予执行权、不保存Run/Step/SSE，相关确认与观测留待T828～T830。
 
 `tests/test_rework_draft_workflow.py`已加入`make test-approval`收集，使用实际只读Tool/Client和MockTransport，包含九动作、版本/轮次/材料变化、首轮/后继边界、拒绝自报事实、权限/上游失败、人工检查/退回及材料复制、总预算等用例。本机按当前会话要求未运行pytest、类型/格式或任何质量检查；代码与用例已编写不代表T827验收、真实Java联调或完整确认链路通过，下一最小任务T828，未自动开始。
+
+## 33. T828 独立审查持久化与确认前重读
+
+本节为内部Python能力，不新增HTTP、Agent动作或前端字段。`ReworkConfirmationService.create(command, context)`只保存T827本次Java取证输出，不接收页面自报目标或已有确认凭证；每次动作分别创建审查，开始/检查/复核不继承首轮或上一动作确认。原始PreparedReworkDraft、owner_user_id、run_id、创建/到期时间及revision保存到Agent自有`rework_confirmation_records`，0017迁移与旧approval_records、OperationType、PendingToolName及旧确认服务隔离。
+
+`ReworkConfirmationRequest`只含approval_id和完整最终draft，确认动作必须来自独立人工入口；内部服务不是Tool或模型可调用的自动确认接口，生产入口接线仍待后续。草稿严格校验后，只允许请求材料编辑，动作、原目标版本、轮次/前驱、当前成果/检查绑定不可替换。材料经过复制，原prepared始终保留；最终人工内容单独存confirmed_draft，展示最终影响时必须按该最终草稿重新生成T826审查包，不能拿原请求的影响替代编辑后的影响。
+
+确认顺序：
+
+1. 从服务端上下文按真实Run/Session归属读取审查，用户、Run不匹配或会话失效统一不可访问，不能靠传入另一个用户身份取走材料；当前Run须RUNNING或WAITING_APPROVAL，删除Run后的原审查证据保留但不可确认。
+2. 先拒绝非WAITING_CONFIRMATION，再按expires_at的`now >= expires_at`边界持久化EXPIRED；检查实时REVIEWER及TASK_READ/REWORK_READ和本动作REWORK_WRITE/REVIEW_WRITE，权限撤销不发放任何确认。
+3. 从最终人工材料还原T827只读命令，Java重新确定订单、问题和当前材料；重读会生成临时新草稿，但只用于与原版本/目标和最终请求比较，不更新原审查对象。
+4. 比较订单身份、任务版本/生产状态、来源问题和有效复核、同源活动返工及完整当前ReworkDetail，覆盖轮次/前驱、成果标识/版本/修订、处理说明与原始引用、检查项/身份/结论及复核。非当前轮次、不允许动作或资源消失亦置STALE；超时、上游、响应校验及权限错误保持分类，不伪装成失效或历史成功，原记录仍不可执行。
+5. Java读取结束后重新读取审查及时间，使用完整原快照和revision比较更新；取消、到期、并发确认或内容变动不能被覆盖。数据库取锁后再次检查有效期及Run/会话归属，锁等待耗尽窗口即拒绝，原材料和最终确认事实在同一短事务保存；Java网络查询不在数据库事务内。
+
+状态仅WAITING_CONFIRMATION→CONFIRMED/CANCELLED/EXPIRED/STALE。取消只允许所属用户/Run操作，不要求仍有业务写权限，不调用Java；CONFIRMED保存服务端确认人、时间和最终草稿，快照严格验证成对字段、时间窗口、归属及原材料绑定。读取损坏JSON或重复索引字段与快照冲突时关闭失败，不修复、补造或重置状态。错误正文为安全机器分类，不复制敏感草稿、证据、上游正文或令牌。
+
+CONFIRMED不是EXECUTING：本版没有执行键、写Tool依赖、写权限快照签发或ReworkExecutionStore实现，数据库状态约束也拒绝EXECUTING；不得把确认成功当作返工/检查/复核已经写入。T829仍须实现唯一执行、执行前条件检查及幂等回执关联，T830联动Run/Step/SSE，页面和生产HTTP/Agent按M8.7推进；原生产始终保持COMPLETED，检查通过只预期RESOLVED，复核通过只预期CLOSED并重查其他交付条件。
+
+`make test-rework-confirmation`验证真实只读Tool/Client和显式内存Store的安全路径，另启动隔离PostgreSQL验证实际迁移、九动作持久化、完整比较、STALE/取消/到期及会话撤销、取锁后期限检查；还验证旧迁移/知识表保护。`make test-approval`与`make test-agent-persistence`已纳入新增用例。`make test-rework-confirmation-e2e`通过独占Java和分离Agent测试库验收成果修订变化后的真实STALE、当前材料独立确认和未写业务事实，保留ORDER-003原始快照；直接Java写入只建立测试状态，Agent场景仅建必要运行表，完整迁移由另组验收。
+
+## 34. T829 唯一执行、一次提交与原键核对
+
+本节为内部Python能力，已开发、部分验证，末次隔离库复验和真实Java联调仍待验收；没有新增HTTP、动态Agent或页面入口。`ReworkExecutionInput`只接受approval_id，调用方不能自报最终正文、目标版本、执行键、确认状态或人员。`ReworkExecutionService`显式装配T827只读Workflow、T823写Tool、T824原键查询Tool以及绑定服务端用户/Run的DatabaseReworkExecutionStore，不自动创建或确认草稿。
+
+执行顺序与互斥：
+
+1. 从Agent审查表读取原记录并核对真实Session/Run归属和实时REVIEWER/TASK_READ/REWORK_READ及本动作写权限。只有原CONFIRMED可进入新执行，WAITING/CANCELLED/EXPIRED/STALE拒绝；EXECUTING/SUCCEEDED只返回已保存状态，不重领、不重发。
+2. 从最终人工草稿还原只读命令重新读Java，比对原目标及完整材料，绝不更新原版本、轮次或成果。变化置STALE、到期置EXPIRED且保留确认人和原草稿；读取失败保持错误分类。若其他执行者已领取或成功，竞争者返回已有执行状态，不覆盖为失效。
+3. `claim`在短事务中比较完整原快照和revision，从CONFIRMED原子进入EXECUTING，以原approval_id的稳定摘要生成并冻结唯一execution_key；数据库唯一索引阻止键复用。取锁后重新检查有效期及可操作Run/会话，网络查询不持有该事务。
+4. 写Tool取得严格原执行快照后，调用新增`ReworkExecutionStore.begin_submission(expected)`原子消费一次提交许可。完整原确认、原键、实时上下文、未过期审批及submission_started_at为空都须匹配；成功后保存真实提交开始时间，force_refresh、新Tool实例或并发调用均不能再次消费许可。端口没有旧实现回退分支，FakeStore和测试断言同步实现一次提交。
+5. 许可消费后只向原Java端点发送一次，Java最终检查原版本、状态、权限、幂等及审计；成功回执经Client和轮次/材料校验后，Store再以原执行快照比较并原子保存SUCCEEDED。原始prepared及最终confirmed_draft保持，首次成功回执/Trace不可覆盖，同一原回执迟到保存可接受但不替换首次来源。
+
+0018只扩展M8独立审查表的execution_key及EXECUTING/SUCCEEDED约束，旧approval_records/枚举、Java契约和固定数据保持。执行键只存在已领取记录，完整JSON与索引字段不符时关闭失败；有执行证据时拒绝降级，不能删键或伪造回到待确认。Store跨await前复制严格快照，不能通过可变材料引用替换原请求。
+
+结果未知与恢复：
+
+- 超时、网络错误、响应校验失败、取消或保存冲突不证明Java未提交。保留EXECUTING/原键/已消费提交标记，安全错误只存机器分类和Trace，不回退CONFIRMED、不自动重试或签发新键。UNKNOWN/IN_PROGRESS是Agent证据状态，不能当作业务失败或成功。
+- `reconcile`只对曾领取的原键调用T824只读查询，要求原用户/Run归属、有效会话及REWORK_READ，写权限撤销不阻止合法核对，也不恢复提交权。审批到期仍可核对，查询失败保留分类，found=false仍UNKNOWN，不轮询或重发。
+- 匹配原确认可见绑定的成功回执才保存SUCCEEDED。`ReworkReceiptEvidence.source=WRITE`记录实际写Trace且查询Trace为null；source=LOOKUP只记录实际查询Trace，首次写Trace未知时为null，不伪造首次写入链路。重复核对返回已保存证据，不覆盖首次来源。
+- 跨Agent数据库与Java HTTP不是一个事务。进程可能在消费许可后、实际发送前中断，本版不宣称分布式exactly-once或自动恢复执行；原键未查到回执也不能授权自动重发，必须保留未知边界。真实已提交结果可在审批到期或会话到期后由原受信调用保存，不能因到期丢失已发生证据；新的执行/查询仍按各自权限和会话门禁处理。
+
+`ReworkExecutionReport`仅输出approval_id、SUCCEEDED/IN_PROGRESS/UNKNOWN、原回执来源及安全错误，没有执行键或新业务事实；检查失败和复核退回也可产生真实成功回执，不能将Tool成功误认为检查通过、问题关闭或可交付。Run/Step/SSE/操作日志联动待T830，生产入口待M8.7。
+
+验证入口：`make test-rework-execution`运行隔离PostgreSQL执行与迁移兼容，首轮已通过；之后补充竞争/复制/权限处理，末次隔离库复验待跑。本地Schema/Mock竞争回归、既有审批/Tool/诊断已运行；`make test-rework-execution-e2e`已实现九动作、两轮返工、真实提交后丢响应核对和ORDER-003保护，但自动审批服务用量限制导致未执行，不能写成已通过。下一最小任务仍为T829验收，不进入T830或将M8.6标为完成。
