@@ -270,27 +270,27 @@ lifespan使用`create_diagnosis_read_tool_registry`保留七个动作名称/权�
 `DatabaseReworkConfirmationStore`只操作Agent表，验证真实Run/会话归属，以完整快照和revision比较更新，取行锁后重查有效期及会话；网络取证不持有数据库事务。原始prepared保持，确认人/时间及最终confirmed_draft由服务端保存，最多到CONFIRMED，没有执行键、EXECUTING或写Tool调用，不实现ReworkExecutionStore。唯一执行和回执恢复待T829，Run/Step/SSE待T830，HTTP/Agent/页面未接通。
 `make test-rework-confirmation`验证离线确认和隔离PostgreSQL迁移/持久化，`make test-rework-confirmation-e2e`验证独占Java成果变更后的真实STALE；Agent使用分离测试库，不读取运行库或调用模型，细节见[契约第三十三节](../docs/api/REWORK_CONTRACT.md#33-t828-独立审查持久化与确认前重读)。
 
-## T829 唯一执行与原键回执关联（已开发，待完整验收）
+## T829 唯一执行与原键回执关联（本机验收通过）
 
 `ReworkExecutionService`只接收approval_id，对原CONFIRMED草稿再读Java并比较原版本/完整材料，再经`DatabaseReworkExecutionStore.claim`原子进入EXECUTING、保存稳定唯一键。写Tool新增`begin_submission`消费一次提交许可，跨实例和force_refresh也不能重发；这扩展了T823 Store端口，既有FakeStore和强制刷新断言同步加强，Java幂等契约保持。0018迁移仅扩展M8独立审查表，不扩展旧确认枚举或生产路由。
 写Tool成功即保存SUCCEEDED与原回执，重复执行返回已存状态；超时、取消或保存冲突保留EXECUTING/原键，不推测未提交或自动释放执行权。`reconcile`只用原键查询，未见回执仍UNKNOWN，匹配才保存成功；WRITE保留原写Trace，LOOKUP的首次写Trace为null、仅记录实际查询Trace。核对只要求REWORK_READ及原用户/Run归属，不恢复写权限；领取/实际提交仍要求实时读写权限、有效Run/会话及未过期审批。
-`make test-rework-execution`已通过首轮隔离库验收；后续补充竞争处理、快照复制及读权限边界后，末次隔离库复验待执行。`make test-rework-execution-e2e`已实现真实Java九动作/两轮闭环及提交后丢响应核对，但自动审批服务因用量限制未完成审批，未执行，不视为已通过。历史本地回归/类型检查结果见[STATUS](../docs/STATUS.md)，完整边界见[契约第三十四节](../docs/api/REWORK_CONTRACT.md#34-t829-唯一执行一次提交与原键核对)。T829仍待验收，不接HTTP/Agent/页面；T830新增以下可选内部观测装配。
+执行服务、Store和写/查Tool共享同一受信now，默认真实UTC，不接收页面时间；无时区关闭失败，未来确认和过期门禁保持。2026-11-19的`make test-rework-execution`及`make test-rework-execution-e2e`最终隔离库和真实Java九动作/两轮验收已通过，修复了夹具会话日期、迁移head预期及内部时钟不一致。既有审批、Tool、黄金诊断和相关前端回归也通过，实际结果见[STATUS](../docs/STATUS.md)，完整边界见[契约第三十四节](../docs/api/REWORK_CONTRACT.md#34-t829-唯一执行一次提交与原键核对)。T830专项亦已收口，见下一节；HTTP/Agent/页面仍未接通。
 
-## T830 Run/Step、状态审计与SSE（已开发，未验证）
+## T830 Run/Step、状态审计与SSE（内部接线已验收）
 
 `ObservedReworkService`显式复用确认服务和唯一执行服务，每份独立审查使用专属Run，不接生产依赖。`create/confirm/cancel/execute/reconcile`分别记录Workflow调用Step；等待确认使用Approval Step，领取后才创建Writeback Step。确认通过仍为WAITING_APPROVAL，执行未知或执行中取消保持RUNNING，真实成功回执才结束Run；检查失败或复核退回的真实回执仍是操作成功，业务结论由Java决定。
 
 Store可选注入`ReworkStateObserver`，统一Run→审查行锁顺序，在原短事务内更新审查、Run/Step和`rework_operation_logs`。0019只新增Agent日志表，已有审计拒绝降级；原始人工材料仍留在受控确认快照，日志和Run结果只存固定阶段、修订、错误码及真实回执标识/Trace。未注入观察器的T828/T829服务保持原调用方式，不能把已有未观测审查直接挂到新接线。
 
-可选参数不能绕过已保存的模式：`require_rework_observation_mode`同时检查审批审计和Run的REWORK_APPROVAL绑定，读取与状态更新都拒绝双向误装配；缓存成功报告也须使用原模式。模式不匹配由`ReworkObservationModeError`返回固定、不可重试的`RESPONSE_VALIDATION_ERROR`（500），不包含材料、对象或键，不自动升级、降级或修补。观测入口在创建Step前检查，避免把旧Run误标为失败；两种模式的新建/更新均先锁Run再锁审批，观测专属Run不能新增未观测审批。既有未观测记录继续走原服务，两个模式均需Agent库已有0019表，缺表不作为降级理由；本轮未执行迁移。
+可选参数不能绕过已保存的模式：`require_rework_observation_mode`同时检查审批审计和Run的REWORK_APPROVAL绑定，读取与状态更新都拒绝双向误装配；缓存成功报告也须使用原模式。模式不匹配由`ReworkObservationModeError`返回固定、不可重试的`RESPONSE_VALIDATION_ERROR`（500），不包含材料、对象或键，不自动升级、降级或修补。观测入口在创建Step前检查，避免把旧Run误标为失败；两种模式的新建/更新均先锁Run再锁审批，观测专属Run不能新增未观测审批。既有未观测记录继续走原服务，两个模式均需Agent库已有0019表，缺表不作为降级理由；隔离库迁移已随本轮验收执行，没有执行运行库迁移。
 
 事务提交后尽力发送`rework_progress`，发送异常或超时不改变状态或重发写入；`publish_progress(after_revision=...)`可从审计补发，同审批按revision去重并忽略旧修订，跨调用顺序和即时送达不保证。现有SSE仍为内存流；没有新增持久消息队列、独立聚合日志页或生产入口。调用Step收尾和Tool逻辑次数另用事务累计，进程中断可能遗留运行中Step或漏记计数，不作为实测性能指标。
 
-自动通知经`wait_for_rework_notification`显式放入独立Task，默认1秒等待预算，退出前取消并回收未完成任务；发送子任务自行取消只记录固定日志，不覆盖成功返回或原始业务异常。请求Task真实取消继续传播，已保存回执保持，未知执行权不释放、不重新提交；这不改变审批取消接口。任务回收依赖协作式取消，不保证强制结束不配合取消的外部实现；显式补发仍可向调用者报告发送失败，只能重试通知。新增取消隔离用例仍未运行。
+自动通知经`wait_for_rework_notification`显式放入独立Task，默认1秒等待预算，退出前取消并回收未完成任务；发送子任务自行取消只记录固定日志，不覆盖成功返回或原始业务异常。请求Task真实取消继续传播，已保存回执保持，未知执行权不释放、不重新提交；这不改变审批取消接口。任务回收依赖协作式取消，不保证强制结束不配合取消的外部实现；显式补发仍可向调用者报告发送失败，只能重试通知。取消隔离已通过本轮本地、持久化及专项回归。
 
-补发使用`ReworkProgressSummary`严格Schema，不信任存储JSON：在Run短事务锁内校验完整修订、行索引和原审批/动作绑定、最新快照及Run状态，取锁后重查会话，出事务后才发送。旧游标不能绕过坏历史；整批不一致报`REWORK_AUDIT_INVALID`且不发送部分事件，游标非法或超前报`PARAM_VALIDATION_ERROR`。终态从校验后的审批生成，准备失败另检查受控Step和机器错误白名单，不透传Run任意错误文本；普通业务Run不经此入口生成返工终态。现有事件字段形状保持，新增校验和用例仍未运行。
+补发使用`ReworkProgressSummary`严格Schema，不信任存储JSON：在Run短事务锁内校验完整修订、行索引和原审批/动作绑定、最新快照及Run状态，取锁后重查会话，出事务后才发送。旧游标不能绕过坏历史；整批不一致报`REWORK_AUDIT_INVALID`且不发送部分事件，游标非法或超前报`PARAM_VALIDATION_ERROR`。终态从校验后的审批生成，准备失败另检查受控Step和机器错误白名单，不透传Run任意错误文本；普通业务Run不经此入口生成返工终态。现有事件字段形状保持，相关用例已通过审批和T830专项回归。
 
-定向入口`make test-rework-observability`覆盖Python白名单/事件、隔离Agent数据库和前端事件解码；`make test-rework-execution-e2e`已扩展真实Java九动作、两轮及独立Run/Step/日志断言。用例同时纳入既有审批、持久化和`make test-agent-e2e`入口。按本机不验证约定，本轮未执行这些命令、迁移或质量检查；先在项目电脑补T829末次验收，再验收T830，M8.6保持未完成。完整边界见[契约第三十五节](../docs/api/REWORK_CONTRACT.md#35-t830-runstep状态审计与提交后事件)。
+定向入口`make test-rework-observability`覆盖Python白名单/事件、隔离Agent数据库和前端事件解码；`make test-rework-execution-e2e`验证真实Java九动作、两轮及独立Run/Step/日志断言。用例同时纳入既有审批、持久化和`make test-agent-e2e`入口。2026-11-19上述专项及真实Java入口、`make test-approval test-tools test-diagnosis-rules`、原有`./scripts/test-agent-e2e.sh`均通过；类型、相关lint/格式及停止线复核完成，M8.6已验收，具体结果见[STATUS](../docs/STATUS.md)。下一最小任务T831仅登记待办，未接HTTP/Agent/页面生产入口，完整边界见[契约第三十五节](../docs/api/REWORK_CONTRACT.md#35-t830-runstep状态审计与提交后事件)。
 
 ## KB-02.2 知识授权Client
 

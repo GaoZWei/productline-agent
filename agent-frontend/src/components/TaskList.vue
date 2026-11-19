@@ -2,6 +2,7 @@
 import type { TaskOverview } from "../types/business";
 
 defineProps<{ tasks: TaskOverview[] }>();
+const emit = defineEmits<{ openRework: [taskId: string, reworkId: string] }>();
 
 function statusClass(status: string) {
   if (status === "COMPLETED") return "status-success";
@@ -51,6 +52,7 @@ function statusClass(status: string) {
           <span class="status-pill" :class="statusClass(rework.status)">{{ rework.status }}</span>
           <p>来源问题：{{ rework.sourceIssueId ?? "无" }}</p>
           <p>{{ rework.reason }}</p>
+          <button type="button" :data-rework-id="rework.reworkTaskId" @click="emit('openRework', item.task.taskId, rework.reworkTaskId)">查看返工详情</button>
         </div>
       </section>
     </article>

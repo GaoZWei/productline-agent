@@ -1,6 +1,6 @@
 """M8独立高风险写Tool映射，必须注入受信确认Store，不加入生产Agent。"""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import NoReturn, TypedDict
@@ -66,6 +66,7 @@ class ReworkWriteTool(BaseTool[ReworkWriteInput, ReworkWriteOutput]):
         *,
         name: str,
         timeout: float = 10.0,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         """Tool名称只能来自固定映射，所有动作均HIGH风险且禁止自动重试。"""
 
@@ -88,6 +89,7 @@ class ReworkWriteTool(BaseTool[ReworkWriteInput, ReworkWriteOutput]):
         self._client = client
         self._store = store
         self._operation = operation
+        self._now = now
 
     async def execute(
         self,
@@ -146,7 +148,11 @@ class ReworkWriteTool(BaseTool[ReworkWriteInput, ReworkWriteOutput]):
                 context,
                 403,
             )
-        now = datetime.now(UTC)
+        now = self._now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            self._raise(
+                ToolErrorCode.RESPONSE_VALIDATION_ERROR, "execution clock is invalid", context
+            )
         if (
             approval.status is not ApprovalStatus.EXECUTING
             or approval.confirmed_at is None
@@ -268,11 +274,15 @@ class ReworkWriteTool(BaseTool[ReworkWriteInput, ReworkWriteOutput]):
 
 
 def create_rework_write_tool_registry(
-    client: ReworkHttpClient, store: ReworkExecutionStore, *, timeout: float = 10.0
+    client: ReworkHttpClient,
+    store: ReworkExecutionStore,
+    *,
+    timeout: float = 10.0,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> ToolRegistry:
     """必须显式注入受信Store，独立注册九个Tool，不改变旧写Tool或生产装配。"""
 
     registry = ToolRegistry()
     for name in _OPERATIONS:
-        registry.register(ReworkWriteTool(client, store, name=name, timeout=timeout))
+        registry.register(ReworkWriteTool(client, store, name=name, timeout=timeout, now=now))
     return registry

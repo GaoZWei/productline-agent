@@ -2724,6 +2724,7 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 - `agent-service/app/services/rework_execution_store.py`：`claim/begin_submission`完整快照比较与一次提交，`save_execution_result/save_resolution`保留首次证据，`unknown`保留原执行状态与键。
 - `agent-service/app/schemas/rework_execution.py`：执行输入、报告及`ReworkReceiptEvidence`分离写/查询Trace；`schemas/rework_confirmation.py`和`0018_rework_execution.py`约束领取、提交时间、唯一键及成功证据。
 - `agent-service/app/tools/rework_write.py`与`services/rework_execution.py`：新增begin_submission端口，写Tool在HTTP前消费许可，不以force_refresh绕过。
+- `ReworkExecutionService.__init__`向写Tool工厂及`QueryReworkOperationTool`传递同一受信时钟，`ReworkWriteTool._execute`及查询快照检查使用该时钟并拒绝无时区值，默认仍为真实UTC。
 
 ### 实现的核心功能
 
@@ -2731,6 +2732,7 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 - 首次成功回执和来源不可覆盖，写响应与原键查询竞争时保留已保存证据；未知结果保持EXECUTING及原键，不把没有回执当作未提交或授权重发。
 - 核对只要求返工读权限及归属，查询Trace不伪装成首次写Trace，审批到期不丢弃已提交成功证据或恢复写权限。
 - 独立审查表承载内部状态，旧确认接口、Java契约、固定数据及生产入口保持，已有执行记录拒绝降级；Run/Step及观测联动保持后续边界。
+- 服务、Store与Tool的确认/过期判断使用同一服务端时钟，避免模拟等待后的合法确认被另一层误判为未来时间；不接受页面时间、不跳过未来确认或过期校验，审批到期仍仅允许原键只读核对。
 
 ## 2026-11-19 T830 返工状态与Run/Step、审计及提交后事件联动
 
@@ -2755,3 +2757,25 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 - 补发在Run短事务锁内校验会话、完整修订及审批/Run/动作绑定，出事务才发送；旧游标不能跳过坏记录，整批失败不发部分事件，终态从校验后的事实生成，不透传任意Run错误文本。
 - 旧模式不能省略观察器推进观测审批，观测模式不能接管旧审批；两种模式统一Run→审批锁序，误装配保留旧Run、执行许可和回执，不自动升级、降级或修补。
 - 自动通知子任务自行取消不覆盖成功返回或原始业务异常，退出前回收未完成通知；请求真实取消继续传播，已保存回执和未知执行权保持，不因取消重发写入。
+
+## 2026-11-19 T831 返工详情与成果、检查、复核历史页面
+
+### 核心解决的问题
+
+订单页面原先只能查看已有返工摘要，人员无法核对真实成果版本、人工检查及退回历史，容易把本轮完成当作最终验收。
+新增任务下的只读详情入口，将Java当前材料与每轮完整历史分开展示，并明确缺证据及后续操作边界。
+
+### 实现的核心代码
+
+- `agent-frontend/src/api/reworkClient.ts`：`fetchReworkDetail/fetchReworkHistory`调用既有Java GET，校验资源、结构、当前绑定及单页顺序。
+- `agent-frontend/src/components/ReworkDetailPanel.vue`：读取详情、展示Java允许动作及当前材料，刷新或切换时隔离迟到响应。
+- `agent-frontend/src/components/ReworkHistory.vue`：`load`按服务端序号拼页，检查轮次、跨页顺序及游标循环，失败保留原页游标。
+- `agent-frontend/src/components/ReworkRecord.vue`及`types/rework.ts`：完整展示成果、人工检查、复核记录及原始证据文本，不执行引用。
+- `agent-frontend/src/App.vue`及`components/TaskList.vue`：`openRework`从当前订单任务打开详情，切单意图立即清除选择，旧overview不能重新打开旧返工。
+
+### 实现的核心功能
+
+- 展示Java真实轮次、前驱、任务版本、问题状态和当前成果/检查/复核，分轮展示处理修订、检查及复核历史，手动分页加载。
+- 当前材料与历史独立，旧通过不替代当前缺失结论；存量null和空历史明确提示，不按编号或时间猜轮次或生成检查证据。
+- 错归属、未知动作、不一致绑定、错轮次、倒序/重复和循环游标拒绝，坏页不拼入；错误保留Trace并允许重试原页，切单/切返工/关闭/刷新隔离迟到响应。
+- Java允许动作仅展示，页面只查询，不登记材料或检查、不推进问题/订单状态；人工表单、独立确认及返工Agent写入口留待后续任务。

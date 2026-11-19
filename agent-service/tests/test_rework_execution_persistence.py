@@ -108,7 +108,8 @@ async def test_rework_execution_nine_actions_save_original_receipt_and_never_res
 ) -> None:
     database = Database(migrated_database_url)
     try:
-        await seed(database)
+        # 写Tool使用真实UTC时钟，会话也须从本轮时钟起算，不能在固定日期后失效。
+        await seed(database, now=datetime.now(UTC))
         for index, case in enumerate(CASES):
             h = ExecutionHarness(case)
             try:
@@ -148,7 +149,7 @@ async def test_rework_execution_parallel_and_forced_tool_refresh_share_one_submi
 ) -> None:
     database, h = Database(migrated_database_url), ExecutionHarness()
     try:
-        await seed(database)
+        await seed(database, now=h.now)
         executor = await h.confirmed(database)
         h.pause = True
         value = {"approval_id": "approval-t829"}
@@ -177,7 +178,7 @@ async def test_rework_execution_unknown_queries_original_key_without_rewriting(
 ) -> None:
     database, h = Database(migrated_database_url), ExecutionHarness()
     try:
-        await seed(database)
+        await seed(database, now=h.now)
         executor = await h.confirmed(database)
         if save_failure:
             monkeypatch.setattr(
@@ -219,7 +220,7 @@ async def test_rework_execution_ineligible_records_never_write(
 ) -> None:
     database, h = Database(migrated_database_url), ExecutionHarness(CASES[5])
     try:
-        await seed(database)
+        await seed(database, now=h.now)
         if reason == "unconfirmed":
             await h.shared.aclose()
             h.shared = h.http
@@ -253,7 +254,7 @@ async def test_rework_execution_claim_race_and_downgrade_preserve_execution_evid
 ) -> None:
     database, h = Database(migrated_database_url), ExecutionHarness()
     try:
-        await seed(database)
+        await seed(database, now=h.now)
         executor = await h.confirmed(database)
         assert h.snapshot is not None
         claims = await asyncio.gather(

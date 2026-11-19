@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElAlert, ElButton, ElLoading, ElSkeleton } from "element-plus";
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 
 import AgentWorkspaceDrawer from "./components/AgentWorkspaceDrawer.vue";
@@ -10,10 +10,12 @@ import OrderSwitcher from "./components/OrderSwitcher.vue";
 import QualityIssuesPanel from "./components/QualityIssuesPanel.vue";
 import RunHistoryPage from "./components/RunHistoryPage.vue";
 import TaskList from "./components/TaskList.vue";
+import ReworkDetailPanel from "./components/ReworkDetailPanel.vue";
 import { useOrderStore } from "./stores/orderStore";
 
 const store = useOrderStore();
 const currentView = ref<"business" | "history">("business");
+const selectedRework = ref<{ orderId: string; taskId: string; reworkId: string }>();
 const vLoading = ElLoading.directive;
 const {
   orders,
@@ -26,6 +28,15 @@ const {
 } = storeToRefs(store);
 
 onMounted(() => store.initialize());
+// 切单意图一发生就隔离旧详情，不等旧overview被新响应替换。
+watch([selectedOrderId, currentView], () => { selectedRework.value = undefined; }, { flush: "sync" });
+watch(overview, () => { selectedRework.value = undefined; });
+function openRework(taskId: string, reworkId: string) {
+  if (detailLoading.value || !overview.value || overview.value.order.orderId !== selectedOrderId.value) return;
+  const task = overview.value.tasks.find(item => item.task.taskId === taskId && item.task.orderId === selectedOrderId.value);
+  if (!task?.reworkTasks.some(item => item.taskId === taskId && item.reworkTaskId === reworkId)) return;
+  selectedRework.value = { orderId: selectedOrderId.value, taskId, reworkId };
+}
 </script>
 
 <template>
@@ -103,12 +114,13 @@ onMounted(() => store.initialize());
           <div v-loading="detailLoading" element-loading-text="正在读取最新业务快照">
             <OrderSummary :order="overview.order" />
             <div class="dashboard-grid">
-              <TaskList :tasks="overview.tasks" />
+              <TaskList :tasks="overview.tasks" @open-rework="openRework" />
               <div class="side-stack">
                 <QualityIssuesPanel :tasks="overview.tasks" />
                 <DeliveryStatusPanel :records="overview.deliveryRecords" />
               </div>
             </div>
+            <ReworkDetailPanel v-if="selectedRework" :order-id="selectedRework.orderId" :task-id="selectedRework.taskId" :rework-id="selectedRework.reworkId" @close="selectedRework = undefined" />
           </div>
         </template>
 

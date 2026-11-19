@@ -231,6 +231,32 @@ input {
   overflow-wrap: anywhere;
 }
 .rework-item p { margin: 6px 0; }
+.rework-item button, .rework-detail-panel button {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #244a73;
+  cursor: pointer;
+  padding: 7px 12px;
+}
+.rework-detail-panel { margin-top: 24px; overflow-wrap: anywhere; }
+.rework-detail-panel button:disabled { opacity: 0.6; cursor: wait; }
+.rework-detail-panel button:focus-visible, .rework-item button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.rework-detail-actions, .rework-allowed-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.rework-allowed-actions { list-style: none; padding: 0; }
+.rework-allowed-actions li { background: #eef4fb; border-radius: 6px; padding: 6px 10px; }
+.rework-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+.rework-facts dt { color: #64748b; font-size: 12px; }
+.rework-facts dd { margin: 6px 0; }
+.rework-detail-panel .original-text { white-space: pre-wrap; }
+.rework-boundary { padding: 12px; background: #fff8e6; border-radius: 8px; line-height: 1.7; }
+.rework-detail-panel .muted-copy, .rework-detail-panel small { color: #64748b; font-size: 12px; line-height: 1.7; }
+.rework-histories { display: grid; gap: 16px; }
+.rework-history { border-top: 1px solid #d8dde7; padding-top: 8px; }
+.rework-record-list { list-style: none; padding: 0; }
+.rework-record { border-left: 3px solid #b8cbe0; padding: 10px 14px; margin: 12px 0; background: #f7f9fc; }
+.rework-check-item { margin: 10px 0; }
+.rework-detail-panel small { display: block; }
 
 .order-button {
   position: relative;

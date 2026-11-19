@@ -46,7 +46,7 @@ def rework_summary(snapshot: ReworkConfirmationSnapshot) -> dict[str, str | int 
     }
     evidence = snapshot.receipt_evidence
     if evidence is not None:
-        # 核对Trace与首次写Trace分开；检查失败是已接受的业务事实，不是调用失败。
+        # 核对Trace与首次写Trace分开，检查失败是已接受的业务事实，不是调用失败。
         result.update(
             receipt_source=evidence.source,
             receipt_operation_id=evidence.receipt.operation_id,
@@ -135,7 +135,7 @@ class ReworkStateObserver:
         except asyncio.CancelledError:
             task = asyncio.current_task()
             if task is None or task.cancelling():
-                # 调用者真实取消仍须传播；不能用通知隔离吞掉请求的取消信号。
+                # 调用者真实取消仍须传播，不能用通知隔离吞掉请求的取消信号。
                 raise
             # 子任务取消不代表业务被取消，更不能覆盖已提交的状态或原回执。
             logging.getLogger(__name__).warning("rework_progress_delivery_cancelled")
@@ -216,7 +216,9 @@ class ReworkStateObserver:
                 await self._step(session, snapshot, phase, AgentStepType.WORKFLOW, now=now)
             await self._complete(session, snapshot, phase, now=now, error_code=code)
             run.status = (
-                AgentRunStatus.CANCELLED if snapshot.status == "CANCELLED" else AgentRunStatus.FAILED
+                AgentRunStatus.CANCELLED
+                if snapshot.status == "CANCELLED"
+                else AgentRunStatus.FAILED
             )
             run.termination_reason = code
             run.error_code = code

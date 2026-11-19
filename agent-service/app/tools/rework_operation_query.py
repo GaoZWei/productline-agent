@@ -1,5 +1,6 @@
 """T824独立只读核对Tool，不写业务、不取得执行权、不恢复Approval终态。"""
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import NoReturn
 
@@ -34,6 +35,7 @@ class QueryReworkOperationTool(
         *,
         timeout: float = 5.0,
         retry_policy: RetryPolicy | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         """沿用只读权限/去重/总预算和最多一次瞬时重试，保持独立注册。"""
 
@@ -47,6 +49,7 @@ class QueryReworkOperationTool(
             retry_policy=retry_policy,
         )
         self._store = store
+        self._now = now
 
     async def _snapshot(
         self, tool_input: ReworkOperationLookupInput, context: ToolContext
@@ -84,11 +87,16 @@ class QueryReworkOperationTool(
                 "approval does not belong to this confirmed user and run",
                 context,
             )
+        now = self._now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            self._raise(
+                ToolErrorCode.RESPONSE_VALIDATION_ERROR, "execution clock is invalid", context
+            )
         if (
             approval.status
             not in {ApprovalStatus.EXECUTING, ApprovalStatus.SUCCEEDED, ApprovalStatus.FAILED}
             or approval.confirmed_at is None
-            or approval.confirmed_at > datetime.now(UTC)
+            or approval.confirmed_at > now
             or approval.confirmed_at >= approval.expires_at
         ):
             self._raise(
@@ -149,11 +157,12 @@ def create_rework_operation_query_tool_registry(
     *,
     timeout: float = 5.0,
     retry_policy: RetryPolicy | None = None,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> ToolRegistry:
     """仅显式创建一个独立核对Tool，不改旧注册表、生产白名单或lifespan。"""
 
     registry = ToolRegistry()
     registry.register(
-        QueryReworkOperationTool(client, store, timeout=timeout, retry_policy=retry_policy)
+        QueryReworkOperationTool(client, store, timeout=timeout, retry_policy=retry_policy, now=now)
     )
     return registry

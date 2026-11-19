@@ -1,4 +1,4 @@
-"""T830显式内部装配；不注册生产HTTP、Agent路由或前端操作入口。"""
+"""T830显式内部装配，不注册生产HTTP、Agent路由或前端操作入口。"""
 
 import asyncio
 import logging
@@ -102,7 +102,7 @@ class ObservedReworkService:
         )
 
     async def cancel(self, approval_id: str) -> ReworkConfirmationSnapshot:
-        """取消独立审查；已确认或已领取的操作不能被取消覆盖。"""
+        """取消独立审查，已确认或已领取的操作不能被取消覆盖。"""
 
         return await self._invoke(
             "cancel", lambda context: self._confirmation.cancel(approval_id, context=context)
@@ -121,7 +121,7 @@ class ObservedReworkService:
         return await self._invoke("execute", lambda context: self._executor(context).execute(value))
 
     async def reconcile(self, value: object) -> ReworkExecutionReport:
-        """仅查询原键；未见回执时保留运行中状态，不重发业务写入。"""
+        """仅查询原键，未见回执时保留运行中状态，不重发业务写入。"""
 
         return await self._invoke(
             "reconcile", lambda context: self._executor(context).reconcile(value)
@@ -154,7 +154,10 @@ class ObservedReworkService:
                 ).all()
             )
             if approvals:
-                if len(approvals) != 1 or approvals[0].owner_user_id != self._context.identity.user_id:
+                if (
+                    len(approvals) != 1
+                    or approvals[0].owner_user_id != self._context.identity.user_id
+                ):
                     raise ReworkObservationModeError()
                 try:
                     stored = DatabaseReworkConfirmationStore._snapshot(approvals[0])
@@ -201,10 +204,8 @@ class ObservedReworkService:
             run.started_at = run.started_at or now
             return identity, revision if revision is not None else -1
 
-    async def _finish(
-        self, step_id: str | None, *, count: int, error_code: str | None
-    ) -> None:
-        """调用错误只结束本次Step；未知写结果不能被标记为Run失败。"""
+    async def _finish(self, step_id: str | None, *, count: int, error_code: str | None) -> None:
+        """调用错误只结束本次Step，未知写结果不能被标记为Run失败。"""
 
         if step_id is None:
             return
@@ -264,7 +265,9 @@ class ObservedReworkService:
         finally:
             try:
                 await self._finish(
-                    step_id, count=context.tool_call_ledger.recorded_call_count, error_code=error_code
+                    step_id,
+                    count=context.tool_call_ledger.recorded_call_count,
+                    error_code=error_code,
                 )
                 await wait_for_rework_notification(self.publish_progress(after_revision=revision))
             except asyncio.CancelledError:
@@ -274,7 +277,7 @@ class ObservedReworkService:
                 # 收尾或通知子任务的取消不应掩盖主调用已经确定的返回值或原异常。
                 _logger.warning("rework_observation_delivery_cancelled")
             except Exception:
-                # 仅固定事件名，不记录异常正文、草稿或业务请求；不能因此再次提交。
+                # 仅固定事件名，不记录异常正文、草稿或业务请求，不能因此再次提交。
                 _logger.warning("rework_observation_delivery_failed")
 
     async def publish_progress(self, *, after_revision: int = -1) -> None:
@@ -301,7 +304,7 @@ class ObservedReworkService:
             )
             if run is None:
                 return
-            # 锁等待可能跨过会话期限；取锁后按新时钟重查，不延长补发授权。
+            # 锁等待可能跨过会话期限，取锁后按新时钟重查，不延长补发授权。
             accessible = await session.scalar(
                 select(AgentSession.session_id).where(
                     AgentSession.session_id == run.session_id,
@@ -322,7 +325,7 @@ class ObservedReworkService:
             if after_revision > latest_revision:
                 raise ReworkConfirmationError("PARAM_VALIDATION_ERROR", status_code=400)
             payloads = [item.event_data() for item in summaries if item.revision > after_revision]
-        # 已退出事务并释放Run锁后才发送；坏批次不会先发一半再报告失败。
+        # 已退出事务并释放Run锁后才发送，坏批次不会先发一半再报告失败。
         for data in payloads:
             await self._sink.publish(
                 RunEventType.REWORK_PROGRESS, run_id=self._context.run_id, data=data
@@ -360,7 +363,7 @@ class ObservedReworkService:
             ).all()
         )
         if not approvals and not records:
-            # 初次准备失败还没有审批；其他业务Run不能经此入口冒充返工终态。
+            # 初次准备失败还没有审批，其他业务Run不能经此入口冒充返工终态。
             step = await session.get(AgentStep, run.error_step) if run.error_step else None
             if step is None or step.run_id != run.run_id or step.step_name != "rework_prepare":
                 return None

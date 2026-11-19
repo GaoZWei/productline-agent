@@ -865,7 +865,7 @@ async def test_managed_knowledge_downgrade_preserves_drafts_and_refuses_sealed_v
         ).scalar_one() == "PUBLISHED"
         assert (
             await connection.execute(text("SELECT version_num FROM agent_alembic_version"))
-        ).scalar_one() == "0018_rework_execution"
+        ).scalar_one() == "0019_rework_observability"
 
 
 @pytest.mark.integration

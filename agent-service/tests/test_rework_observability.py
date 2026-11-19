@@ -1,4 +1,4 @@
-"""返工事件白名单及通知故障隔离；不替代数据库与真实Java验收。"""
+"""返工事件白名单及通知故障隔离，不替代数据库与真实Java验收。"""
 
 import asyncio
 import json
@@ -94,7 +94,12 @@ async def test_rework_observability_summary_uses_only_allowed_fields(case: Case)
         for snapshot in (waiting, confirmed, executing):
             summary = rework_summary(snapshot)
             assert set(summary) == {
-                "approval_id", "revision", "operation", "status", "phase", "error_code"
+                "approval_id",
+                "revision",
+                "operation",
+                "status",
+                "phase",
+                "error_code",
             }
             assert summary["operation"] == case.operation
             encoded = json.dumps(summary)
@@ -215,10 +220,20 @@ async def test_rework_observability_unknown_drops_error_body_and_execution_key()
         await h.shared.aclose()
 
 
-@pytest.mark.parametrize("change", [
-    "extra", "boolean_revision", "string_revision", "unsafe_revision", "phase",
-    "unfinished_receipt", "unknown_error", "error_body", "missing_field",
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "extra",
+        "boolean_revision",
+        "string_revision",
+        "unsafe_revision",
+        "phase",
+        "unfinished_receipt",
+        "unknown_error",
+        "error_body",
+        "missing_field",
+    ],
+)
 async def test_rework_observability_progress_schema_rejects_untrusted_json(change: str) -> None:
     h = Harness()
     try:
@@ -276,10 +291,20 @@ async def test_rework_observability_progress_schema_preserves_lookup_trace_bound
         assert data == raw and data["write_java_trace_id"] is None
 
 
-@pytest.mark.parametrize("change", [
-    "valid", "extra", "approval", "revision", "row_phase", "run", "operation", "latest",
-    "missing_history",
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "valid",
+        "extra",
+        "approval",
+        "revision",
+        "row_phase",
+        "run",
+        "operation",
+        "latest",
+        "missing_history",
+    ],
+)
 async def test_rework_observability_replay_validates_row_binding_and_complete_batch(
     change: str,
 ) -> None:
@@ -312,7 +337,7 @@ async def test_rework_observability_replay_validates_row_binding_and_complete_ba
             row.phase = "CONFIRMED"
         rows = [] if change == "missing_history" else [row]
         if change != "valid":
-            with pytest.raises(ValueError, match="^rework audit history is inconsistent$"):
+            with pytest.raises(ValueError, match=r"^rework audit history is inconsistent$"):
                 validated_rework_replay(rows, snapshot=snapshot)
         else:
             parsed = validated_rework_replay(rows, snapshot=snapshot)

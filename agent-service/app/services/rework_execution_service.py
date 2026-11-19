@@ -45,8 +45,9 @@ class ReworkExecutionService:
             task_tools=create_read_tool_registry(client),
             rework_tools=create_rework_read_tool_registry(rework),
         )
-        self._writes = create_rework_write_tool_registry(rework, self.store)
-        self._query = QueryReworkOperationTool(rework, self.store)
+        # 确认、数据库与Tool共用受信时钟，不能把模拟等待后的确认误判为未来时间。
+        self._writes = create_rework_write_tool_registry(rework, self.store, now=now)
+        self._query = QueryReworkOperationTool(rework, self.store, now=now)
 
     async def _require(
         self, value: object, *, read_only: bool = False

@@ -102,7 +102,9 @@ class DatabaseReworkConfirmationStore:
                 )
                 if run is None:
                     return False
-                await require_rework_creation_mode(session, run, observed=self._observer is not None)
+                await require_rework_creation_mode(
+                    session, run, observed=self._observer is not None
+                )
                 current_time = self._now()
                 if current_time.tzinfo is None or current_time.utcoffset() is None:
                     raise ValueError("confirmation store clock must have a timezone")
