@@ -31,6 +31,7 @@ from app.models.managed_knowledge_processing import (
 )
 from app.models.operation_log import OperationLogRecord
 from app.models.rework_confirmation import ReworkConfirmationRecord
+from app.models.rework_operation_log import ReworkOperationLog
 
 __all__ = [
     "AgentMessage",
@@ -57,4 +58,5 @@ __all__ = [
     "OperationType",
     "PendingToolName",
     "ReworkConfirmationRecord",
+    "ReworkOperationLog",
 ]

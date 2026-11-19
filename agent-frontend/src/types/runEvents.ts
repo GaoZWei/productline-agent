@@ -17,6 +17,7 @@ export type RunEventType =
   | "approval_required"
   | "writeback_started"
   | "writeback_completed"
+  | "rework_progress"
   | "run_completed"
   | "run_failed";
 // 描述一条完整事件结构

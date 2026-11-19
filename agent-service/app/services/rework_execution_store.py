@@ -16,6 +16,7 @@ from app.schemas.rework_execution import ReworkReceiptEvidence
 from app.schemas.rework_operation_query import ReworkOperationResolution
 from app.schemas.rework_write_tools import ReworkExecutionSnapshot, ReworkWriteOutput
 from app.services.rework_confirmation_store import DatabaseReworkConfirmationStore
+from app.services.rework_observation import ReworkStateObserver
 from app.services.rework_receipts import validate_rework_receipt_binding
 from app.tools.models import ToolContext, ToolError
 
@@ -30,8 +31,10 @@ class DatabaseReworkExecutionStore:
         *,
         context: ToolContext,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        observer: ReworkStateObserver | None = None,
     ) -> None:
         self._database, self._client, self.context, self._now = database, client, context, now
+        self._observer = observer
 
     def clock(self) -> datetime:
         """所有提交前时钟必须有时区，拒绝错误扩大执行窗口。"""
@@ -100,6 +103,10 @@ class DatabaseReworkExecutionStore:
         async with self._database.session() as session, session.begin():
             if not await self._owner(session, allow_expired=not before_submit):
                 return None
+            if self._observer is not None:
+                await session.scalar(
+                    select(AgentRun).where(AgentRun.run_id == expected.run_id).with_for_update()
+                )
             row = await session.scalar(
                 select(ReworkConfirmationRecord)
                 .where(
@@ -129,7 +136,11 @@ class DatabaseReworkExecutionStore:
                 updated.revision,
                 updated.execution_key,
             )
-            return updated
+            if self._observer is not None:
+                await self._observer.record(session, updated, now=now)
+        if self._observer is not None:
+            await self._observer.publish(updated)
+        return updated
 
     async def claim(
         self, expected: ReworkConfirmationSnapshot

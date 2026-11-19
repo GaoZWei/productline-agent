@@ -274,7 +274,17 @@ lifespan使用`create_diagnosis_read_tool_registry`保留七个动作名称/权�
 
 `ReworkExecutionService`只接收approval_id，对原CONFIRMED草稿再读Java并比较原版本/完整材料，再经`DatabaseReworkExecutionStore.claim`原子进入EXECUTING、保存稳定唯一键。写Tool新增`begin_submission`消费一次提交许可，跨实例和force_refresh也不能重发；这扩展了T823 Store端口，既有FakeStore和强制刷新断言同步加强，Java幂等契约保持。0018迁移仅扩展M8独立审查表，不扩展旧确认枚举或生产路由。
 写Tool成功即保存SUCCEEDED与原回执，重复执行返回已存状态；超时、取消或保存冲突保留EXECUTING/原键，不推测未提交或自动释放执行权。`reconcile`只用原键查询，未见回执仍UNKNOWN，匹配才保存成功；WRITE保留原写Trace，LOOKUP的首次写Trace为null、仅记录实际查询Trace。核对只要求REWORK_READ及原用户/Run归属，不恢复写权限；领取/实际提交仍要求实时读写权限、有效Run/会话及未过期审批。
-`make test-rework-execution`已通过首轮隔离库验收；后续补充竞争处理、快照复制及读权限边界后，末次隔离库复验待执行。`make test-rework-execution-e2e`已实现真实Java九动作/两轮闭环及提交后丢响应核对，但自动审批服务因用量限制未完成审批，未执行，不视为已通过。当前本地回归/类型检查结果见[STATUS](../docs/STATUS.md)，完整边界见[契约第三十四节](../docs/api/REWORK_CONTRACT.md#34-t829-唯一执行一次提交与原键核对)。T829不接HTTP/Agent/页面，Run/Step/SSE/操作日志留待T830，先完成T829验收。
+`make test-rework-execution`已通过首轮隔离库验收；后续补充竞争处理、快照复制及读权限边界后，末次隔离库复验待执行。`make test-rework-execution-e2e`已实现真实Java九动作/两轮闭环及提交后丢响应核对，但自动审批服务因用量限制未完成审批，未执行，不视为已通过。历史本地回归/类型检查结果见[STATUS](../docs/STATUS.md)，完整边界见[契约第三十四节](../docs/api/REWORK_CONTRACT.md#34-t829-唯一执行一次提交与原键核对)。T829仍待验收，不接HTTP/Agent/页面；T830新增以下可选内部观测装配。
+
+## T830 Run/Step、状态审计与SSE（已开发，未验证）
+
+`ObservedReworkService`显式复用确认服务和唯一执行服务，每份独立审查使用专属Run，不接生产依赖。`create/confirm/cancel/execute/reconcile`分别记录Workflow调用Step；等待确认使用Approval Step，领取后才创建Writeback Step。确认通过仍为WAITING_APPROVAL，执行未知或执行中取消保持RUNNING，真实成功回执才结束Run；检查失败或复核退回的真实回执仍是操作成功，业务结论由Java决定。
+
+Store可选注入`ReworkStateObserver`，统一Run→审查行锁顺序，在原短事务内更新审查、Run/Step和`rework_operation_logs`。0019只新增Agent日志表，已有审计拒绝降级；原始人工材料仍留在受控确认快照，日志和Run结果只存固定阶段、修订、错误码及真实回执标识/Trace。未注入观察器的T828/T829服务保持原调用方式，不能把已有未观测审查直接挂到新接线。
+
+事务提交后尽力发送`rework_progress`，发送异常或超时不改变状态或重发写入；`publish_progress(after_revision=...)`可从审计补发，同审批按revision去重并忽略旧修订，跨调用顺序和即时送达不保证。现有SSE仍为内存流；没有新增持久消息队列、独立聚合日志页或生产入口。调用Step收尾和Tool逻辑次数另用事务累计，进程中断可能遗留运行中Step或漏记计数，不作为实测性能指标。
+
+定向入口`make test-rework-observability`覆盖Python白名单/事件、隔离Agent数据库和前端事件解码；`make test-rework-execution-e2e`已扩展真实Java九动作、两轮及独立Run/Step/日志断言。用例同时纳入既有审批、持久化和`make test-agent-e2e`入口。按本机不验证约定，本轮未执行这些命令、迁移或质量检查；先在项目电脑补T829末次验收，再验收T830，M8.6保持未完成。完整边界见[契约第三十五节](../docs/api/REWORK_CONTRACT.md#35-t830-runstep状态审计与提交后事件)。
 
 ## KB-02.2 知识授权Client
 

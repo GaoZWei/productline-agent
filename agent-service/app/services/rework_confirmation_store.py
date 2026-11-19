@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import Database
 from app.models import AgentRun, AgentRunStatus, AgentSession, ReworkConfirmationRecord
 from app.schemas.rework_confirmation import ReworkConfirmationSnapshot
+from app.services.rework_observation import ReworkStateObserver
 from app.tools.models import ToolContext
 
 
@@ -46,10 +47,15 @@ class DatabaseReworkConfirmationStore:
     """只读写Agent自有表，Java网络查询不放入数据库事务。"""
 
     def __init__(
-        self, database: Database, *, now: Callable[[], datetime] = lambda: datetime.now(UTC)
+        self,
+        database: Database,
+        *,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        observer: ReworkStateObserver | None = None,
     ) -> None:
         self._database = database
         self._now = now
+        self._observer = observer
 
     @staticmethod
     async def _accessible(session: AsyncSession, context: ToolContext, now: datetime) -> bool:
@@ -86,6 +92,16 @@ class DatabaseReworkConfirmationStore:
             async with self._database.session() as session, session.begin():
                 if not await self._accessible(session, context, now):
                     return False
+                if self._observer is not None:
+                    # 统一先锁Run再锁审批，避免并发创建和状态转换形成反向锁序。
+                    await session.scalar(
+                        select(AgentRun).where(AgentRun.run_id == snapshot.run_id).with_for_update()
+                    )
+                    current_time = self._now()
+                    if current_time >= snapshot.expires_at or not await self._accessible(
+                        session, context, current_time
+                    ):
+                        return False
                 session.add(
                     ReworkConfirmationRecord(
                         approval_id=snapshot.approval_id,
@@ -99,6 +115,10 @@ class DatabaseReworkConfirmationStore:
                     )
                 )
                 await session.flush()
+                if self._observer is not None:
+                    await self._observer.record(session, snapshot, now=now)
+            if self._observer is not None:
+                await self._observer.publish(snapshot)
             return True
         except IntegrityError:
             return False
@@ -157,6 +177,10 @@ class DatabaseReworkConfirmationStore:
         async with self._database.session() as session, session.begin():
             if not await self._accessible(session, context, now):
                 return False
+            if self._observer is not None:
+                await session.scalar(
+                    select(AgentRun).where(AgentRun.run_id == expected.run_id).with_for_update()
+                )
             row = await session.scalar(
                 select(ReworkConfirmationRecord)
                 .where(
@@ -178,7 +202,11 @@ class DatabaseReworkConfirmationStore:
                 return False
             row.snapshot = updated.model_dump(mode="json")
             row.status, row.revision = updated.status, updated.revision
-            return True
+            if self._observer is not None:
+                await self._observer.record(session, updated, now=current_time)
+        if self._observer is not None:
+            await self._observer.publish(updated)
+        return True
 
     @staticmethod
     def _snapshot(row: ReworkConfirmationRecord) -> ReworkConfirmationSnapshot:

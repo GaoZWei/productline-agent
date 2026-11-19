@@ -2731,3 +2731,22 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 - 首次成功回执和来源不可覆盖，写响应与原键查询竞争时保留已保存证据；未知结果保持EXECUTING及原键，不把没有回执当作未提交或授权重发。
 - 核对只要求返工读权限及归属，查询Trace不伪装成首次写Trace，审批到期不丢弃已提交成功证据或恢复写权限。
 - 独立审查表承载内部状态，旧确认接口、Java契约、固定数据及生产入口保持，已有执行记录拒绝降级；Run/Step及观测联动保持后续边界。
+
+## 2026-11-19 T830 返工状态与Run/Step、审计及提交后事件联动
+
+### 核心解决的问题
+
+独立确认和唯一执行已有记录，但等待人工、领取写入和结果未知还不能通过同一Run定位，通知异常也容易被误判为业务失败。
+新增显式内部装配，在审批状态事务内同步职责Step和白名单审计，将人工等待与真实执行分开，并在提交后通知进度。
+
+### 实现的核心代码
+
+- `agent-service/app/services/observed_rework.py`：`ObservedReworkService`复用原确认/执行服务，记录每次调用Step、逻辑Tool次数和可补发的安全进度。
+- `agent-service/app/services/rework_observation.py`：`ReworkStateObserver.record/publish`与`rework_summary`联动状态、Run/Step和白名单摘要；两个Store可选注入，同事务记录、提交后发布。
+- `agent-service/app/models/rework_operation_log.py`及`0019_rework_observability.py`：独立审批修订审计和已有证据降级保护；前后端事件契约新增`rework_progress`。
+
+### 实现的核心功能
+
+- 每份审查使用专属Run，等待确认和写回各有Step与耗时；确认通过仍等待显式执行，取消/失效有机器分类，未知结果及执行中取消保持运行中。
+- 审查转换、职责Step、Run和状态审计同事务，采用一致的Run→审批锁序；日志和事件仅投影固定字段及真实回执来源/Trace，材料仍保留在受控确认快照。
+- 提交后尽力通知，发送失败不回滚状态或重发写入；可由审计修订补发，允许重复，状态以数据库为准，不引入持久消息队列或生产HTTP/页面入口。

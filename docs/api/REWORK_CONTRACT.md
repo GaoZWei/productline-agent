@@ -649,6 +649,28 @@ CONFIRMED不是EXECUTING：本版没有执行键、写Tool依赖、写权限快�
 - 匹配原确认可见绑定的成功回执才保存SUCCEEDED。`ReworkReceiptEvidence.source=WRITE`记录实际写Trace且查询Trace为null；source=LOOKUP只记录实际查询Trace，首次写Trace未知时为null，不伪造首次写入链路。重复核对返回已保存证据，不覆盖首次来源。
 - 跨Agent数据库与Java HTTP不是一个事务。进程可能在消费许可后、实际发送前中断，本版不宣称分布式exactly-once或自动恢复执行；原键未查到回执也不能授权自动重发，必须保留未知边界。真实已提交结果可在审批到期或会话到期后由原受信调用保存，不能因到期丢失已发生证据；新的执行/查询仍按各自权限和会话门禁处理。
 
-`ReworkExecutionReport`仅输出approval_id、SUCCEEDED/IN_PROGRESS/UNKNOWN、原回执来源及安全错误，没有执行键或新业务事实；检查失败和复核退回也可产生真实成功回执，不能将Tool成功误认为检查通过、问题关闭或可交付。Run/Step/SSE/操作日志联动待T830，生产入口待M8.7。
+`ReworkExecutionReport`仅输出approval_id、SUCCEEDED/IN_PROGRESS/UNKNOWN、原回执来源及安全错误，没有执行键或新业务事实；检查失败和复核退回也可产生真实成功回执，不能将Tool成功误认为检查通过、问题关闭或可交付。T830新增可选内部观测接线，见第三十五节；生产入口待M8.7。
 
-验证入口：`make test-rework-execution`运行隔离PostgreSQL执行与迁移兼容，首轮已通过；之后补充竞争/复制/权限处理，末次隔离库复验待跑。本地Schema/Mock竞争回归、既有审批/Tool/诊断已运行；`make test-rework-execution-e2e`已实现九动作、两轮返工、真实提交后丢响应核对和ORDER-003保护，但自动审批服务用量限制导致未执行，不能写成已通过。下一最小任务仍为T829验收，不进入T830或将M8.6标为完成。
+验证入口：`make test-rework-execution`运行隔离PostgreSQL执行与迁移兼容，首轮已通过；之后补充竞争/复制/权限处理，末次隔离库复验待跑。本地Schema/Mock竞争回归、既有审批/Tool/诊断已运行；`make test-rework-execution-e2e`已实现九动作、两轮返工、真实提交后丢响应核对和ORDER-003保护，但自动审批服务用量限制导致未执行，不能写成已通过。2026-11-19按用户要求继续T830内部开发，T829待验收事实保留，不将M8.6标为完成。
+
+## 35. T830 Run/Step、状态审计与提交后事件
+
+本节为已开发、未验证的内部接线，不新增HTTP接口。`ObservedReworkService`接收服务端上下文和原有命令/审查ID，复用T828确认及T829执行服务；每份独立审查绑定专属Run，拒绝一个Run挂多份审查或中途接管未观测审查，避免一次动作结束其他待确认操作。
+
+| 审查/执行事实 | Run | 持久职责Step与日志 |
+|---|---|---|
+| WAITING_CONFIRMATION | WAITING_APPROVAL | Approval等待Step运行中；审计原修订 |
+| CONFIRMED | WAITING_APPROVAL | 等待Step完成，未创建写回Step |
+| EXECUTING、领取/消费提交许可 | RUNNING | 新Writeback Step；分别记录CLAIMED/SUBMITTING，消费许可不证明Java已收到 |
+| 结果未知或执行调用取消 | RUNNING | Writeback保持运行中；错误分类在调用Step或UNKNOWN修订，不回退确认或授权重发 |
+| 已保存匹配成功回执 | SUCCEEDED | Writeback完成；保留WRITE/LOOKUP与真实Trace；不等同业务检查通过 |
+| CANCELLED | CANCELLED | 等待Step失败，记录APPROVAL_CANCELLED，不调用写Tool |
+| STALE/EXPIRED | FAILED | 等待Step失败；若等待已完成则新增失效Step，不篡改人工确认历史 |
+
+每次取证、确认、执行、核对另设Workflow调用Step，安全错误只记录机器分类。初次准备失败且未产生审查时结束该Run；已有审查的调用错误不自动把未知写入判为失败。每次调用使用新的受信Tool账本，累计真实获准的逻辑调用数，HTTP重试不另算逻辑调用，未使用模型不填造Token指标。调用Step收尾和计数另用短事务，崩溃时可能遗漏，不能把它们当作跨服务原子审计或实测质量/性能指标。
+
+观察器可选注入两种Store，观察模式统一先锁Run再锁审批，网络取证及写HTTP均在事务外。审查转换、职责Step、Run状态与操作日志在同一事务，失败全部回滚。0019新增`rework_operation_logs`，主键为审批ID和修订，应用只追加白名单记录；它与旧`agent_operation_logs`动作枚举/外键隔离，没有独立聚合页。日志不包含请求、人工说明、原件引用、完整回执、用户身份、执行键或错误正文；只记录阶段、修订、动作、错误码及真实回执标识/来源/Trace。有审计记录时拒绝降级，不能静默删掉证据。
+
+提交后限时尽力发送`rework_progress`，事件data与审计使用同一白名单。Run完成/失败另发已有终态事件，UNKNOWN进度不是终态；前端只新增类型和解码，未接返工页面。通知失败或超时不会回滚已提交状态、释放许可或重发业务写入。`publish_progress(after_revision)`由服务端受信调用，检查真实归属、会话及返工读权限，从审计补发；事件可能重复或跨调用乱序，消费者须按审批ID/修订去重并忽略旧修订，以数据库状态为准。现有内存SSE不保证进程重启后的协议事件ID续传，本版未实现持久消息队列。
+
+`make test-rework-observability`覆盖白名单、九动作、等待/执行分离、未知恢复、竞争、通知失败、事务回滚、降级保护和前端解码；真实Java入口`make test-rework-execution-e2e`扩展独立Run/Step/日志断言并保留两轮和ORDER-003保护。全部新用例本轮未运行，未执行0019迁移或质量检查；T829末次验收仍待完成，之后再验收T830，不进入M8.7或把M8.6视为完成。

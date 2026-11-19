@@ -13,6 +13,7 @@ from app.schemas.rework_confirmation import ReworkConfirmationSnapshot
 from app.schemas.rework_execution import ReworkExecutionInput, ReworkExecutionReport
 from app.services.rework_confirmation import ReworkConfirmationError, ReworkConfirmationService
 from app.services.rework_execution_store import DatabaseReworkExecutionStore
+from app.services.rework_observation import ReworkStateObserver
 from app.tools.models import ToolContext
 from app.tools.readonly import create_read_tool_registry
 from app.tools.rework_operation_query import QueryReworkOperationTool
@@ -31,11 +32,14 @@ class ReworkExecutionService:
         *,
         context: ToolContext,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        observer: ReworkStateObserver | None = None,
     ) -> None:
         """显式装配已验证只读、写入和回执Tool，始终绑定服务端上下文。"""
 
         rework = ReworkHttpClient(client)
-        self.store = DatabaseReworkExecutionStore(database, rework, context=context, now=now)
+        self.store = DatabaseReworkExecutionStore(
+            database, rework, context=context, now=now, observer=observer
+        )
         self._context = context
         self._workflow = ReworkDraftWorkflow(
             task_tools=create_read_tool_registry(client),

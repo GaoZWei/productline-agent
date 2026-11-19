@@ -1,4 +1,4 @@
-"""T829真实Java九动作/两轮闭环及丢响应核对，Agent证据使用分离测试库。"""
+"""T829/T830真实Java九动作/两轮及状态审计，Agent证据使用分离测试库。"""
 
 import asyncio
 import json
@@ -10,23 +10,20 @@ import asyncpg  # type: ignore[import-untyped]
 import httpx
 import pytest
 from pydantic import AnyHttpUrl
+from sqlalchemy import select
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.clients.business import BusinessHttpClient
 from app.clients.rework import ReworkHttpClient
 from app.database import Base, Database
-from app.models import AgentRun, AgentRunStatus, AgentSession
+from app.models import AgentRun, AgentRunStatus, AgentSession, AgentStep, ReworkOperationLog
 from app.schemas.business import BusinessIdentity
 from app.schemas.rework import ReworkWriteReceipt
-from app.services.rework_confirmation import ReworkConfirmationService
-from app.services.rework_confirmation_store import DatabaseReworkConfirmationStore
-from app.services.rework_execution_service import ReworkExecutionService
+from app.services.observed_rework import ObservedReworkService
 from app.settings import Settings
 from app.tools.models import ToolContext
-from app.tools.readonly import create_read_tool_registry
-from app.tools.rework_readonly import create_rework_read_tool_registry
-from app.workflows.rework_draft import ReworkDraftWorkflow
+from tests.test_rework_observability import EventSink
 
 pytestmark = [pytest.mark.e2e, pytest.mark.asyncio]
 ORDER, TASK, ISSUE = "ORDER-T829-E2E", "TASK-T829-E2E", "ISSUE-T829-E2E"
@@ -91,46 +88,58 @@ async def test_real_java_nine_actions_two_rounds_and_unknown_receipt_never_rewri
         trace_id="trace-t829-e2e",
         run_id="run-t829-e2e",
     )
-    flow = ReworkDraftWorkflow(
-        task_tools=create_read_tool_registry(shared),
-        rework_tools=create_rework_read_tool_registry(java),
-    )
-    confirmations = ReworkConfirmationService(
-        store=DatabaseReworkConfirmationStore(database), workflow=flow
-    )
     seen: set[str] = set()
+    action_number = 0
+    sink = EventSink()
 
     async def act(
         operation: str, rework: str | None = None, *, concurrent: bool = False, **materials: object
     ) -> ReworkWriteReceipt:
         """每次动作独立生成、审查和确认，所有业务写入实际经过新执行服务。"""
 
+        nonlocal action_number
+        action_number += 1
+        action_context = ToolContext.model_validate(
+            {**ctx.model_dump(), "run_id": f"run-t830-e2e-{action_number}"}
+        )
+        async with database.session() as session, session.begin():
+            session.add(AgentRun(
+                run_id=action_context.run_id,
+                session_id="session-t829-e2e",
+                status=AgentRunStatus.RUNNING,
+                version_snapshot={},
+            ))
+
+        def executor() -> ObservedReworkService:
+            """新实例重建内部接线，唯一执行依赖持久化许可。"""
+
+            return ObservedReworkService(database, shared, context=action_context, event_sink=sink)
+
+        confirmations = executor()
         command: dict[str, object] = {"operation": operation, "task_id": TASK, **materials}
         if rework is not None:
             command["rework_task_id"] = rework
-        pending = await confirmations.create(command, context=ctx)
+        pending = await confirmations.create(command)
         confirmed = await confirmations.confirm(
             {"approval_id": pending.approval_id, "draft": pending.prepared.review.draft},
-            context=ctx,
         )
         assert confirmed.confirmed_draft is not None
         value = {"approval_id": pending.approval_id}
         count = len(transport.writes)
-        executor = ReworkExecutionService(database, shared, context=ctx)
         if concurrent:
             reports = await asyncio.gather(
-                executor.execute(value),
-                ReworkExecutionService(database, shared, context=ctx).execute(value),
+                executor().execute(value),
+                executor().execute(value),
             )
             report = next(r for r in reports if r.outcome == "SUCCEEDED")
         else:
-            report = await executor.execute(value)
+            report = await executor().execute(value)
         if operation == "CREATE_LIFECYCLE_REWORK":
             assert report.outcome == "UNKNOWN" and len(transport.writes) == count + 1
             assert (
-                await ReworkExecutionService(database, shared, context=ctx).execute(value)
+                await executor().execute(value)
             ).outcome == "UNKNOWN"
-            report = await ReworkExecutionService(database, shared, context=ctx).reconcile(value)
+            report = await executor().reconcile(value)
             assert (
                 report.receipt_evidence is not None and report.receipt_evidence.source == "LOOKUP"
             )
@@ -141,7 +150,22 @@ async def test_real_java_nine_actions_two_rounds_and_unknown_receipt_never_rewri
             )
         assert report.outcome == "SUCCEEDED" and report.receipt_evidence is not None
         assert len(transport.writes) == count + 1
-        assert await ReworkExecutionService(database, shared, context=ctx).execute(value) == report
+        assert await executor().execute(value) == report
+        async with database.session() as session:
+            run = await session.get(AgentRun, action_context.run_id)
+            assert run is not None and run.status == AgentRunStatus.SUCCEEDED
+            steps = list((await session.scalars(
+                select(AgentStep).where(AgentStep.run_id == action_context.run_id)
+            )).all())
+            assert {step.step_name for step in steps} >= {"rework_approval", "rework_execution"}
+            logs = list((await session.scalars(
+                select(ReworkOperationLog).where(
+                    ReworkOperationLog.approval_id == pending.approval_id
+                ).order_by(ReworkOperationLog.revision)
+            )).all())
+            assert logs[0].phase == "WAITING_CONFIRMATION" and logs[-1].phase == "SUCCEEDED"
+            assert sum(log.phase == "SUBMITTING" for log in logs) == 1
+        assert any(data.get("approval_id") == pending.approval_id for _, data in sink.events)
         seen.add(operation)
         return report.receipt_evidence.receipt
 
@@ -157,6 +181,8 @@ async def test_real_java_nine_actions_two_rounds_and_unknown_receipt_never_rewri
                             "agent_messages",
                             "agent_runs",
                             "rework_confirmation_records",
+                            "agent_steps",
+                            "rework_operation_logs",
                         )
                     ],
                 )

@@ -48,6 +48,7 @@ class RunEventType(StrEnum):
     APPROVAL_REQUIRED = "approval_required"
     WRITEBACK_STARTED = "writeback_started"
     WRITEBACK_COMPLETED = "writeback_completed"
+    REWORK_PROGRESS = "rework_progress"
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
 

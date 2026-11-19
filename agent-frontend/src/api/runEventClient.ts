@@ -26,6 +26,7 @@ const RUN_EVENT_TYPES = new Set<RunEventType>([
   "approval_required",
   "writeback_started",
   "writeback_completed",
+  "rework_progress",
   "run_completed",
   "run_failed",
 ]);

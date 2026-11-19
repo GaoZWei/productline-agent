@@ -1,7 +1,7 @@
 """T828真实迁移和隔离PostgreSQL确认持久化，Java读仍使用明确MockTransport。"""
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select, text, update
@@ -20,12 +20,12 @@ from tests.test_rework_draft_workflow import command, context, workflow
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-async def seed(database: Database) -> None:
+async def seed(database: Database, *, now: datetime = NOW) -> None:
     """只向本次隔离Agent库准备真实用户/Run关系，不触碰Java业务表。"""
 
     async with database.session() as session, session.begin():
         agent_session = AgentSession(
-            session_id="session-t828", user_id="reviewer-test", expires_at=NOW + timedelta(days=1)
+            session_id="session-t828", user_id="reviewer-test", expires_at=now + timedelta(days=1)
         )
         session.add(agent_session)
         await session.flush()

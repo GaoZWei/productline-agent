@@ -4,6 +4,32 @@ import type { RunEvent, RunEventType } from "../types/runEvents";
 import { openRunEventStream, RunEventClientError } from "./runEventClient";
 
 describe("run event SSE client", () => {
+  it("接收返工未知进度后继续等待终态事件", async () => {
+    const events: RunEvent[] = [];
+    const progress = event("1", "rework_progress", "2026-11-19T03:00:00Z");
+    progress.data = {
+      approval_id: "approval-t830",
+      revision: 4,
+      status: "EXECUTING",
+      phase: "UNKNOWN",
+    };
+    const connection = openRunEventStream({
+      streamId: "stream-web-001",
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(eventResponse([
+        ": connected stream-web-001\n\n",
+        eventFrame(progress),
+        eventFrame(event("2", "run_completed", "2026-11-19T03:00:01Z")),
+      ])),
+      maxReconnectAttempts: 0,
+      onEvent: (item) => events.push(item),
+    });
+    await connection.ready;
+    await vi.waitFor(() => expect(events).toHaveLength(2));
+    expect(events[0]?.data.phase).toBe("UNKNOWN");
+    expect(events[1]?.event_type).toBe("run_completed");
+    connection.close();
+  });
+
   it("解析分块事件并携带Last-Event-ID自动重连", async () => {
     const events: RunEvent[] = [];
     const states: string[] = [];

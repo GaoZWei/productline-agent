@@ -53,6 +53,7 @@ def test_run_event_schema_has_complete_types_and_rejects_sensitive_or_large_data
         "approval_required",
         "writeback_started",
         "writeback_completed",
+        "rework_progress",
         "run_completed",
         "run_failed",
     )

@@ -396,6 +396,7 @@ def test_agent_metadata_contains_agent_runtime_and_knowledge_tables() -> None:
         "agent_steps",
         "approval_records",
         "rework_confirmation_records",
+        "rework_operation_logs",
         "knowledge_chunks",
         "knowledge_documents",
         "managed_knowledge_libraries",
