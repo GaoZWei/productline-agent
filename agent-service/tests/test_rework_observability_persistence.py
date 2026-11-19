@@ -3,11 +3,14 @@
 import asyncio
 import json
 import subprocess
+from collections.abc import Mapping
 from datetime import datetime, timedelta
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import select
+from pydantic import JsonValue
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Database
@@ -32,7 +35,7 @@ from tests.test_agent_persistence import migrated_database_url as migrated_datab
 from tests.test_rework_confirmation_persistence import seed
 from tests.test_rework_draft_workflow import command, context, nested
 from tests.test_rework_execution_persistence import ExecutionHarness
-from tests.test_rework_observability import EventSink
+from tests.test_rework_observability import CancellingEventSink, EventSink
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -353,6 +356,270 @@ async def test_rework_observability_replay_and_execution_respect_trusted_permiss
             await other.execute({"approval_id": "approval-t830"})
         assert not sink.events and not h.writes
     finally:
+        await h.shared.aclose()
+        await h.close()
+        await database.dispose()
+
+
+@pytest.mark.parametrize("change", [
+    "extra_material", "approval_binding", "revision_binding", "operation_binding",
+    "phase_binding", "history_gap", "receipt_trace", "receipt_identity", "run_status",
+])
+async def test_rework_observability_corrupt_replay_emits_nothing_even_behind_cursor(
+    migrated_database_url: str, change: str
+) -> None:
+    database, h, sink = Database(migrated_database_url), ExecutionHarness(), EventSink()
+    try:
+        await seed(database, now=h.now)
+        service = observed(database, h)
+        await prepare(service, h)
+        await service.execute({"approval_id": "approval-t830"})
+        _, _, logs = await records(database)
+        target = logs[4] if change.startswith("receipt_") else logs[1]
+        summary = dict(target.summary)
+        async with database.session() as session, session.begin():
+            approval = await session.get(ReworkConfirmationRecord, "approval-t830")
+            assert approval is not None
+            original = approval.snapshot
+            if change == "history_gap":
+                await session.execute(delete(ReworkOperationLog).where(
+                    ReworkOperationLog.approval_id == target.approval_id,
+                    ReworkOperationLog.revision == target.revision,
+                ))
+            elif change == "run_status":
+                await session.execute(update(AgentRun).where(
+                    AgentRun.run_id == context().run_id
+                ).values(status=AgentRunStatus.FAILED))
+            elif change == "phase_binding":
+                await session.execute(update(ReworkOperationLog).where(
+                    ReworkOperationLog.approval_id == target.approval_id,
+                    ReworkOperationLog.revision == target.revision,
+                ).values(phase="CLAIMED"))
+            else:
+                if change == "extra_material":
+                    summary["processing_comment"] = "private-replay-material"
+                elif change == "approval_binding":
+                    summary["approval_id"] = "approval-other"
+                elif change == "revision_binding":
+                    summary["revision"] = 0
+                elif change == "operation_binding":
+                    summary["operation"] = "FAIL_REWORK"
+                elif change == "receipt_trace":
+                    summary["lookup_java_trace_id"] = "invented-lookup-trace"
+                else:
+                    summary["receipt_operation_id"] = "OP-OTHER"
+                await session.execute(update(ReworkOperationLog).where(
+                    ReworkOperationLog.approval_id == target.approval_id,
+                    ReworkOperationLog.revision == target.revision,
+                ).values(summary=summary))
+        counts = len(h.calls), len(h.writes), len(h.lookups)
+        with pytest.raises(ReworkConfirmationError) as caught:
+            await observed(database, h, sink).publish_progress(after_revision=4)
+        assert caught.value.code == "REWORK_AUDIT_INVALID" and caught.value.status_code == 500
+        assert "private-replay-material" not in str(caught.value)
+        assert not sink.events and counts == (len(h.calls), len(h.writes), len(h.lookups))
+        async with database.session() as session:
+            approval = await session.get(ReworkConfirmationRecord, "approval-t830")
+            assert approval is not None and approval.snapshot == original
+    finally:
+        await h.shared.aclose()
+        await h.close()
+        await database.dispose()
+
+
+@pytest.mark.parametrize("cursor", [-2, True, "0", 1.0, 9007199254740992, 100])
+async def test_rework_observability_replay_rejects_invalid_or_future_cursor(
+    migrated_database_url: str, cursor: object
+) -> None:
+    database, h, sink = Database(migrated_database_url), ExecutionHarness(), EventSink()
+    try:
+        await seed(database, now=h.now)
+        await prepare(observed(database, h), h, confirm=False)
+        with pytest.raises(ReworkConfirmationError) as caught:
+            await observed(database, h, sink).publish_progress(after_revision=cast(int, cursor))
+        assert caught.value.code == "PARAM_VALIDATION_ERROR" and caught.value.status_code == 400
+        assert not sink.events and not h.writes
+        assert (await records(database))[0].status == AgentRunStatus.WAITING_APPROVAL
+    finally:
+        await h.shared.aclose()
+        await h.close()
+        await database.dispose()
+
+
+async def test_rework_observability_terminal_replay_uses_confirmed_fact_not_raw_run_error(
+    migrated_database_url: str,
+) -> None:
+    database, h, sink = Database(migrated_database_url), ExecutionHarness(), EventSink()
+    try:
+        await seed(database, now=h.now)
+        service = observed(database, h)
+        await prepare(service, h)
+        await service.execute({"approval_id": "approval-t830"})
+        async with database.session() as session, session.begin():
+            await session.execute(update(AgentRun).where(
+                AgentRun.run_id == context().run_id
+            ).values(error_code="private-run-error"))
+        counts = len(h.calls), len(h.writes), len(h.lookups)
+        await observed(database, h, sink).publish_progress(after_revision=3)
+        assert len(sink.events) == 2 and sink.events[-1] == (
+            RunEventType.RUN_COMPLETED, {"status": "SUCCEEDED", "error_code": None}
+        )
+        assert "private-run-error" not in json.dumps(sink.events)
+        assert counts == (len(h.calls), len(h.writes), len(h.lookups))
+    finally:
+        await h.shared.aclose()
+        await h.close()
+        await database.dispose()
+
+
+async def test_rework_observability_unrelated_terminal_run_does_not_emit_rework_event(
+    migrated_database_url: str,
+) -> None:
+    database, h, sink = Database(migrated_database_url), ExecutionHarness(), EventSink()
+    try:
+        await seed(database, now=h.now)
+        async with database.session() as session, session.begin():
+            await session.execute(update(AgentRun).where(
+                AgentRun.run_id == context().run_id
+            ).values(status=AgentRunStatus.FAILED, error_code="private-run-error"))
+        await observed(database, h, sink).publish_progress()
+        assert not sink.events and not h.calls and not h.writes
+    finally:
+        await h.shared.aclose()
+        await h.close()
+        await database.dispose()
+
+
+async def test_rework_observability_preparation_replay_rejects_arbitrary_run_error(
+    migrated_database_url: str,
+) -> None:
+    database, h, sink = Database(migrated_database_url), ExecutionHarness(), EventSink()
+    try:
+        await seed(database, now=h.now)
+        with pytest.raises(ToolException):
+            await observed(database, h).create({"operation": "UNKNOWN_OPERATION"})
+        run, steps, logs = await records(database)
+        assert run.status == AgentRunStatus.FAILED and not logs
+        async with database.session() as session, session.begin():
+            await session.execute(update(AgentRun).where(
+                AgentRun.run_id == run.run_id
+            ).values(error_code="private-preparation-body"))
+            await session.execute(update(AgentStep).where(
+                AgentStep.step_id == steps[0].step_id
+            ).values(error_code="private-preparation-body"))
+        with pytest.raises(ReworkConfirmationError) as caught:
+            await observed(database, h, sink).publish_progress()
+        assert caught.value.code == "REWORK_AUDIT_INVALID"
+        assert "private-preparation-body" not in str(caught.value)
+        assert not sink.events and not h.calls and not h.writes
+    finally:
+        await h.shared.aclose()
+        await h.close()
+        await database.dispose()
+
+
+@pytest.mark.parametrize("terminal_only", [False, True], ids=["all-notifications", "terminal"])
+async def test_rework_observability_notification_cancellation_keeps_saved_success(
+    migrated_database_url: str, terminal_only: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    database, h = Database(migrated_database_url), ExecutionHarness()
+    sink = CancellingEventSink(RunEventType.RUN_COMPLETED if terminal_only else None)
+    try:
+        await seed(database, now=h.now)
+        service = observed(database, h, sink)
+        await prepare(service, h)
+        value = {"approval_id": "approval-t830"}
+        result = await service.execute(value)
+        assert result.outcome == "SUCCEEDED" and result.receipt_evidence is not None
+        assert await service.execute(value) == result and len(h.writes) == 1
+        run, steps, logs = await records(database)
+        assert run.status == AgentRunStatus.SUCCEEDED and run.error_code is None
+        assert all(step.status == AgentStepStatus.SUCCEEDED for step in steps)
+        assert [log.revision for log in logs] == list(range(5))
+        assert RunEventType.RUN_COMPLETED in sink.cancelled_types
+        assert "private-notification-cancel" not in caplog.text
+        task = asyncio.current_task()
+        assert task is not None and task.cancelling() == 0
+    finally:
+        await h.shared.aclose()
+        await h.close()
+        await database.dispose()
+
+
+async def test_rework_observability_notification_cancellation_keeps_original_failure(
+    migrated_database_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, h = Database(migrated_database_url), ExecutionHarness()
+    sink = CancellingEventSink(RunEventType.RUN_FAILED)
+    try:
+        await seed(database, now=h.now)
+        service = observed(database, h, sink)
+        failure = ToolException(
+            code=ToolErrorCode.TOOL_TIMEOUT, message="private-upstream-body", retryable=False
+        )
+        monkeypatch.setattr(
+            service._confirmation._workflow, "ainvoke", AsyncMock(side_effect=failure)
+        )
+        with pytest.raises(ToolException) as caught:
+            await service.create(command(h.case))
+        assert caught.value is failure
+        run, steps, logs = await records(database)
+        assert run.status == AgentRunStatus.FAILED and run.error_code == "TOOL_TIMEOUT"
+        assert len(steps) == 1 and steps[0].error_code == "TOOL_TIMEOUT" and not logs
+        assert sink.cancelled_types == [RunEventType.RUN_FAILED] and not h.writes
+    finally:
+        await h.shared.aclose()
+        await h.close()
+        await database.dispose()
+
+
+async def test_rework_observability_real_cancellation_after_receipt_preserves_evidence(
+    migrated_database_url: str,
+) -> None:
+    database, h = Database(migrated_database_url), ExecutionHarness()
+    entered, release = asyncio.Event(), asyncio.Event()
+    task = None
+
+    class BlockingTerminalSink(EventSink):
+        """只阻塞已保存回执后的终态通知，不阻塞业务执行。"""
+
+        async def publish(
+            self,
+            event_type: RunEventType,
+            *,
+            run_id: str | None = None,
+            step_id: str | None = None,
+            data: Mapping[str, JsonValue] | None = None,
+        ) -> None:
+            """在外层调用者取消时允许发送Task正常退出。"""
+
+            if event_type == RunEventType.RUN_COMPLETED:
+                entered.set()
+                await release.wait()
+            await super().publish(event_type, run_id=run_id, step_id=step_id, data=data)
+
+    try:
+        await seed(database, now=h.now)
+        service = observed(database, h, BlockingTerminalSink())
+        await prepare(service, h)
+        value = {"approval_id": "approval-t830"}
+        task = asyncio.create_task(service.execute(value))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        run, steps, logs = await records(database)
+        assert run.status == AgentRunStatus.SUCCEEDED and logs[-1].phase == "SUCCEEDED"
+        assert all(step.status == AgentStepStatus.SUCCEEDED for step in steps)
+        recovered = await observed(database, h).execute(value)
+        assert recovered.outcome == "SUCCEEDED" and recovered.receipt_evidence is not None
+        assert recovered.receipt_evidence.source == "WRITE"
+        assert len(h.writes) == 1 and not h.lookups
+    finally:
+        release.set()
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
         await h.shared.aclose()
         await h.close()
         await database.dispose()

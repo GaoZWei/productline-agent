@@ -2742,7 +2742,9 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 ### 实现的核心代码
 
 - `agent-service/app/services/observed_rework.py`：`ObservedReworkService`复用原确认/执行服务，记录每次调用Step、逻辑Tool次数和可补发的安全进度。
-- `agent-service/app/services/rework_observation.py`：`ReworkStateObserver.record/publish`与`rework_summary`联动状态、Run/Step和白名单摘要；两个Store可选注入，同事务记录、提交后发布。
+- `agent-service/app/services/rework_observation.py`：`ReworkStateObserver.record/publish`与`rework_summary`联动状态、Run/Step和白名单摘要，`validated_rework_replay`校验完整审计与原审批绑定；`wait_for_rework_notification`以独立Task等待并回收自动通知，区分子任务取消和请求真实取消。
+- `agent-service/app/schemas/rework_progress.py`：`ReworkProgressSummary`约束进度字段、阶段/错误和回执Trace，生成与补发共用，不透传数据库JSON。
+- `agent-service/app/services/rework_observation_mode.py`：`require_rework_creation_mode/require_rework_observation_mode`以已有审计及Run绑定约束装配模式，两种Store在读取和更新前校验，观测入口在创建Step前校验。
 - `agent-service/app/models/rework_operation_log.py`及`0019_rework_observability.py`：独立审批修订审计和已有证据降级保护；前后端事件契约新增`rework_progress`。
 
 ### 实现的核心功能
@@ -2750,3 +2752,6 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 - 每份审查使用专属Run，等待确认和写回各有Step与耗时；确认通过仍等待显式执行，取消/失效有机器分类，未知结果及执行中取消保持运行中。
 - 审查转换、职责Step、Run和状态审计同事务，采用一致的Run→审批锁序；日志和事件仅投影固定字段及真实回执来源/Trace，材料仍保留在受控确认快照。
 - 提交后尽力通知，发送失败不回滚状态或重发写入；可由审计修订补发，允许重复，状态以数据库为准，不引入持久消息队列或生产HTTP/页面入口。
+- 补发在Run短事务锁内校验会话、完整修订及审批/Run/动作绑定，出事务才发送；旧游标不能跳过坏记录，整批失败不发部分事件，终态从校验后的事实生成，不透传任意Run错误文本。
+- 旧模式不能省略观察器推进观测审批，观测模式不能接管旧审批；两种模式统一Run→审批锁序，误装配保留旧Run、执行许可和回执，不自动升级、降级或修补。
+- 自动通知子任务自行取消不覆盖成功返回或原始业务异常，退出前回收未完成通知；请求真实取消继续传播，已保存回执和未知执行权保持，不因取消重发写入。

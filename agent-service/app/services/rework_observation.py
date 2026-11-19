@@ -2,7 +2,9 @@
 
 import asyncio
 import hashlib
+import json
 import logging
+from collections.abc import Coroutine, Sequence
 from datetime import datetime
 
 from pydantic import JsonValue
@@ -21,6 +23,7 @@ from app.models import (
 )
 from app.schemas.events import RunEventType
 from app.schemas.rework_confirmation import ReworkConfirmationSnapshot
+from app.schemas.rework_progress import ReworkProgressSummary
 
 
 def rework_summary(snapshot: ReworkConfirmationSnapshot) -> dict[str, str | int | None]:
@@ -51,7 +54,38 @@ def rework_summary(snapshot: ReworkConfirmationSnapshot) -> dict[str, str | int 
             write_java_trace_id=evidence.write_java_trace_id,
             lookup_java_trace_id=evidence.lookup_java_trace_id,
         )
-    return result
+    validated = ReworkProgressSummary.model_validate_json(json.dumps(result))
+    return validated.model_dump(mode="json", exclude_unset=True)
+
+
+def validated_rework_replay(
+    records: Sequence[ReworkOperationLog], *, snapshot: ReworkConfirmationSnapshot
+) -> list[ReworkProgressSummary]:
+    """整批校验后才允许补发，损坏记录不能被跳过或带出当前审批绑定。"""
+
+    try:
+        if len(records) != snapshot.revision + 1:
+            raise ValueError("audit revisions are incomplete")
+        result: list[ReworkProgressSummary] = []
+        for revision, record in enumerate(records):
+            summary = ReworkProgressSummary.model_validate_json(json.dumps(record.summary))
+            if (
+                record.run_id != snapshot.run_id
+                or record.approval_id != snapshot.approval_id
+                or record.revision != revision
+                or summary.approval_id != record.approval_id
+                or summary.revision != record.revision
+                or summary.phase != record.phase
+                or summary.operation != snapshot.prepared.review.draft.operation
+            ):
+                raise ValueError("audit identity is inconsistent")
+            result.append(summary)
+        if result[-1].event_data() != rework_summary(snapshot):
+            raise ValueError("latest audit differs from the confirmation")
+        return result
+    except (ValueError, TypeError):
+        # 不传播Pydantic错误详情或原JSON，避免损坏材料进入日志和调用栈文案。
+        raise ValueError("rework audit history is inconsistent") from None
 
 
 def rework_step_id(approval_id: str, phase: str) -> str:
@@ -64,6 +98,18 @@ def elapsed_ms(start: datetime, end: datetime) -> int:
     """系统时钟回拨时耗时仍保持非负，不将等待时间当作写入耗时。"""
 
     return max(0, int((end - start).total_seconds() * 1000))
+
+
+async def wait_for_rework_notification(notification: Coroutine[object, object, None]) -> None:
+    """独立Task承载通知并在退出前回收，避免发送端取消直接落到请求Task上。"""
+
+    delivery = asyncio.create_task(notification)
+    try:
+        await asyncio.wait_for(delivery, timeout=1.0)
+    finally:
+        if not delivery.done():
+            delivery.cancel()
+        await asyncio.gather(delivery, return_exceptions=True)
 
 
 class ReworkStateObserver:
@@ -79,12 +125,20 @@ class ReworkStateObserver:
 
         if self._sink is None:
             return
-        data: dict[str, JsonValue] = {key: value for key, value in rework_summary(snapshot).items()}
         try:
-            await asyncio.wait_for(
-                self._sink.publish(RunEventType.REWORK_PROGRESS, run_id=snapshot.run_id, data=data),
-                timeout=1.0,
+            data: dict[str, JsonValue] = {
+                key: value for key, value in rework_summary(snapshot).items()
+            }
+            await wait_for_rework_notification(
+                self._sink.publish(RunEventType.REWORK_PROGRESS, run_id=snapshot.run_id, data=data)
             )
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if task is None or task.cancelling():
+                # 调用者真实取消仍须传播；不能用通知隔离吞掉请求的取消信号。
+                raise
+            # 子任务取消不代表业务被取消，更不能覆盖已提交的状态或原回执。
+            logging.getLogger(__name__).warning("rework_progress_delivery_cancelled")
         except Exception:
             logging.getLogger(__name__).warning("rework_progress_delivery_failed")
 

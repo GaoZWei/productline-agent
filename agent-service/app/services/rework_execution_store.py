@@ -17,6 +17,7 @@ from app.schemas.rework_operation_query import ReworkOperationResolution
 from app.schemas.rework_write_tools import ReworkExecutionSnapshot, ReworkWriteOutput
 from app.services.rework_confirmation_store import DatabaseReworkConfirmationStore
 from app.services.rework_observation import ReworkStateObserver
+from app.services.rework_observation_mode import require_rework_observation_mode
 from app.services.rework_receipts import validate_rework_receipt_binding
 from app.tools.models import ToolContext, ToolError
 
@@ -74,7 +75,11 @@ class DatabaseReworkExecutionStore:
                 or row.owner_user_id != self.context.identity.user_id
             ):
                 return None
-            return DatabaseReworkConfirmationStore._snapshot(row)
+            snapshot = DatabaseReworkConfirmationStore._snapshot(row)
+            await require_rework_observation_mode(
+                session, snapshot, observed=self._observer is not None
+            )
+            return snapshot
 
     async def _change(
         self,
@@ -103,10 +108,11 @@ class DatabaseReworkExecutionStore:
         async with self._database.session() as session, session.begin():
             if not await self._owner(session, allow_expired=not before_submit):
                 return None
-            if self._observer is not None:
-                await session.scalar(
-                    select(AgentRun).where(AgentRun.run_id == expected.run_id).with_for_update()
-                )
+            run = await session.scalar(
+                select(AgentRun).where(AgentRun.run_id == expected.run_id).with_for_update()
+            )
+            if run is None:
+                return None
             row = await session.scalar(
                 select(ReworkConfirmationRecord)
                 .where(
@@ -116,6 +122,9 @@ class DatabaseReworkExecutionStore:
             )
             if row is None or DatabaseReworkConfirmationStore._snapshot(row) != expected:
                 return None
+            await require_rework_observation_mode(
+                session, expected, observed=self._observer is not None, run=run
+            )
             now = self.clock()
             if before_submit and (
                 now >= expected.expires_at

@@ -13,6 +13,10 @@ from app.database import Database
 from app.models import AgentRun, AgentRunStatus, AgentSession, ReworkConfirmationRecord
 from app.schemas.rework_confirmation import ReworkConfirmationSnapshot
 from app.services.rework_observation import ReworkStateObserver
+from app.services.rework_observation_mode import (
+    require_rework_creation_mode,
+    require_rework_observation_mode,
+)
 from app.tools.models import ToolContext
 
 
@@ -92,16 +96,20 @@ class DatabaseReworkConfirmationStore:
             async with self._database.session() as session, session.begin():
                 if not await self._accessible(session, context, now):
                     return False
-                if self._observer is not None:
-                    # 统一先锁Run再锁审批，避免并发创建和状态转换形成反向锁序。
-                    await session.scalar(
-                        select(AgentRun).where(AgentRun.run_id == snapshot.run_id).with_for_update()
-                    )
-                    current_time = self._now()
-                    if current_time >= snapshot.expires_at or not await self._accessible(
-                        session, context, current_time
-                    ):
-                        return False
+                # 两种模式均先锁Run，防止并发创建在观测绑定提交前混入另一份审批。
+                run = await session.scalar(
+                    select(AgentRun).where(AgentRun.run_id == snapshot.run_id).with_for_update()
+                )
+                if run is None:
+                    return False
+                await require_rework_creation_mode(session, run, observed=self._observer is not None)
+                current_time = self._now()
+                if current_time.tzinfo is None or current_time.utcoffset() is None:
+                    raise ValueError("confirmation store clock must have a timezone")
+                if current_time >= snapshot.expires_at or not await self._accessible(
+                    session, context, current_time
+                ):
+                    return False
                 session.add(
                     ReworkConfirmationRecord(
                         approval_id=snapshot.approval_id,
@@ -138,7 +146,11 @@ class DatabaseReworkConfirmationStore:
                 or row.owner_user_id != context.identity.user_id
             ):
                 return None
-            return self._snapshot(row)
+            snapshot = self._snapshot(row)
+            await require_rework_observation_mode(
+                session, snapshot, observed=self._observer is not None
+            )
+            return snapshot
 
     async def transition(
         self,
@@ -177,10 +189,11 @@ class DatabaseReworkConfirmationStore:
         async with self._database.session() as session, session.begin():
             if not await self._accessible(session, context, now):
                 return False
-            if self._observer is not None:
-                await session.scalar(
-                    select(AgentRun).where(AgentRun.run_id == expected.run_id).with_for_update()
-                )
+            run = await session.scalar(
+                select(AgentRun).where(AgentRun.run_id == expected.run_id).with_for_update()
+            )
+            if run is None:
+                return False
             row = await session.scalar(
                 select(ReworkConfirmationRecord)
                 .where(
@@ -190,6 +203,9 @@ class DatabaseReworkConfirmationStore:
             )
             if row is None or self._snapshot(row) != expected:
                 return False
+            await require_rework_observation_mode(
+                session, expected, observed=self._observer is not None, run=run
+            )
             # 等待数据库锁也可能耗尽确认窗口，取锁后必须用新时钟再次检查。
             current_time = self._now()
             if current_time.tzinfo is None or current_time.utcoffset() is None:

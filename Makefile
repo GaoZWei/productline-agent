@@ -261,7 +261,7 @@ eval-rag: ## 验证 RAG固定集、四策略、五项指标和失败样本
 
 test-approval: ## 验证 M6 Approval生命周期、确认执行、安全边界、操作日志和前端契约
 	cd agent-service && uv run --frozen pytest -q tests/test_approval_lifecycle.py tests/test_approval_schemas.py tests/test_rework_approval_schemas.py tests/test_rework_draft_workflow.py tests/test_rework_confirmation.py tests/test_rework_execution.py tests/test_rework_observability.py tests/test_review_draft_generation.py tests/test_write_tools.py tests/test_approval_confirmation.py tests/test_approval_confirmation_api.py tests/test_approval_security.py tests/test_operation_log.py tests/test_operation_log_api.py
-	./scripts/test-agent-persistence.sh -k "approval or review_draft_store or execution or confirmation or operation_log or rework_observability"
+	./scripts/test-agent-persistence.sh -k "approval or review_draft_store or execution or confirmation or operation_log or rework_observability or rework_observation_mode"
 	cd agent-frontend && npm test -- --run src/components/ReviewApprovalCard.spec.ts src/api/agentClient.spec.ts src/api/runEventClient.spec.ts src/types/reworkApproval.spec.ts
 
 test-agent-e2e: ## 使用隔离 PostgreSQL 和真实 Java 验证诊断、旧确认及M8返工执行/观测
@@ -279,7 +279,7 @@ test-rework-diagnosis-e2e: ## 使用真实Java验证两轮返工、有效复核�
 .PHONY: test-rework-confirmation
 test-rework-confirmation: ## 验证M8独立确认重读、失效与隔离PostgreSQL审查持久化
 	cd agent-service && uv run --frozen pytest -q tests/test_rework_confirmation.py
-	./scripts/test-agent-persistence.sh -k "rework_confirmation or alembic_creates or managed_knowledge_migration or managed_knowledge_downgrade"
+	./scripts/test-agent-persistence.sh -k "rework_confirmation or rework_observation_mode or alembic_creates or managed_knowledge_migration or managed_knowledge_downgrade"
 
 .PHONY: test-rework-confirmation-e2e
 test-rework-confirmation-e2e: ## 使用独占Java及分离Agent测试库验证真实成果变化使确认失效
@@ -287,7 +287,7 @@ test-rework-confirmation-e2e: ## 使用独占Java及分离Agent测试库验证�
 
 .PHONY: test-rework-execution
 test-rework-execution: ## 验证M8唯一执行、一次提交及原回执核对的隔离数据库链路
-	./scripts/test-agent-persistence.sh -k "rework_execution or rework_confirmation or alembic_creates or managed_knowledge_migration or managed_knowledge_downgrade"
+	./scripts/test-agent-persistence.sh -k "rework_execution or rework_confirmation or rework_observation_mode or alembic_creates or managed_knowledge_migration or managed_knowledge_downgrade"
 
 .PHONY: test-rework-execution-e2e
 test-rework-execution-e2e: ## 使用独占Java及分离Agent测试库验证九动作真实执行、两轮返工及原键恢复
@@ -296,7 +296,7 @@ test-rework-execution-e2e: ## 使用独占Java及分离Agent测试库验证九�
 .PHONY: test-rework-observability
 test-rework-observability: ## 验证M8返工Run/Step、状态审计和提交后事件，不接生产入口
 	cd agent-service && uv run --frozen pytest -q tests/test_rework_observability.py tests/test_run_events.py
-	./scripts/test-agent-persistence.sh -k "rework_observability or rework_execution or rework_confirmation or alembic_creates or managed_knowledge_migration or managed_knowledge_downgrade"
+	./scripts/test-agent-persistence.sh -k "rework_observability or rework_observation_mode or rework_execution or rework_confirmation or alembic_creates or managed_knowledge_migration or managed_knowledge_downgrade"
 	cd agent-frontend && npm test -- --run src/api/runEventClient.spec.ts
 
 quality: ## 运行 Python Ruff 和 mypy 严格质量检查

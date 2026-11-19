@@ -81,6 +81,7 @@ async def test_real_java_changed_artifact_stales_persisted_confirmation_without_
                         Base.metadata.tables["agent_messages"],
                         Base.metadata.tables["agent_runs"],
                         Base.metadata.tables["rework_confirmation_records"],
+                        Base.metadata.tables["rework_operation_logs"],
                     ],
                 )
             )

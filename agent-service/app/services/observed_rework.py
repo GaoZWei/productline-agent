@@ -6,13 +6,13 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from pydantic import JsonValue
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.business import BusinessHttpClient
 from app.clients.rework import ReworkHttpClient
 from app.database import Database
-from app.errors import ToolException
+from app.errors import ToolErrorCode, ToolException
 from app.eventing import RunEventSink
 from app.models import (
     AgentRun,
@@ -21,15 +21,28 @@ from app.models import (
     AgentStep,
     AgentStepStatus,
     AgentStepType,
+    ReworkConfirmationRecord,
     ReworkOperationLog,
 )
 from app.schemas.events import RunEventType
+from app.schemas.rework import MAX_SAFE_INTEGER
 from app.schemas.rework_confirmation import ReworkConfirmationSnapshot
 from app.schemas.rework_execution import ReworkExecutionReport
+from app.schemas.rework_progress import ReworkProgressSummary
 from app.services.rework_confirmation import ReworkConfirmationError, ReworkConfirmationService
 from app.services.rework_confirmation_store import DatabaseReworkConfirmationStore
 from app.services.rework_execution_service import ReworkExecutionService
-from app.services.rework_observation import ReworkStateObserver, elapsed_ms
+from app.services.rework_observation import (
+    ReworkStateObserver,
+    elapsed_ms,
+    validated_rework_replay,
+    wait_for_rework_notification,
+)
+from app.services.rework_observation_mode import (
+    ReworkObservationModeError,
+    require_rework_creation_mode,
+    require_rework_observation_mode,
+)
 from app.tools.models import ToolContext
 from app.tools.readonly import create_read_tool_registry
 from app.tools.rework_readonly import create_rework_read_tool_registry
@@ -131,6 +144,30 @@ class ObservedReworkService:
             )
             if run is None:
                 raise ReworkConfirmationError("RESOURCE_NOT_FOUND", status_code=404)
+            approvals = list(
+                (
+                    await session.scalars(
+                        select(ReworkConfirmationRecord)
+                        .where(ReworkConfirmationRecord.run_id == run.run_id)
+                        .limit(2)
+                    )
+                ).all()
+            )
+            if approvals:
+                if len(approvals) != 1 or approvals[0].owner_user_id != self._context.identity.user_id:
+                    raise ReworkObservationModeError()
+                try:
+                    stored = DatabaseReworkConfirmationStore._snapshot(approvals[0])
+                except ValueError:
+                    raise ReworkObservationModeError() from None
+                await require_rework_observation_mode(
+                    session,
+                    stored,
+                    observed=True,
+                    run=run,
+                )
+            else:
+                await require_rework_creation_mode(session, run, observed=True)
             revision = await session.scalar(
                 select(func.max(ReworkOperationLog.revision)).where(
                     ReworkOperationLog.run_id == run.run_id
@@ -229,13 +266,19 @@ class ObservedReworkService:
                 await self._finish(
                     step_id, count=context.tool_call_ledger.recorded_call_count, error_code=error_code
                 )
-                await asyncio.wait_for(self.publish_progress(after_revision=revision), timeout=1.0)
+                await wait_for_rework_notification(self.publish_progress(after_revision=revision))
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if task is None or task.cancelling():
+                    raise
+                # 收尾或通知子任务的取消不应掩盖主调用已经确定的返回值或原异常。
+                _logger.warning("rework_observation_delivery_cancelled")
             except Exception:
                 # 仅固定事件名，不记录异常正文、草稿或业务请求；不能因此再次提交。
                 _logger.warning("rework_observation_delivery_failed")
 
     async def publish_progress(self, *, after_revision: int = -1) -> None:
-        """提交后按审查修订发送白名单事件；可重放，消费者按approval/revision去重。"""
+        """提交后补发整批校验过的摘要，游标不能跳过损坏证据或生成虚假终态。"""
 
         if (
             self._sink is None
@@ -243,7 +286,9 @@ class ObservedReworkService:
             or "REWORK_READ" not in self._context.permissions
         ):
             return
-        async with self._database.session() as session:
+        if type(after_revision) is not int or not -1 <= after_revision <= MAX_SAFE_INTEGER:
+            raise ReworkConfirmationError("PARAM_VALIDATION_ERROR", status_code=400)
+        async with self._database.session() as session, session.begin():
             run = await session.scalar(
                 select(AgentRun)
                 .join(AgentSession)
@@ -252,24 +297,33 @@ class ObservedReworkService:
                     AgentSession.user_id == self._context.identity.user_id,
                     AgentSession.expires_at > self._clock(),
                 )
+                .with_for_update(of=AgentRun)
             )
             if run is None:
                 return
-            records = list(
-                (
-                    await session.scalars(
-                        select(ReworkOperationLog)
-                        .where(
-                            ReworkOperationLog.run_id == run.run_id,
-                            ReworkOperationLog.revision > after_revision,
-                        )
-                        .order_by(ReworkOperationLog.revision)
-                    )
-                ).all()
+            # 锁等待可能跨过会话期限；取锁后按新时钟重查，不延长补发授权。
+            accessible = await session.scalar(
+                select(AgentSession.session_id).where(
+                    AgentSession.session_id == run.session_id,
+                    AgentSession.user_id == self._context.identity.user_id,
+                    AgentSession.expires_at > self._clock(),
+                )
             )
-            status, code = run.status, run.error_code
-        for record in records:
-            data: dict[str, JsonValue] = {key: value for key, value in record.summary.items()}
+            if accessible is None:
+                return
+            try:
+                state = await self._replay_state(session, run)
+            except (ValueError, TypeError):
+                raise ReworkConfirmationError("REWORK_AUDIT_INVALID", status_code=500) from None
+            if state is None:
+                return
+            summaries, status, code = state
+            latest_revision = summaries[-1].revision if summaries else -1
+            if after_revision > latest_revision:
+                raise ReworkConfirmationError("PARAM_VALIDATION_ERROR", status_code=400)
+            payloads = [item.event_data() for item in summaries if item.revision > after_revision]
+        # 已退出事务并释放Run锁后才发送；坏批次不会先发一半再报告失败。
+        for data in payloads:
             await self._sink.publish(
                 RunEventType.REWORK_PROGRESS, run_id=self._context.run_id, data=data
             )
@@ -281,3 +335,72 @@ class ObservedReworkService:
                 run_id=self._context.run_id,
                 data={"status": status.value, "error_code": code},
             )
+
+    async def _replay_state(
+        self, session: AsyncSession, run: AgentRun
+    ) -> tuple[list[ReworkProgressSummary], AgentRunStatus, str | None] | None:
+        """在Run锁内读取同一份审查与完整审计，只使用已校验的状态生成终态。"""
+
+        approvals = list(
+            (
+                await session.scalars(
+                    select(ReworkConfirmationRecord)
+                    .where(ReworkConfirmationRecord.run_id == run.run_id)
+                    .limit(2)
+                )
+            ).all()
+        )
+        records = list(
+            (
+                await session.scalars(
+                    select(ReworkOperationLog)
+                    .where(ReworkOperationLog.run_id == run.run_id)
+                    .order_by(ReworkOperationLog.revision)
+                )
+            ).all()
+        )
+        if not approvals and not records:
+            # 初次准备失败还没有审批；其他业务Run不能经此入口冒充返工终态。
+            step = await session.get(AgentStep, run.error_step) if run.error_step else None
+            if step is None or step.run_id != run.run_id or step.step_name != "rework_prepare":
+                return None
+            safe_codes = {code.value for code in ToolErrorCode} | {
+                "CALL_CANCELLED",
+                "INTERNAL_ERROR",
+                "APPROVAL_NOT_CREATED",
+            }
+            expected = (
+                AgentRunStatus.CANCELLED
+                if run.error_code == "CALL_CANCELLED"
+                else AgentRunStatus.FAILED
+            )
+            if (
+                step.step_type != AgentStepType.WORKFLOW
+                or step.status != AgentStepStatus.FAILED
+                or run.error_code not in safe_codes
+                or step.error_code != run.error_code
+                or run.status != expected
+            ):
+                raise ValueError("preparation failure is inconsistent")
+            return [], expected, run.error_code
+        if len(approvals) != 1 or approvals[0].owner_user_id != self._context.identity.user_id:
+            raise ValueError("audit approval binding is inconsistent")
+        snapshot = DatabaseReworkConfirmationStore._snapshot(approvals[0])
+        summaries = validated_rework_replay(records, snapshot=snapshot)
+        expected_status = {
+            "WAITING_CONFIRMATION": AgentRunStatus.WAITING_APPROVAL,
+            "CONFIRMED": AgentRunStatus.WAITING_APPROVAL,
+            "EXECUTING": AgentRunStatus.RUNNING,
+            "SUCCEEDED": AgentRunStatus.SUCCEEDED,
+            "CANCELLED": AgentRunStatus.CANCELLED,
+            "EXPIRED": AgentRunStatus.FAILED,
+            "STALE": AgentRunStatus.FAILED,
+        }[snapshot.status]
+        if run.status != expected_status:
+            raise ValueError("audit run status is inconsistent")
+        code = (
+            "APPROVAL_" + snapshot.status
+            if snapshot.status in {"CANCELLED", "EXPIRED", "STALE"}
+            else None
+        )
+        return summaries, expected_status, code
