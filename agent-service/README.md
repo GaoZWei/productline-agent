@@ -298,9 +298,13 @@ Store可选注入`ReworkStateObserver`，统一Run→审查行锁顺序，在原
 
 接口与失败处理见[返工契约第37节](../docs/api/REWORK_CONTRACT.md#37-t832-页面操作预览与独立确认)。用例纳入 `make test-rework-actions` 和 `make test-agent-page`，本机尚未执行。
 
-T833在同一入口增加 `REGISTER_REWORK_INSPECTION` 和 `SUBMIT_REWORK_REVIEW`。沿用复核角色校验，服务端为复核操作提供 `REVIEW_WRITE`，Java验证当前材料与写入权限。两类预览返回 `bound_materials`，数据取自原审批保存的Java快照。人工检查展示成果，复核同时展示同轮次同修订的通过检查。原确认后二次取证发现材料变化时审批失效，要求刷新重审。T832/T833均待项目电脑验收。
+T833在同一入口增加 `REGISTER_REWORK_INSPECTION` 和 `SUBMIT_REWORK_REVIEW`。沿用复核角色校验，服务端为复核操作提供 `REVIEW_WRITE`，Java验证当前材料与写入权限。两类预览返回 `bound_materials`，数据取自原审批保存的Java快照。人工检查展示成果，复核同时展示同轮次同修订的通过检查。检查未通过时提交复核预览返回 `409 BUSINESS_CONFLICT`。原确认后二次取证发现材料变化时审批失效，要求刷新重审。T832/T833均待项目电脑验收。
 
-T834增加 `CREATE_NEXT_REWORK` 与 `POST /{run_id}/{approval_id}/reconcile`。下一轮独立预览含原审批绑定的上一轮复核。主动核对验证原审批与当前页面定位，未提交时读取审批状态，已提交后只按服务端保存的原键查询Java回执。成功响应只根据已校验回执提供操作及后继返工编号。查询未命中保持未知。详见[返工契约第39节](../docs/api/REWORK_CONTRACT.md#39-t834-下一轮与原审批结果核对)。本机尚未执行新增验收用例。
+T834增加 `CREATE_NEXT_REWORK` 与 `POST /{run_id}/{approval_id}/reconcile`。下一轮独立预览含原审批绑定的上一轮复核。主动核对验证原审批与当前页面定位，待确认或已确认未领取的审批到期后可原子终结，已领取的继续保留原执行键。有提交记录时只按原键查询Java回执。成功响应根据已校验回执提供操作及后继返工编号，查询未命中保持未知。详见[返工契约第39节](../docs/api/REWORK_CONTRACT.md#39-t834-下一轮与原审批结果核对)。本机尚未执行新增验收用例。
+
+T835从统一消息入口识别明确的返工短句，复用只读订单交付条件和返工详情Tool。歧义通过候选选择重新读取，唯一目标返回 `REWORK_GUIDANCE`，供页面打开详情或现有操作表单。候选为空或详情返回资源不存在时，页面提示核对返工编号。Run/Step记录实际查询次数，获取写入审批仍由页面预览及人工确认触发。支持的句式和返回状态见[返工契约第40节](../docs/api/REWORK_CONTRACT.md#40-t835-agent返工引导)。新增用例待项目电脑验收。
+
+`make test-rework-page-flow` 使用独占PostgreSQL、真实Java与生产FastAPI装配，发起Agent引导、预览、确认、取消和核对请求。测试仅在首个成功写入后注入丢响应，以同一个原键验证回执恢复，随后检查阻塞与失败后的恢复、失效草稿、失败检查禁止复核、通过检查的证据绑定、复核退回和下一轮。项目电脑可与 `make test-agent-page` 的页面用例配合验收。本机尚未执行。
 
 ## KB-02.2 知识授权Client
 

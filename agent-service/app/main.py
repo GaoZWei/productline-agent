@@ -26,6 +26,7 @@ from app.api.tool_debug import router as tool_debug_router
 from app.clients.business import BusinessHttpClient
 from app.clients.knowledge_authorization import KnowledgeAuthorizationClient
 from app.clients.model import OpenAICompatibleChatClient
+from app.clients.rework import ReworkHttpClient
 from app.database import Database
 from app.knowledge import (
     EmbeddingBatchGenerator,
@@ -43,6 +44,7 @@ from app.services import (
     RunEventService,
 )
 from app.services.knowledge_management import KnowledgeManagementService
+from app.services.rework_agent_entry import ReworkAgentEntry
 from app.settings import Settings, get_settings
 from app.tools import create_write_tool_registry
 from app.tools.diagnosis_reviews import create_diagnosis_read_tool_registry
@@ -76,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # FastAPI 应用级共享状态供路由处理访问数据库和业务客户端。
         application.state.database = database
         application.state.business_client = business_client
+        application.state.rework_entry = ReworkAgentEntry(ReworkHttpClient(business_client))
         application.state.knowledge_authorization_client = KnowledgeAuthorizationClient(
             business_client
         )

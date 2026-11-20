@@ -3,6 +3,7 @@ import { ElAlert, ElButton, ElLoading, ElSkeleton } from "element-plus";
 import { onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 
+import { BusinessApiError } from "./api/businessClient";
 import AgentWorkspaceDrawer from "./components/AgentWorkspaceDrawer.vue";
 import DeliveryStatusPanel from "./components/DeliveryStatusPanel.vue";
 import OrderSummary from "./components/OrderSummary.vue";
@@ -12,10 +13,13 @@ import RunHistoryPage from "./components/RunHistoryPage.vue";
 import TaskList from "./components/TaskList.vue";
 import ReworkDetailPanel from "./components/ReworkDetailPanel.vue";
 import { useOrderStore } from "./stores/orderStore";
+import type { ReworkGuidanceTarget } from "./types/agent";
+import type { ReworkAction } from "./types/rework";
 
 const store = useOrderStore();
 const currentView = ref<"business" | "history">("business");
-const selectedRework = ref<{ orderId: string; taskId: string; reworkId: string }>();
+const selectedRework = ref<{ orderId: string; taskId: string; reworkId: string; operation?: ReworkAction }>();
+let orderViewVersion = 0;
 const vLoading = ElLoading.directive;
 const {
   orders,
@@ -29,7 +33,10 @@ const {
 
 onMounted(() => store.initialize());
 // 切单意图一发生就隔离旧详情，不等旧overview被新响应替换。
-watch([selectedOrderId, currentView], () => { selectedRework.value = undefined; }, { flush: "sync" });
+watch([selectedOrderId, currentView], () => {
+  orderViewVersion += 1;
+  selectedRework.value = undefined;
+}, { flush: "sync" });
 watch(overview, (value) => {
   const selected = selectedRework.value;
   if (!selected) return;
@@ -38,11 +45,30 @@ watch(overview, (value) => {
     selectedRework.value = undefined;
   }
 });
-function openRework(taskId: string, reworkId: string) {
-  if (detailLoading.value || !overview.value || overview.value.order.orderId !== selectedOrderId.value) return;
+function openRework(taskId: string, reworkId: string, operation?: ReworkAction): boolean {
+  if (detailLoading.value || !overview.value || overview.value.order.orderId !== selectedOrderId.value) return false;
   const task = overview.value.tasks.find(item => item.task.taskId === taskId && item.task.orderId === selectedOrderId.value);
-  if (!task?.reworkTasks.some(item => item.taskId === taskId && item.reworkTaskId === reworkId)) return;
-  selectedRework.value = { orderId: selectedOrderId.value, taskId, reworkId };
+  if (!task?.reworkTasks.some(item => item.taskId === taskId && item.reworkTaskId === reworkId)) return false;
+  selectedRework.value = { orderId: selectedOrderId.value, taskId, reworkId, operation };
+  return true;
+}
+async function openGuidedRework(orderId: string, target: ReworkGuidanceTarget, operation: ReworkAction | null) {
+  if (currentView.value !== "business" || orderId !== selectedOrderId.value) return false;
+  const { task_id: taskId, rework_task_id: reworkId } = target;
+  if (openRework(taskId, reworkId, operation ?? undefined)) return true;
+
+  // Agent 可能已经读到新返工，先刷新当前订单总览，再校验目标归属。
+  const viewVersion = orderViewVersion;
+  try {
+    await store.switchOrderForAgent(orderId);
+  } catch (reason) {
+    if (viewVersion === orderViewVersion) throw reason;
+  }
+  if (viewVersion !== orderViewVersion) return false;
+  if (openRework(taskId, reworkId, operation ?? undefined)) return true;
+  throw new BusinessApiError({
+    code: "RESOURCE_NOT_FOUND", message: "当前订单中没有该返工，请重新查询。",
+  });
 }
 function refreshWrittenOrder(orderId: string) {
   if (selectedOrderId.value === orderId) void store.selectOrder(orderId);
@@ -98,7 +124,8 @@ function refreshWrittenOrder(orderId: string) {
             <div v-if="traceId" class="trace-chip" title="用于关联 Java 服务日志">
               TRACE · {{ traceId }}
             </div>
-            <AgentWorkspaceDrawer :order="overview?.order" :switch-order="store.switchOrderForAgent" />
+            <AgentWorkspaceDrawer :order="overview?.order" :switch-order="store.switchOrderForAgent"
+              :open-rework="openGuidedRework" />
           </div>
         </div>
 
@@ -111,6 +138,7 @@ function refreshWrittenOrder(orderId: string) {
           show-icon
         >
           <template #default>
+            <span v-if="overview?.order.orderId === selectedOrderId">订单总览刷新失败，仍显示上次读取的内容。</span>
             <span v-if="error.traceId">Trace ID：{{ error.traceId }}</span>
             <el-button size="small" @click="store.retry">重新加载</el-button>
           </template>
@@ -130,8 +158,10 @@ function refreshWrittenOrder(orderId: string) {
                 <DeliveryStatusPanel :records="overview.deliveryRecords" />
               </div>
             </div>
-            <ReworkDetailPanel v-if="selectedRework" :key="`${selectedRework.orderId}/${selectedRework.taskId}/${selectedRework.reworkId}`"
+            <ReworkDetailPanel v-if="selectedRework" :key="`${selectedRework.orderId}/${selectedRework.taskId}/${selectedRework.reworkId}/${selectedRework.operation ?? ''}`"
               :order-id="selectedRework.orderId" :task-id="selectedRework.taskId" :rework-id="selectedRework.reworkId"
+              :initial-action="selectedRework.operation"
+              :can-open-next-round="!detailLoading && !error"
               @close="selectedRework = undefined" @written="refreshWrittenOrder" @open-next="openRework" />
           </div>
         </template>

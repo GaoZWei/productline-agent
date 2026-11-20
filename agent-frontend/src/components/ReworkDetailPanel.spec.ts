@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import ReworkDetailPanel from "./ReworkDetailPanel.vue";
 import { agentHttpClient } from "../api/agentClient";
 import { businessHttpClient } from "../api/businessClient";
+import { readReworkRecovery, storeReworkRecovery } from "../api/reworkActionClient";
 import { detailFixture, envelope, historyPage, inspectionFixture, processingFixture, reviewFixture, reworkPath } from "../test/reworkFixtures";
+import type { ReworkAction } from "../types/rework";
 
 const mock = new MockAdapter(businessHttpClient);
 const agent = new MockAdapter(agentHttpClient);
@@ -23,8 +25,8 @@ function setup(detail = detailFixture()) {
   mock.onGet(reworkPath).reply(200, envelope(detail));
   for (const kind of ["results", "inspections", "reviews"]) mock.onGet(`${reworkPath}/${kind}`).reply(200, envelope(historyPage()));
 }
-async function mount() {
-  const props = reactive({ orderId: "ORDER-030", taskId: "TASK-030-A", reworkId: "REWORK-Z9" });
+async function mount(initialAction?: ReworkAction) {
+  const props = reactive({ orderId: "ORDER-030", taskId: "TASK-030-A", reworkId: "REWORK-Z9", initialAction });
   host = document.createElement("div"); document.body.append(host);
   // 由父级响应式props驱动，覆盖切换与迟到响应，不修改子组件内部状态。
   app = createApp({ render: () => h(ReworkDetailPanel, props) }); app.mount(host);
@@ -172,6 +174,14 @@ function enterMaterial(label: string, value: string, root: ParentNode = host) {
 }
 
 describe("返工操作预览与确认", () => {
+  it.each([true, false])("Agent动作只有新详情仍允许时打开表单，允许=%s", async allowed => {
+    const detail = actionDetail();
+    setup({ ...detail, allowedActions: allowed ? ["START_REWORK"] : [] });
+    await mount("START_REWORK");
+    expect(Boolean(host.querySelector("form"))).toBe(allowed);
+    expect(agent.history.post).toHaveLength(0);
+  });
+
   it("预览不确认，双击只提交一次，成功后重新读取Java详情", async () => {
     const detail = actionDetail();
     setup({ ...detail, allowedActions: [...detail.allowedActions] });
@@ -499,7 +509,7 @@ describe("下一轮返工与结果核对", () => {
     expect(agent.history.post).toHaveLength(2);
   });
 
-  it("丢响应后跨页面核对原审批，没有回执时持续待核对", async () => {
+  it.each([false, true])("丢响应后跨页面核对原审批，Java详情暂不可用=%s", async detailUnavailable => {
     setup({ ...actionDetail(), allowedActions: ["START_REWORK"] });
     agent.onPost(previewPath).reply(200, previewResponse("START_REWORK"));
     agent.onPost(`${decisionPath}/confirm`).networkError();
@@ -516,12 +526,18 @@ describe("下一轮返工与结果核对", () => {
     await settle();
     app?.unmount();
     host.remove();
+    if (detailUnavailable) mock.onGet(reworkPath).networkError();
     await mount();
+    if (detailUnavailable) {
+      expect(host.textContent).toContain("NETWORK_ERROR");
+      expect(host.querySelector('[aria-label="Java允许动作"]')).toBeNull();
+      expect(host.querySelector("form")).toBeNull();
+    }
     expect(host.textContent).toContain("待核对审批 approval-t832");
     expect(host.textContent).not.toContain("确认并执行");
     button("核对原审批结果").click();
     await settle();
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain("执行结果待核对");
+    expect(host.querySelector('[aria-label="返工操作"] [role="alert"]')?.textContent).toContain("执行结果待核对");
     button("核对原审批结果").click();
     await settle();
     expect(host.textContent).toContain("OP-RECOVERED");
@@ -532,6 +548,21 @@ describe("下一轮返工与结果核对", () => {
     expect(JSON.parse(agent.history.post[2]!.data)).toEqual({
       order_id: "ORDER-030", task_id: "TASK-030-A", rework_task_id: "REWORK-Z9",
     });
+  });
+
+  it("Java拒绝详情读取时保留原审批定位，页面不开放核对", async () => {
+    const target = { order_id: "ORDER-030", task_id: "TASK-030-A", rework_task_id: "REWORK-Z9" };
+    const reference = { runId: "run-t832", approvalId: "approval-t832", nextRound: false };
+    storeReworkRecovery(target, reference);
+    mock.onGet(reworkPath).reply(403, {
+      ...envelope(null), success: false, code: "PERMISSION_DENIED", message: "无权读取返工详情",
+    });
+
+    await mount();
+    expect(host.textContent).toContain("PERMISSION_DENIED");
+    expect(host.querySelector('[aria-label="原审批结果核对"]')).toBeNull();
+    expect(readReworkRecovery(target)).toEqual(reference);
+    expect(agent.history.post).toHaveLength(0);
   });
 
   it("切单后丢弃核对迟到结果，回原页面仍能找到审批", async () => {

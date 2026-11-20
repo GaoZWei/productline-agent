@@ -1,5 +1,6 @@
 import axios, { AxiosError } from "axios";
 import { isManagedKnowledgeIndexCapabilities } from "./managedKnowledgeIndex";
+import { reworkActionLabels } from "../types/rework";
 
 import type {
   AgentCapabilitiesResponse,
@@ -41,6 +42,7 @@ const AGENT_RESULT_KINDS = [
   "SPECIFICATION_ANSWER",
   "CLARIFICATION",
   "APPROVAL",
+  "REWORK_GUIDANCE",
 ] as const;
 
 const AGENT_INTENTS = [
@@ -375,7 +377,29 @@ function isAgentMessageResult(value: unknown) {
     return isSpecificationQaResult(value.specification_answer);
   }
   if (value.kind === "CLARIFICATION") return isClarificationResult(value);
+  if (value.kind === "REWORK_GUIDANCE") return isReworkGuidance(value);
   return isApprovalAgentResult(value);
+}
+
+function isReworkGuidance(value: Record<string, unknown>) {
+  const id = (item: unknown, prefix: string) =>
+    typeof item === "string" && item.length <= 64 && !/[\r\n]/u.test(item)
+      && item.startsWith(prefix) && /^[A-Z]+-[A-Z0-9][A-Z0-9-]*$/u.test(item);
+  if (!(value.order_id === null || id(value.order_id, "ORDER-"))
+    || !(value.operation === null || (typeof value.operation === "string" && Object.hasOwn(reworkActionLabels, value.operation)))
+    || !Array.isArray(value.candidates) || value.candidates.length > 20
+    || !value.candidates.every(item => isRecord(item) && id(item.task_id, "TASK-") && id(item.rework_task_id, "REWORK-"))
+    || !(value.round_number === null || (Number.isSafeInteger(value.round_number) && Number(value.round_number) > 0))) {
+    return false;
+  }
+  if (value.state === "READY" || value.state === "ACTION_UNAVAILABLE") {
+    return value.order_id !== null && value.candidates.length === 1
+      && ["PENDING", "RUNNING", "BLOCKED", "FAILED", "COMPLETED"].includes(String(value.status));
+  }
+  if (value.status !== null || value.round_number !== null) return false;
+  return value.state === "CHOOSE_TARGET"
+    ? value.order_id !== null && value.candidates.length >= 2
+    : (value.state === "NEEDS_INPUT" || value.state === "NOT_FOUND") && value.candidates.length === 0;
 }
 
 function isSpecificationQaResult(value: unknown) {

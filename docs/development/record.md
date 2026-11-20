@@ -2804,12 +2804,12 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 
 ### 实现的核心代码
 
-- `agent-service/app/api/rework_actions.py` 的 `QualityPreviewOutput` 从审批快照返回绑定证据，复用既有确认与执行入口。
+- `agent-service/app/api/rework_actions.py` 的 `QualityPreviewOutput` 从审批快照返回绑定证据，`_tool_error` 将工作流判定的状态冲突返回为409。
 - `agent-frontend/src/api/reworkActionClient.ts` 校验实际绑定、检查项和复核意见。 `components/ReworkActionForm.vue` 展示人工填写表单及审查卡。
 
 ### 实现的核心功能
 
-人工检查逐项填写结论、说明和证据，再次复核填写结论与意见。预览展示绑定成果和检查证据，确认前的Java事实变化使审批失效，页面需要刷新重审。成功后重新读取历史和业务状态。
+人工检查逐项填写结论、说明和证据，再次复核填写结论与意见。失败检查保存后仍须处理，只有通过检查才可预览复核。预览展示绑定成果和检查证据，确认前的Java事实变化使审批失效，页面需要刷新重审。成功后重新读取历史和业务状态。
 
 ## 2026-11-20 — `[T834] 下一轮与原审批结果核对`
 
@@ -2820,9 +2820,28 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 ### 实现的核心代码
 
 - `agent-service/app/api/rework_actions.py` 的 `NextRoundPreviewOutput`、`reconcile_rework_action` 串联原复核、独立确认与原键回执核对。
+- `agent-service/app/services/observed_rework.py` 的 `expire_unclaimed` 复用待确认和已确认审批的失效事务，竞争时按持久化后的原审批状态处理。
 - `agent-frontend/src/api/reworkActionClient.ts` 和 `components/ReworkActionForm.vue` 按目标保存原审批定位，恢复后提供主动核对。
-- `agent-frontend/src/components/ReworkDetailPanel.vue` 根据Java回执显示下一轮入口。
+- `agent-frontend/src/components/ReworkDetailPanel.vue` 根据Java回执显示下一轮入口，并在详情遇到可重试错误时保留原审批核对。
+- `agent-frontend/src/stores/orderStore.ts` 的 `selectOrder` 对当前订单的可重试失败保留上次总览，页面保留回执并等待总览重新加载后打开下一轮。
 
 ### 实现的核心功能
 
-复核退回后可创建下一轮独立审批，回执编号来自Java，原轮历史继续可查。丢响应后用原审批恢复核对，未找到回执继续等待，切单隔离迟到结果。
+复核退回后可创建下一轮独立审批，回执编号来自Java，原轮历史继续可查。丢响应后用原审批恢复核对，即使详情暂时不可读，也可查看已保存的对应回执。仍待确认或已确认未领取的审批过期可结束核对并刷新后重审，已领取的保留原键，未找到回执继续等待。切单隔离迟到结果。
+
+## 2026-11-20 — `[T835] Agent查询与操作表单引导`
+
+### 核心解决的问题
+
+用户可从当前订单用短句定位返工及下一步操作，多任务或多轮时先明确目标再进入操作。
+
+### 实现的核心代码
+
+- `agent-service/app/services/rework_agent_entry.py` 的 `parse_rework_entry` 和 `ReworkAgentEntry.resolve` 解析短句并从Java校验候选及详情。
+- `agent-service/app/services/agent_messages.py` 的 `_execute_rework_entry` 将只读结果和调用计数记入统一Run。
+- `agent-frontend/src/components/AgentResultView.vue` 和 `AgentWorkspaceDrawer.vue` 将候选选择接回只读入口，唯一目标打开既有详情和表单。
+- `agent-frontend/src/App.vue` 的 `openGuidedRework` 在当前订单总览缺少引导目标时重读Java并校验归属，抽屉根据打开结果决定是否关闭。
+
+### 实现的核心功能
+
+支持查询或定位已有返工动作。同订单多候选须明确选择，Java详情确认目标不存在时提示核对编号。若页面总览缺少已定位的目标，先重新核对归属，打开表单后由人员填材料、预览及确认。用户选择和模型路由均无法直接执行返工写入。

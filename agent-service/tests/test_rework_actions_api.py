@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from functools import partial
+from typing import NoReturn
 
 import httpx
 import pytest
@@ -10,8 +12,10 @@ from sqlalchemy import func, select
 
 from app.api.rework_actions import router
 from app.database import Database
-from app.models import AgentRun, ReworkConfirmationRecord
+from app.models import AgentRun, ReworkConfirmationRecord, ReworkOperationLog
 from app.observability import TraceIdMiddleware
+from app.services.observed_rework import ObservedReworkService
+from app.services.rework_confirmation import ReworkConfirmationError
 from app.settings import Settings
 from app.tools.readonly import create_read_tool_registry
 from app.versioning import build_run_version_snapshot
@@ -302,6 +306,88 @@ async def test_rework_actions_api_reconcile_cancelled_approval_never_queries_jav
             )
             assert result.status_code == 200 and result.json()["outcome"] == "NOT_SUBMITTED"
             assert not java.writes and not java.lookups
+    finally:
+        await java.shared.aclose()
+        await java.close()
+        await database.dispose()
+
+
+@pytest.mark.parametrize("state", ["WAITING_CONFIRMATION", "CONFIRMED", "EXECUTING"])
+async def test_rework_actions_api_reconcile_expired_interrupted_confirmation(
+    migrated_database_url: str, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    database, java = Database(migrated_database_url), ExecutionHarness()
+    original_key: str | None = None
+
+    async def interrupt_execution(service: ObservedReworkService, value: dict[str, str]) -> NoReturn:
+        """在确认已持久化后，模拟执行领取前或领取后、提交前的中断。"""
+
+        nonlocal original_key
+        snapshot = await service.get_approval(value["approval_id"])
+        assert snapshot.status == "CONFIRMED"
+        if state == "EXECUTING":
+            execution = await service._executor(service._context).store.claim(snapshot)
+            assert execution is not None and execution.execution_key is not None
+            original_key = execution.execution_key
+        raise ReworkConfirmationError("UPSTREAM_UNAVAILABLE", status_code=503)
+
+    monkeypatch.setattr(
+        "app.api.rework_actions.ObservedReworkService",
+        partial(ObservedReworkService, now=lambda: java.now),
+    )
+    monkeypatch.setattr(ObservedReworkService, "execute", interrupt_execution)
+    try:
+        async with page_client(database, java) as client:
+            path = await preview(client, java.case)
+            approval_id = path.rsplit("/", 1)[-1]
+            target = {"order_id": ORDER, "task_id": TASK, "rework_task_id": REWORK}
+            if state != "WAITING_CONFIRMATION":
+                result = await client.post(f"{path}/confirm", json={"decision": "CONFIRM"})
+                assert result.status_code == 503
+            java_reads = len(java.calls)
+            pending = await client.post(f"{path}/reconcile", json=target)
+            expected_pending = (
+                "WAITING_CONFIRMATION" if state == "WAITING_CONFIRMATION" else "IN_PROGRESS"
+            )
+            assert pending.status_code == 200 and pending.json()["outcome"] == expected_pending
+
+            async with database.session() as session:
+                row = await session.get(ReworkConfirmationRecord, approval_id)
+                assert row is not None and row.status == state
+                java.now = row.expires_at
+
+            mismatched = await client.post(
+                f"{path}/reconcile", json={**target, "order_id": "ORDER-OTHER"}
+            )
+            assert mismatched.status_code == 404
+            async with database.session() as session:
+                row = await session.get(ReworkConfirmationRecord, approval_id)
+                assert row is not None and row.status == state
+
+            checked = await asyncio.gather(
+                client.post(f"{path}/reconcile", json=target),
+                client.post(f"{path}/reconcile", json=target),
+            )
+            expected = "IN_PROGRESS" if state == "EXECUTING" else "NOT_SUBMITTED"
+            assert all(result.status_code == 200 for result in checked)
+            assert all(result.json()["outcome"] == expected for result in checked)
+            assert len(java.calls) == java_reads and not java.writes and not java.lookups
+
+        async with database.session() as session:
+            row = await session.get(ReworkConfirmationRecord, approval_id)
+            final_status = "EXECUTING" if state == "EXECUTING" else "EXPIRED"
+            assert row is not None and row.status == final_status
+            assert row.execution_key == original_key
+            phases = await session.scalars(
+                select(ReworkOperationLog.phase)
+                .where(ReworkOperationLog.approval_id == row.approval_id)
+                .order_by(ReworkOperationLog.revision)
+            )
+            expected_phases = ["WAITING_CONFIRMATION"]
+            if state != "WAITING_CONFIRMATION":
+                expected_phases.append("CONFIRMED")
+            expected_phases.append("CLAIMED" if state == "EXECUTING" else "EXPIRED")
+            assert phases.all() == expected_phases
     finally:
         await java.shared.aclose()
         await java.close()

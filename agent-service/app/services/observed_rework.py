@@ -113,6 +113,23 @@ class ObservedReworkService:
         ReworkConfirmationService._permissions(snapshot, self._context)
         return snapshot
 
+    async def expire_unclaimed(
+        self, snapshot: ReworkConfirmationSnapshot
+    ) -> ReworkConfirmationSnapshot:
+        """核对已绑定的审批时，只原子终结过期且尚未领取的审批。"""
+
+        if (
+            snapshot.status not in {"WAITING_CONFIRMATION", "CONFIRMED"}
+            or self._clock() < snapshot.expires_at
+        ):
+            return snapshot
+        if snapshot.status == "WAITING_CONFIRMATION":
+            await self._confirmation.expire_waiting(snapshot, context=self._context)
+        else:
+            await self._executor(self._context).store.invalidate(snapshot, expired=True)
+        # 确认或领取可能先于失效提交。重新读取原审批，以持久化状态决定核对结果。
+        return await self.get_approval(snapshot.approval_id)
+
     async def confirm(self, value: object) -> ReworkConfirmationSnapshot:
         """重新取证并确认原草稿，确认通过后仍等待显式执行。"""
 

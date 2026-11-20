@@ -48,8 +48,12 @@ export const useOrderStore = defineStore("orders", () => {
       traceId.value = result.traceId;
     } catch (reason) {
       if (requestSequence !== detailRequestSequence) return;
-      overview.value = undefined;
-      error.value = toBusinessError(reason);
+      const loadError = toBusinessError(reason);
+      // 同一订单暂时读不到时保留上次总览，让已显示的返工回执留在页面。
+      if (!loadError.retryable || overview.value?.order.orderId !== orderId) {
+        overview.value = undefined;
+      }
+      error.value = loadError;
     } finally {
       if (requestSequence === detailRequestSequence) {
         detailLoading.value = false;

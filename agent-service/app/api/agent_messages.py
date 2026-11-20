@@ -226,6 +226,7 @@ def _message_service(
         session_ttl_seconds=request.app.state.settings.session_ttl_seconds,
         version_snapshot=request.app.state.run_version_snapshot,
         event_sink=publisher,
+        rework_entry=getattr(request.app.state, "rework_entry", None),
     )
 
 

@@ -13,6 +13,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from app.clients.model import ChatMessage, ModelClientError, StructuredModelResult
 from app.database import Database
+from app.errors import ToolException
 from app.eventing import RunEventSink
 from app.model_adapters import StructuredIntentRoutingModel
 from app.models import AgentMessage, AgentMessageRole, AgentRunStatus, AgentSession, AgentStepType
@@ -45,12 +46,14 @@ from app.schemas.session import SessionContext, context_from_page
 from app.schemas.versioning import RunVersionSnapshot
 from app.services.intent_router import IntentRouter, InvalidRouterOutputError
 from app.services.model_invocation import ObservedModelInvoker, StructuredChatClient
+from app.services.rework_agent_entry import ReworkAgentEntry, ReworkEntryCommand, parse_rework_entry
 from app.services.run_lifecycle import RunLifecycleService
 from app.services.session_context import (
     SessionAccessDeniedError,
     SessionContextError,
     SessionContextService,
 )
+from app.tools.models import ToolContext
 from app.workflows.recording import (
     DatabaseWorkflowStepRecorder,
     EventPublishingWorkflowStepRecorder,
@@ -274,6 +277,7 @@ class AgentMessageService:
         session_ttl_seconds: int,
         version_snapshot: RunVersionSnapshot,
         event_sink: RunEventSink | None = None,
+        rework_entry: ReworkAgentEntry | None = None,
     ) -> None:
         self._database = database
         self._model_client = model_client
@@ -281,6 +285,7 @@ class AgentMessageService:
         self._session_ttl = timedelta(seconds=session_ttl_seconds)
         self._version_snapshot = version_snapshot
         self._event_sink = event_sink
+        self._rework_entry = rework_entry
 
     # 建立Run + 加载上下文+ 模型给候选+ 服务端做裁决+ 澄清或分者调用Skill + 统一保存终态
     async def execute(
@@ -373,6 +378,15 @@ class AgentMessageService:
             )
             # Step 序号如何安排
             routing_model: _ObservedIntentRoutingModel | None = None
+            router_usage = RunTokenUsage()
+            if self._rework_entry is not None and request.clarification is None:
+                rework_command = parse_rework_entry(request.message)
+                if rework_command is not None:
+                    return await self._execute_rework_entry(
+                        self._rework_entry, rework_command,
+                        run_id=run_id, session_id=session_id, identity=identity,
+                        trace_id=trace_id, page_context=request.page_context, recorder=recorder,
+                    )
             # 5.判断是不是澄清续接
             # 如果当前请求不是澄清续接，系统创建路由模型
             if request.clarification is None:
@@ -897,6 +911,59 @@ class AgentMessageService:
             await session.flush()
 
     # 标记成功
+    async def _execute_rework_entry(
+        self,
+        entry: ReworkAgentEntry,
+        command: ReworkEntryCommand,
+        *,
+        run_id: str,
+        session_id: str,
+        identity: BusinessIdentity,
+        trace_id: str,
+        page_context: PageContext | None,
+        recorder: DatabaseWorkflowStepRecorder,
+    ) -> AgentMessageExecution:
+        """受控返工短句直接只读取证，延续统一Run/Step和安全错误契约。"""
+
+        step_id = f"step-rework-entry-{run_id}"
+        context = ToolContext(
+            run_id=run_id, trace_id=trace_id, identity=identity,
+            permissions=frozenset({"REWORK_READ"}),
+        )
+        await recorder.start_step(
+            step_id=step_id, run_id=run_id, sequence_number=2, step_type=AgentStepType.WORKFLOW,
+            step_name="resolve_rework_entry", input_summary="rework read or page guidance",
+        )
+        try:
+            result = await entry.resolve(
+                command, page_order_id=page_context.order_id if page_context else None, context=context
+            )
+        except ToolException as error:
+            await recorder.mark_failed(
+                step_id, error_code=error.code.value, output_summary="rework facts unavailable"
+            )
+            raise AgentSkillExecutionError(
+                code=error.code.value,
+                message=error.message,
+                retryable=error.retryable,
+                error_step="resolve_rework_entry",
+                tool_call_count=context.tool_call_ledger.recorded_call_count,
+            ) from None
+        await recorder.mark_succeeded(step_id, output_summary=f"guidance={result.state}")
+        count = context.tool_call_ledger.recorded_call_count
+        await self._mark_succeeded(
+            run_id, result=result, token_usage=RunTokenUsage(),
+            tool_call_count=count, termination_reason="REWORK_GUIDANCE",
+        )
+        await self._publish(
+            RunEventType.RUN_COMPLETED, run_id=run_id,
+            data={
+                "session_id": session_id, "status": AgentRunStatus.SUCCEEDED.value,
+                "result_kind": result.kind.value, "tool_call_count": count,
+            },
+        )
+        return AgentMessageExecution(run_id=run_id, session_id=session_id, result=result)
+
     async def _mark_succeeded(
         self,
         run_id: str,

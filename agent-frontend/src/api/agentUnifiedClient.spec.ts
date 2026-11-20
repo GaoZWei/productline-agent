@@ -113,6 +113,7 @@ function capabilities() {
       "SPECIFICATION_ANSWER",
       "CLARIFICATION",
       "APPROVAL",
+      "REWORK_GUIDANCE",
     ],
     model: { configured: true, provider: "openai_compatible", model_name: "agent-model" },
     knowledge_index: {

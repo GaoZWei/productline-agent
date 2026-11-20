@@ -128,15 +128,24 @@ class ReworkConfirmationService:
             raise ReworkConfirmationError("RESOURCE_NOT_FOUND", status_code=404)
         return snapshot
 
+    async def expire_waiting(
+        self, snapshot: ReworkConfirmationSnapshot, *, context: ToolContext
+    ) -> bool:
+        """确认和结果核对共用待确认审批的到期转换，保留已提交的并发状态。"""
+
+        now = self._clock()
+        if snapshot.status != "WAITING_CONFIRMATION" or now < snapshot.expires_at:
+            return False
+        updated = self._updated(snapshot, "EXPIRED")
+        return await self._store.transition(snapshot, updated, context=context, now=now)
+
     async def _waiting(self, snapshot: ReworkConfirmationSnapshot, context: ToolContext) -> None:
         """终态先拒绝，到期精确使用>=边界，失败不恢复旧状态。"""
 
         if snapshot.status != "WAITING_CONFIRMATION":
             raise ReworkConfirmationError(f"APPROVAL_{snapshot.status}")
         if self._clock() >= snapshot.expires_at:
-            now = self._clock()
-            updated = self._updated(snapshot, "EXPIRED")
-            if not await self._store.transition(snapshot, updated, context=context, now=now):
+            if not await self.expire_waiting(snapshot, context=context):
                 raise ReworkConfirmationError("APPROVAL_CHANGED")
             raise ReworkConfirmationError("APPROVAL_EXPIRED", status_code=410)
 

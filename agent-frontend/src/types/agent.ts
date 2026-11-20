@@ -1,3 +1,5 @@
+import type { ReworkAction } from "./rework";
+
 export type BlockingStage =
   | "PRODUCTION"
   | "PRODUCTION_BLOCKED"
@@ -72,13 +74,14 @@ export interface OrderDiagnosisErrorResponse {
   retryable: boolean;
   error_step: string | null;
 }
-// 统一入口返回五类结果
+// 统一入口返回的结果类型
 export type AgentResultKind =
   | "ORDER_STATUS"
   | "DIAGNOSIS"
   | "SPECIFICATION_ANSWER"
   | "CLARIFICATION"
-  | "APPROVAL";
+  | "APPROVAL"
+  | "REWORK_GUIDANCE";
 
 export type AgentIntent =
   | "ORDER_QUERY"
@@ -227,13 +230,29 @@ export interface ApprovalAgentResult extends Omit<ReviewApproval, "run_id"> {
   run_id: string;
   source_run_id: string;
 }
+
+export interface ReworkGuidanceTarget {
+  task_id: string;
+  rework_task_id: string;
+}
+
+export interface ReworkGuidanceResult {
+  kind: "REWORK_GUIDANCE";
+  state: "READY" | "CHOOSE_TARGET" | "NEEDS_INPUT" | "NOT_FOUND" | "ACTION_UNAVAILABLE";
+  order_id: string | null;
+  operation: ReworkAction | null;
+  candidates: ReworkGuidanceTarget[];
+  status: "PENDING" | "RUNNING" | "BLOCKED" | "FAILED" | "COMPLETED" | null;
+  round_number: number | null;
+}
 // 信息结果类型
 export type AgentMessageResult =
   | OrderStatusAgentResult
   | DiagnosisAgentResult
   | SpecificationAnswerAgentResult
   | ClarificationAgentResult
-  | ApprovalAgentResult;
+  | ApprovalAgentResult
+  | ReworkGuidanceResult;
 // 统一响应数据
 export interface AgentMessageResponse {
   run_id: string; // 当前这一轮Agent执行ID
@@ -394,3 +413,4 @@ export interface OperationLogDetail {
   java_trace_id: string | null;
   created_at: string;
 }
+

@@ -25,15 +25,21 @@ import type {
   ApprovalAgentResult,
   ClarificationChoice,
   ReviewApprovalDecision,
+  ReworkGuidanceTarget,
 } from "../types/agent";
 import type { Order } from "../types/business";
+import type { ReworkAction } from "../types/rework";
 import type { RunEvent, RunEventConnectionStatus } from "../types/runEvents";
 import AgentResultView from "./AgentResultView.vue";
 import AgentRunTimeline from "./AgentRunTimeline.vue";
 
 const DEFAULT_MESSAGE = "这个订单为什么还没有交付？";
 
-const props = defineProps<{ order?: Order; switchOrder?: (orderId: string) => Promise<Order> }>();
+const props = defineProps<{
+  order?: Order;
+  switchOrder?: (orderId: string) => Promise<Order>;
+  openRework?: (orderId: string, target: ReworkGuidanceTarget, operation: ReworkAction | null) => Promise<boolean>;
+}>();
 const visible = ref(false);
 const userMessage = ref(DEFAULT_MESSAGE);
 const loading = ref(false);
@@ -55,6 +61,21 @@ let requestSequence = 0;
 
 const currentOrderId = computed(() => props.order?.orderId);
 const busy = computed(() => loading.value || actionLoading.value || switchingOrder.value);
+
+async function openGuidedRework(orderId: string, target: ReworkGuidanceTarget, operation: ReworkAction | null) {
+  if (busy.value || !props.openRework || orderId !== currentOrderId.value) return;
+  const sequence = requestSequence;
+  actionLoading.value = true;
+  error.value = undefined;
+  try {
+    const opened = await props.openRework(orderId, target, operation);
+    if (sequence === requestSequence && opened) closeDrawer();
+  } catch (reason) {
+    if (sequence === requestSequence) error.value = toAgentError(reason, "打开返工详情失败");
+  } finally {
+    if (sequence === requestSequence) actionLoading.value = false;
+  }
+}
 // 检查返回结果是否是订单切换提示，如果是则显示切换确认按钮
 const orderSwitchRequest = computed(() => {
   const value = result.value?.result;
@@ -522,6 +543,8 @@ function toAgentError(reason: unknown, fallback: string) {
           @confirm="confirmApproval"
           @cancel="cancelApproval"
           @rework="requestRework"
+          @rework-query="submitAgent(undefined, $event)"
+          @open-rework="openGuidedRework"
         />
       </div>
     </aside>

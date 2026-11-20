@@ -13,10 +13,11 @@ from app.schemas.approval import ReviewDraft
 from app.schemas.context import PageContext
 from app.schemas.knowledge_index import KnowledgeIndexCapabilitiesResponse
 from app.schemas.model_capabilities import ModelCapabilitiesResponse
+from app.schemas.rework import BusinessId, OrderId, ReworkAction, Sequence, TaskId
 from app.schemas.routing import ClarificationRequest, EntitySelection
 from app.schemas.session import RunIdentifier, SessionIdentifier
 from app.schemas.specification import SpecificationQaResult
-from app.schemas.tools import OrderIdentifier, TaskIdentifier
+from app.schemas.tools import OrderIdentifier, ProductionStatus, TaskIdentifier
 from app.schemas.workflow import DiagnosisResult, StableCode, TraceIdentifier
 from app.schemas.write_tools import ApprovalIdentifier
 
@@ -66,13 +67,14 @@ class AgentMessageRequest(AgentMessageSchema):
 
 # 结果类型模型
 class AgentResultKind(StrEnum):
-    """统一入口和历史记录能够稳定区分的五类结果。"""
+    """统一入口和历史记录能够稳定区分的结果类型。"""
 
     ORDER_STATUS = "ORDER_STATUS"
     DIAGNOSIS = "DIAGNOSIS"
     SPECIFICATION_ANSWER = "SPECIFICATION_ANSWER"
     CLARIFICATION = "CLARIFICATION"
     APPROVAL = "APPROVAL"
+    REWORK_GUIDANCE = "REWORK_GUIDANCE"
 
 
 class OrderStatusSubject(StrEnum):
@@ -144,18 +146,52 @@ class ApprovalAgentResult(AgentResultEnvelope):
     draft: ReviewDraft
 
 
+class ReworkGuidanceTarget(AgentMessageSchema):
+    """Java已核对的返工定位。"""
+
+    task_id: TaskId
+    rework_task_id: BusinessId
+
+
+class ReworkGuidanceResult(AgentResultEnvelope):
+    """只读返工查询、候选澄清或明确的页面操作入口。"""
+
+    kind: Literal[AgentResultKind.REWORK_GUIDANCE] = AgentResultKind.REWORK_GUIDANCE
+    state: Literal["READY", "CHOOSE_TARGET", "NEEDS_INPUT", "NOT_FOUND", "ACTION_UNAVAILABLE"]
+    order_id: OrderId | None
+    operation: ReworkAction | None
+    candidates: Annotated[tuple[ReworkGuidanceTarget, ...], Field(max_length=20)] = ()
+    status: ProductionStatus | None = None
+    round_number: Sequence | None = None
+
+    @model_validator(mode="after")
+    def require_target_for_detail(self) -> Self:
+        """仅选定唯一目标时展示Java详情，模糊目标不携带操作入口。"""
+
+        if self.state in {"READY", "ACTION_UNAVAILABLE"}:
+            valid = self.order_id is not None and len(self.candidates) == 1 and self.status is not None
+        elif self.state == "CHOOSE_TARGET":
+            valid = self.order_id is not None and len(self.candidates) >= 2 and self.status is None
+        else:
+            valid = not self.candidates and self.status is None
+        if not valid or (self.status is None and self.round_number is not None):
+            raise ValueError("rework guidance state differs from its target")
+        return self
+
+
 type AgentMessageResult = Annotated[
     OrderStatusResult
     | DiagnosisAgentResult
     | SpecificationAnswerAgentResult
     | ClarificationAgentResult
-    | ApprovalAgentResult,
+    | ApprovalAgentResult
+    | ReworkGuidanceResult,
     Field(discriminator="kind"),
 ]
 
 
 class AgentMessageResponse(AgentMessageSchema):
-    """统一返回Run、Session、Trace及五类之一的强类型结果。"""
+    """统一返回Run、Session、Trace和强类型结果。"""
 
     run_id: RunIdentifier
     session_id: SessionIdentifier
@@ -184,7 +220,7 @@ class AgentCapabilitiesResponse(AgentMessageSchema):
 
     @model_validator(mode="after")
     def require_all_result_kinds(self) -> Self:
-        """能力响应必须按枚举顺序完整声明五类结果且不得重复。"""
+        """能力响应必须按枚举顺序完整声明结果类型且不得重复。"""
 
         if self.result_kinds != tuple(AgentResultKind):
             raise ValueError("agent capabilities must expose every result kind in order")

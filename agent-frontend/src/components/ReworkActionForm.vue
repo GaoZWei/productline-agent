@@ -9,25 +9,35 @@ import { reworkActionLabels, type InspectionResult, type ReworkDetail, type Rewo
 import type { ReworkInspectionItem } from "../types/reworkApproval";
 import ReworkRecord from "./ReworkRecord.vue";
 
-const props = defineProps<{ orderId: string; detail: ReworkDetail }>();
+const props = defineProps<{
+  orderId: string;
+  taskId: string;
+  reworkId: string;
+  detail?: ReworkDetail;
+  initialAction?: PageReworkAction;
+}>();
 const emit = defineEmits<{
   busy: [value: boolean]; written: [operationId: string, nextReworkId: string | null]; refresh: [];
 }>();
-const target = {
-  order_id: props.orderId,
-  task_id: props.detail.reworkTask.taskId,
-  rework_task_id: props.detail.reworkTask.reworkTaskId,
+const commandTarget = {
+  task_id: props.taskId,
+  rework_task_id: props.reworkId,
 };
-const actions = computed(() => props.detail.allowedActions.filter(isPageReworkAction).filter(item => {
-  if (item === "REGISTER_REWORK_INSPECTION") return props.detail.processing !== null;
-  if (item === "SUBMIT_REWORK_REVIEW") {
-    return props.detail.processing !== null && props.detail.inspection?.result === "PASSED";
-  }
-  if (item === "CREATE_NEXT_REWORK") {
-    return props.detail.review?.status === "REJECTED" || props.detail.review?.status === "REWORK_REQUIRED";
-  }
-  return true;
-}));
+const target = { order_id: props.orderId, ...commandTarget };
+const actions = computed(() => {
+  const { detail } = props;
+  if (!detail) return [];
+  return detail.allowedActions.filter(isPageReworkAction).filter(item => {
+    if (item === "REGISTER_REWORK_INSPECTION") return detail.processing !== null;
+    if (item === "SUBMIT_REWORK_REVIEW") {
+      return detail.processing !== null && detail.inspection?.result === "PASSED";
+    }
+    if (item === "CREATE_NEXT_REWORK") {
+      return detail.review?.status === "REJECTED" || detail.review?.status === "REWORK_REQUIRED";
+    }
+    return true;
+  });
+});
 const action = ref<PageReworkAction>();
 const reason = ref("");
 const artifactId = ref("");
@@ -55,6 +65,9 @@ function newInspection(): InspectionInput {
 const inspections = ref([newInspection()]);
 const pending = ref(false);
 const recovery = ref(readReworkRecovery(target));
+if (!recovery.value && props.initialAction && actions.value.includes(props.initialAction)) {
+  action.value = props.initialAction;
+}
 const uncertain = computed(() => recovery.value !== undefined);
 const waitingForConfirmation = ref(false);
 const failure = ref("");
@@ -100,9 +113,7 @@ function showError(error: unknown) {
 function commandForForm(): PageReworkCommand | undefined {
   const operation = action.value;
   if (!operation || !actions.value.includes(operation)) return;
-  const { taskId, reworkTaskId } = props.detail.reworkTask;
-  const target = { task_id: taskId, rework_task_id: reworkTaskId };
-  if (operation === "START_REWORK") return { ...target, operation };
+  if (operation === "START_REWORK") return { ...commandTarget, operation };
   if (operation === "REGISTER_REWORK_INSPECTION") {
     const items: ReworkInspectionItem[] = [];
     for (const item of inspections.value) {
@@ -110,27 +121,28 @@ function commandForForm(): PageReworkCommand | undefined {
       if (!item.result || !nonblank(item.checkItem, 128) || !nonblank(item.comment, 1000) || !references) return;
       items.push({ checkItem: item.checkItem, result: item.result, comment: item.comment, evidenceReferences: references });
     }
-    return { ...target, operation, items };
+    return { ...commandTarget, operation, items };
   }
   if (operation === "SUBMIT_REWORK_REVIEW") {
     if (!reviewStatus.value || !nonblank(reviewComment.value, 1000)) return;
-    return { ...target, operation, status: reviewStatus.value, review_comment: reviewComment.value };
+    return { ...commandTarget, operation, status: reviewStatus.value, review_comment: reviewComment.value };
   }
   if (operation !== "REGISTER_REWORK_RESULT") {
-    if (nonblank(reason.value, 1000)) return { ...target, operation, reason: reason.value };
+    if (nonblank(reason.value, 1000)) return { ...commandTarget, operation, reason: reason.value };
     return;
   }
   const references = evidenceReferences(evidence.value);
   if (!identifier(artifactId.value, 256) || !identifier(artifactVersion.value, 128)
     || !nonblank(comment.value, 1000) || !references) return;
   return {
-    ...target, operation, artifact: { artifactId: artifactId.value, artifactVersion: artifactVersion.value },
+    ...commandTarget, operation, artifact: { artifactId: artifactId.value, artifactVersion: artifactVersion.value },
     processing_comment: comment.value, evidence_references: references,
   };
 }
 
 async function prepare() {
-  if (pending.value || preview.value || uncertain.value) return;
+  const { detail } = props;
+  if (!detail || pending.value || preview.value || uncertain.value) return;
   const command = commandForForm();
   if (!command) {
     failure.value = "请填写必填材料，并检查长度和证据引用格式。";
@@ -140,7 +152,7 @@ async function prepare() {
   failure.value = "";
   trace.value = undefined;
   try {
-    const result = await previewReworkAction(props.orderId, props.detail, command);
+    const result = await previewReworkAction(props.orderId, detail, command);
     if (!active) {
       // 页面已离开，尽力取消未确认的草稿。
       await cancelReworkAction(result).catch(() => undefined);
@@ -270,7 +282,7 @@ async function cancel() {
         {{ reworkActionLabels[item] }}
       </button>
     </div>
-    <form v-else-if="action && !preview && !uncertain" @submit.prevent="prepare">
+    <form v-else-if="detail && action && !preview && !uncertain" @submit.prevent="prepare">
       <h4>{{ reworkActionLabels[action] }}</h4>
       <fieldset :disabled="pending">
         <template v-if="action === 'REGISTER_REWORK_RESULT'">

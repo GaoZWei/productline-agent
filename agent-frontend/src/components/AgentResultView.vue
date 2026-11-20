@@ -4,8 +4,10 @@ import { computed } from "vue";
 import type {
   AgentMessageResponse,
   ClarificationChoice,
+  ReworkGuidanceTarget,
   ReviewApprovalDecision,
 } from "../types/agent";
+import { reworkActionLabels, type ReworkAction } from "../types/rework";
 import KnowledgeCitationCard from "./KnowledgeCitationCard.vue";
 import ReviewApprovalCard from "./ReviewApprovalCard.vue";
 
@@ -23,6 +25,8 @@ const emit = defineEmits<{
   confirm: [decision: ReviewApprovalDecision];
   cancel: [approvalId: string];
   rework: [approvalId: string];
+  reworkQuery: [message: string];
+  openRework: [orderId: string, target: ReworkGuidanceTarget, operation: ReworkAction | null];
 }>();
 // 从Agent响应中提取出五类结果类型：ORDER_STATUS, DIAGNOSIS, SPECIFICATION_ANSWER, CLARIFICATION, APPROVAL
 const orderStatus = computed(() =>
@@ -42,6 +46,20 @@ const clarification = computed(() =>
 const approval = computed(() =>
   props.response.result.kind === "APPROVAL" ? props.response.result : undefined,
 );
+const reworkGuidance = computed(() =>
+  props.response.result.kind === "REWORK_GUIDANCE" ? props.response.result : undefined,
+);
+
+function chooseRework(target: ReworkGuidanceTarget) {
+  const guidance = reworkGuidance.value;
+  if (!guidance?.order_id) return;
+  if (guidance.state === "CHOOSE_TARGET") {
+    const phrase = guidance.operation ? reworkActionLabels[guidance.operation] : "查询返工";
+    emit("reworkQuery", `${phrase} ${guidance.order_id} ${target.task_id} ${target.rework_task_id}`);
+  } else {
+    emit("openRework", guidance.order_id, target, guidance.state === "READY" ? guidance.operation : null);
+  }
+}
 
 function chooseOption(value: string) {
   const result = clarification.value;
@@ -71,6 +89,24 @@ function formatEvidenceValue(value: string | number | boolean | null) {
 
 <template>
   <div class="agent-result-view" :data-result-kind="response.result.kind">
+    <section v-if="reworkGuidance" class="agent-result-card" aria-label="返工引导">
+      <h3>返工</h3>
+      <p v-if="reworkGuidance.state === 'NEEDS_INPUT'">请在当前订单用一条指令定位返工，例如“查询返工 TASK-003”。</p>
+      <p v-else-if="reworkGuidance.state === 'NOT_FOUND'">当前订单中未定位到匹配返工。查询历史轮次时请同时提供任务和返工编号。</p>
+      <p v-else-if="reworkGuidance.state === 'CHOOSE_TARGET'">找到多个返工，请选定任务和返工后继续。</p>
+      <template v-else>
+        <p>当前状态 {{ reworkGuidance.status }}<template v-if="reworkGuidance.round_number !== null"> · 第 {{ reworkGuidance.round_number }} 轮</template></p>
+        <p v-if="reworkGuidance.state === 'ACTION_UNAVAILABLE'">当前状态或权限不允许该操作。</p>
+        <p v-else-if="reworkGuidance.operation">打开表单后填写材料、预览并确认。</p>
+      </template>
+      <div class="rework-detail-actions">
+        <button v-for="target in reworkGuidance.candidates" :key="`${target.task_id}/${target.rework_task_id}`"
+          type="button" :disabled="submitting" @click="chooseRework(target)">
+          {{ reworkGuidance.state === 'READY' && reworkGuidance.operation ? reworkActionLabels[reworkGuidance.operation] : '查看' }}
+          {{ target.task_id }} · {{ target.rework_task_id }}
+        </button>
+      </div>
+    </section>
     <section v-if="orderStatus" class="agent-result-card order-status-result">
       <header><span>确定性状态</span><strong>{{ orderStatus.status }}</strong></header>
       <h3>{{ orderStatus.subject === "ORDER" ? orderStatus.order_id : orderStatus.task_id }}</h3>

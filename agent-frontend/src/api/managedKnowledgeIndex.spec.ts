@@ -23,14 +23,14 @@ describe("managed knowledge readiness contract", () => {
     expect(isManagedKnowledgeIndexCapabilities(managed)).toBe(true);
     mock.onGet("/api/agent/capabilities").reply(200, {
       message_api_enabled: true,
-      result_kinds: ["ORDER_STATUS", "DIAGNOSIS", "SPECIFICATION_ANSWER", "CLARIFICATION", "APPROVAL"],
+      result_kinds: ["ORDER_STATUS", "DIAGNOSIS", "SPECIFICATION_ANSWER", "CLARIFICATION", "APPROVAL", "REWORK_GUIDANCE"],
       model: { configured: false, provider: null, model_name: null }, knowledge_index: managed,
     });
     await expect(requestAgentCapabilities()).resolves.toMatchObject({ knowledge_index: { expected_document_count: 0, message: "无已发布资料" } });
     const legacy = { ...managed, source: "LEGACY" };
     mock.onGet("/api/agent/capabilities").reply(200, {
       message_api_enabled: true,
-      result_kinds: ["ORDER_STATUS", "DIAGNOSIS", "SPECIFICATION_ANSWER", "CLARIFICATION", "APPROVAL"],
+      result_kinds: ["ORDER_STATUS", "DIAGNOSIS", "SPECIFICATION_ANSWER", "CLARIFICATION", "APPROVAL", "REWORK_GUIDANCE"],
       model: { configured: false, provider: null, model_name: null }, knowledge_index: legacy,
     });
     await expect(requestAgentCapabilities()).rejects.toMatchObject({ code: "RESPONSE_VALIDATION_ERROR" });

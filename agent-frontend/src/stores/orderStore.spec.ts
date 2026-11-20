@@ -72,6 +72,22 @@ describe("order store", () => {
     expect(store.overview?.tasks[0]?.qualityIssues[0]?.issue.issueId).toBe("ISSUE-001");
   });
 
+  it.each([
+    { orderId: "ORDER-003", code: "PERMISSION_DENIED", retryable: false },
+    { orderId: "ORDER-005", code: "NETWORK_ERROR", retryable: true },
+  ])("读取 $orderId 遇到 $code 时移除先前总览", async ({ orderId, code, retryable }) => {
+    const store = useOrderStore();
+    mockedFetchOverview.mockResolvedValueOnce(resultFor("ORDER-003"));
+    await store.selectOrder("ORDER-003");
+    mockedFetchOverview.mockRejectedValueOnce(new BusinessApiError({ code, message: "读取失败", retryable }));
+
+    await store.selectOrder(orderId);
+
+    expect(store.overview).toBeUndefined();
+    expect(store.error?.code).toBe(code);
+    expect(store.selectedOrderId).toBe(orderId);
+  });
+
   it("快速切换时只接受最后一次请求的结果", async () => {
     const resolvers = new Map<string, (value: ReturnType<typeof resultFor>) => void>();
     mockedFetchOverview.mockImplementation(

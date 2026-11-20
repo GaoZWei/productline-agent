@@ -132,6 +132,13 @@ def _error(code: str, status: int) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "trace_id": get_trace_id()})
 
 
+def _tool_error(error: ToolException) -> HTTPException:
+    """本地返工状态冲突沿用409，Java已提供的HTTP状态直接保留。"""
+
+    status = error.status_code or (409 if error.code is ToolErrorCode.BUSINESS_CONFLICT else 502)
+    return _error(error.code.value, status)
+
+
 def _reviewer(request: Request) -> BusinessIdentity:
     """复用现有网关身份约定，明确限制在复核角色。"""
 
@@ -205,7 +212,7 @@ async def preview_rework_action(
     except ReworkConfirmationError as error:
         raise _error(error.code, error.status_code) from None
     except ToolException as error:
-        raise _error(error.code.value, error.status_code or 502) from None
+        raise _tool_error(error) from None
     preview = PreviewOutput(
         run_id=run_id, approval_id=snapshot.approval_id, order_id=snapshot.prepared.order_id,
         expires_at=snapshot.expires_at, review=snapshot.prepared.review,
@@ -265,7 +272,7 @@ async def confirm_rework_action(
     except ReworkConfirmationError as error:
         raise _error(error.code, error.status_code) from None
     except ToolException as error:
-        raise _error(error.code.value, error.status_code or 502) from None
+        raise _tool_error(error) from None
     return _execution_output(result)
 
 
@@ -309,6 +316,7 @@ async def reconcile_rework_action(
             or draft.target.rework_task_id != target.rework_task_id
         ):
             raise _error("RESOURCE_NOT_FOUND", 404)
+        snapshot = await service.expire_unclaimed(snapshot)
         if snapshot.status in {"CANCELLED", "EXPIRED", "STALE"}:
             return NotSubmittedOutput(approval_id=approval_id, outcome="NOT_SUBMITTED")
         if snapshot.status == "WAITING_CONFIRMATION":
@@ -321,7 +329,7 @@ async def reconcile_rework_action(
     except ReworkConfirmationError as error:
         raise _error(error.code, error.status_code) from None
     except ToolException as error:
-        raise _error(error.code.value, error.status_code or 502) from None
+        raise _tool_error(error) from None
 
 
 @router.post("/{run_id}/{approval_id}/cancel", response_model=CancelOutput)
@@ -339,5 +347,5 @@ async def cancel_rework_action(
     except ReworkConfirmationError as error:
         raise _error(error.code, error.status_code) from None
     except ToolException as error:
-        raise _error(error.code.value, error.status_code or 502) from None
+        raise _tool_error(error) from None
     return CancelOutput(approval_id=approval_id)

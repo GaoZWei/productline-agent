@@ -104,7 +104,7 @@ test-agent-review: ## 验证 M7.6-F Review草稿、独立Approval、确认/取�
 test-agent-page: ## 验证统一抽屉、返工详情、四Skill集成和Docker页面链路
 	cd agent-frontend && npm test -- --run src/api/agentUnifiedClient.spec.ts src/api/agentMessageTimeout.spec.ts src/api/runEventClient.spec.ts src/api/reworkClient.spec.ts src/components/ReworkDetailPanel.spec.ts src/AppRework.spec.ts src/components/AgentResultView.spec.ts src/components/AgentWorkspaceDrawer.spec.ts src/components/ReviewApprovalCard.spec.ts src/App.spec.ts src/server.spec.mjs
 	cd agent-frontend && npm run build
-	./scripts/test-agent-persistence.sh -k "agent_read_skills_execute_through_unified_http or rework_actions_api"
+	./scripts/test-agent-persistence.sh -k "agent_read_skills_execute_through_unified_http or rework_actions_api or rework_agent_entry"
 	./scripts/test-agent-page-e2e.sh
 
 test-agent-java-fault-matrix: test-java-faults ## 验证 M7.7 场景01～08 Java/Tool全链路故障
@@ -352,6 +352,10 @@ test-rework-page: ## 验证T831返工详情/历史、切单隔离及真实Java�
 test-rework-actions: ## 验证T832～T834页面表单、独立确认及原审批结果核对
 	cd agent-frontend && npm test -- --run src/components/ReworkDetailPanel.spec.ts src/AppRework.spec.ts
 	./scripts/test-agent-persistence.sh -k rework_actions_api
+
+.PHONY: test-rework-page-flow
+test-rework-page-flow: ## 使用独占数据库和真实Java验证M8.7页面HTTP与Agent返工引导
+	sh ./scripts/test-rework-query-e2e.sh tests/e2e/test_rework_page_flow.py
 
 dev: ## 构建并启动 PostgreSQL、Java、Python 和 Web
 	$(COMPOSE) up --build

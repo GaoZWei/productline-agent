@@ -58,6 +58,7 @@ beforeEach(() => {
       "SPECIFICATION_ANSWER",
       "CLARIFICATION",
       "APPROVAL",
+      "REWORK_GUIDANCE",
     ],
     model: { configured: true, provider: "openai_compatible", model_name: "agent-model" },
     knowledge_index: {
@@ -82,6 +83,51 @@ afterEach(() => {
 });
 
 describe("Agent workspace drawer", () => {
+  it("返工候选选择重新发起只读定位，明确目标后仅打开表单", async () => {
+    const openRework = vi.fn()
+      .mockRejectedValueOnce(new BusinessApiError({ code: "RESOURCE_NOT_FOUND", message: "当前订单中没有该返工，请重新查询。" }))
+      .mockResolvedValueOnce(true);
+    const chosen = { task_id: "TASK-003", rework_task_id: "REWORK-002" };
+    mockedSend.mockResolvedValueOnce({
+      run_id: "run-options", session_id: "session-rework", trace_id: "trace-options",
+      result: {
+        kind: "REWORK_GUIDANCE", state: "CHOOSE_TARGET", order_id: "ORDER-003",
+        operation: "START_REWORK", candidates: [
+          { task_id: "TASK-003", rework_task_id: "REWORK-001" }, chosen,
+        ], status: null, round_number: null,
+      },
+    }).mockResolvedValueOnce({
+      run_id: "run-target", session_id: "session-rework", trace_id: "trace-target",
+      result: {
+        kind: "REWORK_GUIDANCE", state: "READY", order_id: "ORDER-003",
+        operation: "START_REWORK", candidates: [chosen], status: "PENDING", round_number: 1,
+      },
+    });
+    mountDrawer(undefined, "ORDER-003", openRework);
+    click('[data-testid="open-agent-drawer"]');
+    await settleUi();
+    input('[data-testid="agent-message-input"]', "开始返工");
+    click('[data-testid="submit-agent-message"]');
+    await settleUi();
+    expect(host?.textContent).toContain("找到多个返工");
+    clickText("REWORK-002");
+    await settleUi();
+    expect(mockedSend).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: "开始返工 ORDER-003 TASK-003 REWORK-002",
+    }), "stream-2");
+    expect(openRework).not.toHaveBeenCalled();
+    clickText("REWORK-002");
+    await settleUi();
+    expect(host?.textContent).toContain("当前订单中没有该返工，请重新查询");
+    clickText("REWORK-002");
+    await settleUi();
+    expect(openRework).toHaveBeenCalledTimes(2);
+    expect(openRework).toHaveBeenCalledWith("ORDER-003", chosen, "START_REWORK");
+    expect(host?.querySelector(".agent-drawer-layer")).toBeNull();
+    expect(mockedConfirm).not.toHaveBeenCalled();
+    expect(mockedRework).not.toHaveBeenCalled();
+  });
+
   it("跨页确认先加载目标，阻止重复点击，再用原问题和新会话发送", async () => {
     mockedSend.mockResolvedValueOnce(switchResponse()).mockResolvedValueOnce(statusResponse("session-new", "run-new"));
     let finishLoad: (() => void) | undefined;
@@ -416,7 +462,11 @@ describe("Agent workspace drawer", () => {
   });
 });
 
-function mountDrawer(switchOrder?: (orderId: string) => Promise<Order>, orderId = "ORDER-003") {
+function mountDrawer(
+  switchOrder?: (orderId: string) => Promise<Order>,
+  orderId = "ORDER-003",
+  openRework?: InstanceType<typeof AgentWorkspaceDrawer>["$props"]["openRework"],
+) {
   host = document.createElement("div");
   document.body.append(host);
   selectedOrder = ref({
@@ -425,7 +475,7 @@ function mountDrawer(switchOrder?: (orderId: string) => Promise<Order>, orderId 
     status: "QUALITY_CHECKING",
   });
   application = createApp({
-    setup: () => () => h(AgentWorkspaceDrawer, { order: selectedOrder?.value, switchOrder }),
+    setup: () => () => h(AgentWorkspaceDrawer, { order: selectedOrder?.value, switchOrder, openRework }),
   });
   application.mount(host);
 }

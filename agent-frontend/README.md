@@ -6,7 +6,7 @@ M7.6-G 订单业务与统一Agent页面，使用 Vue 3、TypeScript、Vite、Pin
 页面通过Java的`GET /api/orders`加载`ORDER-001`～`ORDER-030`，支持订单号/场景名称搜索、分类筛选与滚动，默认打开黄金场景`ORDER-003`，并从Java
 `/api/orders/{orderId}` 与 `/api/orders/{orderId}/overview` 读取业务事实。统一Agent抽屉先查询
 `GET /api/agent/capabilities`，再把当前订单提示和自然语言消息提交到`POST /api/agent/messages`；返回结果按
-`ORDER_STATUS`、`DIAGNOSIS`、`SPECIFICATION_ANSWER`、`CLARIFICATION`和`APPROVAL`五类展示。
+`ORDER_STATUS`、`DIAGNOSIS`、`SPECIFICATION_ANSWER`、`CLARIFICATION`、`APPROVAL`和`REWORK_GUIDANCE`六类展示。
 
 任务下展示Java overview返回的已有返工编号、来源问题、状态和原因。场景名称、分类和能力提示保存在
 `src/demoScenarios.ts`，不提供业务状态；复杂多任务仍受6轮决策/8次Tool预算约束，非坐标系问题本轮仅作只读验证。
@@ -41,7 +41,15 @@ M7.6-G 订单业务与统一Agent页面，使用 Vue 3、TypeScript、Vite、Pin
 
 上一轮被驳回或退回后，按Java允许动作打开下一轮表单。预览显示原复核和本次原因。取得回执后重新读取订单和详情，可从“查看下一轮”打开Java返回的新编号，上一轮仍可查。
 
-确认前在标签页会话存储中按登录身份、订单、任务和返工保存原审批定位。失败或丢响应时，回到原详情点击“核对原审批结果”。查到回执后刷新详情，未查到则保留待核对状态。切单时隔离旧响应。存储被禁用、清理或原服务端会话到期时，恢复范围受限。专项用例本机尚未执行。
+同一订单总览刷新遇到可重试错误时，页面保留回执并提示当前总览是上次读取的内容。“重新加载”成功后可打开下一轮，重试只读总览。
+
+确认前在标签页会话存储中按登录身份、订单、任务和返工保存原审批定位。失败或丢响应时，回到原详情点击“核对原审批结果”。Java 详情读取遇到可重试错误时仍可核对已有审批，新操作需成功读取详情。查到回执后刷新详情，未查到则保留待核对状态。切单时隔离旧响应。存储被禁用、清理或原服务端会话到期时，恢复范围受限。专项用例本机尚未执行。
+
+## Agent 返工引导（T835，待验收）
+
+在当前订单的 Agent 抽屉输入“查询返工 TASK-003”或“开始返工 TASK-003 REWORK-001”。系统按Java定位任务和返工，有多个候选时选择一项后重新查询。查询结果可打开详情，动作结果打开当前仍允许的表单。检查、复核和处理材料由人员在表单填写，经过预览和独立确认后由Java执行。
+
+订单总览尚未包含目标时，页面先向Java重读当前订单并核对归属。目标仍缺失或读取失败时在抽屉显示错误，可重新查询。切单或离开业务全景会放弃旧的打开请求。
 
 同一订单抽屉会复用首次响应的`session_id`，切换订单时清除本地Session、结果与事件流，迟到响应也不能覆盖新订单。
 每轮统一消息及每次Approval确认都会先创建独立SSE事件流；页面实时展示Run、模型、RAG、Tool和Approval步骤、失败位置及耗时。
@@ -110,7 +118,7 @@ make build-web
 
 `test-run-timeline`定向覆盖SSE分块解析、连接确认、有限重连、`Last-Event-ID`续接、事件归并、时间线、
 诊断抽屉绑定和生产代理错误；`test-run-history`覆盖列表/详情Client、页面选择、历史Step、引用、Approval差异和失败展示，
-并联动后端隔离数据库测试；`test-agent-page`覆盖统一Client、五类结果、Session/SSE、模型错误、Review/返工确认、真实PostgreSQL
+并联动后端隔离数据库测试；`test-agent-page`覆盖统一Client、六类结果、Session/SSE、模型错误、Review/返工确认、真实PostgreSQL
 四Skill生产集成，以及隔离Compose中的生产页面、Java/Agent代理、固定诊断与失败语义；`test-web`覆盖全部页面测试，
 `build-web`同时执行Vue TypeScript检查和Vite构建。
 
