@@ -15,7 +15,13 @@ from app.observability import get_trace_id
 from app.schemas.business import BusinessIdentity
 from app.schemas.context import PageContext, PageType
 from app.schemas.rework import (
-    BusinessId, OrderId, ReworkInspection, ReworkProcessing, ReworkReview, ReworkSchema, TaskId,
+    BusinessId,
+    OrderId,
+    ReworkInspection,
+    ReworkProcessing,
+    ReworkReview,
+    ReworkSchema,
+    TaskId,
 )
 from app.schemas.rework_approval import ReworkDraftReview
 from app.schemas.rework_confirmation import ReworkConfirmationRequest
@@ -170,7 +176,9 @@ def _service(request: Request, identity: BusinessIdentity, run_id: str) -> Obser
     )
 
 
-@router.post("/preview", response_model=QualityPreviewOutput | NextRoundPreviewOutput | PreviewOutput)
+@router.post(
+    "/preview", response_model=QualityPreviewOutput | NextRoundPreviewOutput | PreviewOutput
+)
 async def preview_rework_action(
     request: Request, identity: _Reviewer, body: Annotated[object, Body()]
 ) -> PreviewOutput:
@@ -191,20 +199,24 @@ async def preview_rework_action(
         user_role=identity.role,
     )
     async with database.session() as session, session.begin():
-        session.add(AgentSession(
-            session_id=session_id,
-            user_id=identity.user_id,
-            expires_at=now + timedelta(seconds=request.app.state.settings.session_ttl_seconds),
-        ))
+        session.add(
+            AgentSession(
+                session_id=session_id,
+                user_id=identity.user_id,
+                expires_at=now + timedelta(seconds=request.app.state.settings.session_ttl_seconds),
+            )
+        )
         await session.flush()
-        session.add(AgentRun(
-            run_id=run_id,
-            session_id=session_id,
-            status=AgentRunStatus.RUNNING,
-            started_at=now,
-            version_snapshot=request.app.state.run_version_snapshot.model_dump(mode="json"),
-            page_context_snapshot=page.model_dump(mode="json"),
-        ))
+        session.add(
+            AgentRun(
+                run_id=run_id,
+                session_id=session_id,
+                status=AgentRunStatus.RUNNING,
+                started_at=now,
+                version_snapshot=request.app.state.run_version_snapshot.model_dump(mode="json"),
+                page_context_snapshot=page.model_dump(mode="json"),
+            )
+        )
     try:
         snapshot = await _service(request, identity, run_id).create(
             command.command, expected_order_id=command.order_id
@@ -214,8 +226,11 @@ async def preview_rework_action(
     except ToolException as error:
         raise _tool_error(error) from None
     preview = PreviewOutput(
-        run_id=run_id, approval_id=snapshot.approval_id, order_id=snapshot.prepared.order_id,
-        expires_at=snapshot.expires_at, review=snapshot.prepared.review,
+        run_id=run_id,
+        approval_id=snapshot.approval_id,
+        order_id=snapshot.prepared.order_id,
+        expires_at=snapshot.expires_at,
+        review=snapshot.prepared.review,
     )
     operation = preview.review.draft.operation
     detail = snapshot.prepared.current_rework
@@ -285,7 +300,9 @@ def _execution_output(result: ReworkExecutionReport) -> ConfirmOutput:
         outcome=result.outcome,
         operation_id=receipt.operation_id if receipt else None,
         next_rework_task_id=(
-            receipt.rework_task_id if receipt and receipt.operation == "CREATE_NEXT_REWORK" else None
+            receipt.rework_task_id
+            if receipt and receipt.operation == "CREATE_NEXT_REWORK"
+            else None
         ),
         error_code=result.error.code if result.error else None,
     )
@@ -334,7 +351,10 @@ async def reconcile_rework_action(
 
 @router.post("/{run_id}/{approval_id}/cancel", response_model=CancelOutput)
 async def cancel_rework_action(
-    run_id: ContextIdentifier, approval_id: ApprovalIdentifier, request: Request, identity: _Reviewer
+    run_id: ContextIdentifier,
+    approval_id: ApprovalIdentifier,
+    request: Request,
+    identity: _Reviewer,
 ) -> CancelOutput:
     """取消尚待确认的原审批，取消路径无业务写入。"""
 

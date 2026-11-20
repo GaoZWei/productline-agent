@@ -50,7 +50,9 @@ def page_client(database: Database, java: ExecutionHarness) -> httpx.AsyncClient
 async def preview(client: httpx.AsyncClient, case: Case) -> str:
     """取得实际审批地址，同时验证公开响应只含审查信息。"""
 
-    result = await client.post(f"{_PATH}/preview", json={"order_id": ORDER, "command": command(case)})
+    result = await client.post(
+        f"{_PATH}/preview", json={"order_id": ORDER, "command": command(case)}
+    )
     assert result.status_code == 200, result.text
     payload = result.json()
     fields = {"run_id", "approval_id", "order_id", "expires_at", "review"}
@@ -74,9 +76,9 @@ async def test_rework_actions_api_preview_and_concurrent_confirmation_write_once
             path = await preview(client, case)
             assert not java.writes
             decision = {"decision": "CONFIRM"}
-            results = await asyncio.gather(*(
-                client.post(f"{path}/confirm", json=decision) for _ in range(2)
-            ))
+            results = await asyncio.gather(
+                *(client.post(f"{path}/confirm", json=decision) for _ in range(2))
+            )
             assert sorted(res.status_code for res in results)[0] == 200
             success = [res.json() for res in results if res.status_code == 200]
             assert len(success) == 1 and success[0]["outcome"] == "SUCCEEDED"
@@ -149,14 +151,19 @@ async def test_rework_actions_api_rejects_bad_material_and_unavailable_operation
                 result = await client.post(f"{_PATH}/preview", json=body)
                 assert result.status_code == 400
                 assert set(result.json()["detail"]) == {"code", "trace_id"}
-            denied = await client.post(f"{_PATH}/preview", json=valid, headers={"X-User-Role": "VIEWER"})
+            denied = await client.post(
+                f"{_PATH}/preview", json=valid, headers={"X-User-Role": "VIEWER"}
+            )
             assert denied.status_code == 403 and not java.calls
-            assert (await client.post(
-                f"{_PATH}/preview", json={**valid, "order_id": "ORDER-OTHER"}
-            )).status_code == 404
+            assert (
+                await client.post(f"{_PATH}/preview", json={**valid, "order_id": "ORDER-OTHER"})
+            ).status_code == 404
         async with database.session() as session:
             assert await session.scalar(select(func.count()).select_from(AgentRun)) == 1
-            assert await session.scalar(select(func.count()).select_from(ReworkConfirmationRecord)) == 0
+            assert (
+                await session.scalar(select(func.count()).select_from(ReworkConfirmationRecord))
+                == 0
+            )
         assert not java.writes
     finally:
         await java.shared.aclose()
@@ -189,17 +196,21 @@ async def test_rework_actions_api_quality_disposition_and_binding(
             items = body["items"]
             assert isinstance(items, list)
             if disposition == "FAILED":
-                items.append({
-                    "checkItem": "范围边界",
-                    "result": "FAILED",
-                    "comment": "  实际失败证据  ",
-                    "evidenceReferences": ["report:manual-2"],
-                })
+                items.append(
+                    {
+                        "checkItem": "范围边界",
+                        "result": "FAILED",
+                        "comment": "  实际失败证据  ",
+                        "evidenceReferences": ["report:manual-2"],
+                    }
+                )
         else:
             body["status"] = disposition
         java.raw_receipt.update(status=rework_status, issueStatus=issue_status)
         async with page_client(database, java) as client:
-            response = await client.post(f"{_PATH}/preview", json={"order_id": ORDER, "command": body})
+            response = await client.post(
+                f"{_PATH}/preview", json={"order_id": ORDER, "command": body}
+            )
             assert response.status_code == 200, response.text
             payload = response.json()
             assert not java.writes
@@ -243,7 +254,9 @@ async def test_rework_actions_api_changed_quality_evidence_invalidates_original_
             if case.operation == "REGISTER_REWORK_INSPECTION":
                 nested(java.data[2], "processing")["evidenceReferences"] = ["report:changed"]
             else:
-                nested(java.data[2], "inspection", "items", 0)["evidenceReferences"] = ["report:changed"]
+                nested(java.data[2], "inspection", "items", 0)["evidenceReferences"] = [
+                    "report:changed"
+                ]
             result = await client.post(f"{path}/confirm", json={"decision": "CONFIRM"})
             assert result.status_code == 409 and result.json()["detail"]["code"] == "APPROVAL_STALE"
             assert not java.writes
@@ -265,13 +278,17 @@ async def test_rework_actions_api_reconcile_next_round_uses_only_original_key(
             path = await preview(client, java.case)
             target = {"order_id": ORDER, "task_id": TASK, "rework_task_id": REWORK}
             waiting = await client.post(f"{path}/reconcile", json=target)
-            assert waiting.status_code == 200 and waiting.json()["outcome"] == "WAITING_CONFIRMATION"
+            assert (
+                waiting.status_code == 200 and waiting.json()["outcome"] == "WAITING_CONFIRMATION"
+            )
             assert not java.writes and not java.lookups
             java.lose_response = True
             result = await client.post(f"{path}/confirm", json={"decision": "CONFIRM"})
             assert result.status_code == 200 and result.json()["outcome"] == "UNKNOWN"
             assert result.json()["error_code"] is not None
-            mismatch = await client.post(f"{path}/reconcile", json={**target, "order_id": "ORDER-OTHER"})
+            mismatch = await client.post(
+                f"{path}/reconcile", json={**target, "order_id": "ORDER-OTHER"}
+            )
             assert mismatch.status_code == 404 and not java.lookups
             java.found = False
             missing = await client.post(f"{path}/reconcile", json=target)
@@ -302,7 +319,8 @@ async def test_rework_actions_api_reconcile_cancelled_approval_never_queries_jav
             path = await preview(client, java.case)
             assert (await client.post(f"{path}/cancel")).status_code == 200
             result = await client.post(
-                f"{path}/reconcile", json={"order_id": ORDER, "task_id": TASK, "rework_task_id": REWORK}
+                f"{path}/reconcile",
+                json={"order_id": ORDER, "task_id": TASK, "rework_task_id": REWORK},
             )
             assert result.status_code == 200 and result.json()["outcome"] == "NOT_SUBMITTED"
             assert not java.writes and not java.lookups
@@ -319,7 +337,9 @@ async def test_rework_actions_api_reconcile_expired_interrupted_confirmation(
     database, java = Database(migrated_database_url), ExecutionHarness()
     original_key: str | None = None
 
-    async def interrupt_execution(service: ObservedReworkService, value: dict[str, str]) -> NoReturn:
+    async def interrupt_execution(
+        service: ObservedReworkService, value: dict[str, str]
+    ) -> NoReturn:
         """在确认已持久化后，模拟执行领取前或领取后、提交前的中断。"""
 
         nonlocal original_key

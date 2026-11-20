@@ -49,9 +49,7 @@ def _json(response: httpx.Response) -> dict[str, Any]:
     return payload
 
 
-async def _seed_business(
-    admin: asyncpg.Connection, java: httpx.AsyncClient
-) -> tuple[str, str]:
+async def _seed_business(admin: asyncpg.Connection, java: httpx.AsyncClient) -> tuple[str, str]:
     """准备同订单两个独立待开始返工。后续推进全部经过页面审批入口。"""
 
     async with admin.transaction():
@@ -154,40 +152,72 @@ async def test_rework_page_flow_guidance_to_confirmation_and_next_round(
                 return data
 
             page_context = {
-                "current_system": "production-system", "current_page": "order-detail",
-                "order_id": _ORDER, "user_role": "REVIEWER",
+                "current_system": "production-system",
+                "current_page": "order-detail",
+                "order_id": _ORDER,
+                "user_role": "REVIEWER",
             }
-            first_turn = _json(await page.post("/api/agent/messages", json={
-                "message": "开始返工", "page_context": page_context,
-            }))
+            first_turn = _json(
+                await page.post(
+                    "/api/agent/messages",
+                    json={
+                        "message": "开始返工",
+                        "page_context": page_context,
+                    },
+                )
+            )
             guidance = first_turn["result"]
             assert guidance["kind"] == "REWORK_GUIDANCE" and guidance["state"] == "CHOOSE_TARGET"
             assert {(row["task_id"], row["rework_task_id"]) for row in guidance["candidates"]} == {
-                (_TASK, first), (_OTHER_TASK, other),
+                (_TASK, first),
+                (_OTHER_TASK, other),
             }
-            missing = _json(await page.post("/api/agent/messages", json={
-                "message": f"开始返工 {_ORDER} {_TASK} REWORK-T835-MISSING",
-                "session_id": first_turn["session_id"], "page_context": page_context,
-            }))
+            missing = _json(
+                await page.post(
+                    "/api/agent/messages",
+                    json={
+                        "message": f"开始返工 {_ORDER} {_TASK} REWORK-T835-MISSING",
+                        "session_id": first_turn["session_id"],
+                        "page_context": page_context,
+                    },
+                )
+            )
             assert missing["result"] == {
-                "kind": "REWORK_GUIDANCE", "state": "NOT_FOUND", "order_id": _ORDER,
-                "operation": "START_REWORK", "candidates": [], "status": None, "round_number": None,
+                "kind": "REWORK_GUIDANCE",
+                "state": "NOT_FOUND",
+                "order_id": _ORDER,
+                "operation": "START_REWORK",
+                "candidates": [],
+                "status": None,
+                "round_number": None,
             }
-            wrong_task = await page.post("/api/agent/messages", json={
-                "message": f"开始返工 {_ORDER} {_TASK} {other}",
-                "session_id": first_turn["session_id"], "page_context": page_context,
-            })
+            wrong_task = await page.post(
+                "/api/agent/messages",
+                json={
+                    "message": f"开始返工 {_ORDER} {_TASK} {other}",
+                    "session_id": first_turn["session_id"],
+                    "page_context": page_context,
+                },
+            )
             assert wrong_task.status_code == 409, wrong_task.text
             assert wrong_task.json()["code"] == "BUSINESS_CONFLICT"
-            selected = _json(await page.post("/api/agent/messages", json={
-                "message": f"开始返工 {_ORDER} {_TASK} {first}",
-                "session_id": first_turn["session_id"], "page_context": page_context,
-            }))["result"]
+            selected = _json(
+                await page.post(
+                    "/api/agent/messages",
+                    json={
+                        "message": f"开始返工 {_ORDER} {_TASK} {first}",
+                        "session_id": first_turn["session_id"],
+                        "page_context": page_context,
+                    },
+                )
+            )["result"]
             assert selected["state"] == "READY" and selected["operation"] == "START_REWORK"
             assert selected["status"] == "PENDING"
             assert selected["candidates"] == [{"task_id": _TASK, "rework_task_id": first}]
             async with database.session() as session:
-                count = await session.scalar(select(func.count()).select_from(ReworkConfirmationRecord))
+                count = await session.scalar(
+                    select(func.count()).select_from(ReworkConfirmationRecord)
+                )
                 assert count == 0
                 run = await session.get(AgentRun, missing["run_id"])
                 assert run is not None and run.status is AgentRunStatus.SUCCEEDED
@@ -196,17 +226,26 @@ async def test_rework_page_flow_guidance_to_confirmation_and_next_round(
             assert (await detail(first))["taskVersion"] == 1
 
             async def preview(
-                operation: str, rework_id: str, **materials: object,
+                operation: str,
+                rework_id: str,
+                **materials: object,
             ) -> tuple[str, dict[str, Any]]:
                 """请求页面预览并记下本次独立审批身份。"""
 
-                result = _json(await page.post(f"{_ACTIONS}/preview", json={
-                    "order_id": _ORDER,
-                    "command": {
-                        "operation": operation, "task_id": _TASK,
-                        "rework_task_id": rework_id, **materials,
-                    },
-                }))
+                result = _json(
+                    await page.post(
+                        f"{_ACTIONS}/preview",
+                        json={
+                            "order_id": _ORDER,
+                            "command": {
+                                "operation": operation,
+                                "task_id": _TASK,
+                                "rework_task_id": rework_id,
+                                **materials,
+                            },
+                        },
+                    )
+                )
                 return f"{_ACTIONS}/{result['run_id']}/{result['approval_id']}", result
 
             async def confirm(path: str) -> dict[str, Any]:
@@ -268,7 +307,9 @@ async def test_rework_page_flow_guidance_to_confirmation_and_next_round(
 
             failed = await detail(first)
             writes_before = len(transport.writes)
-            stale_resume = await page.post(f"{obsolete_resume}/confirm", json={"decision": "CONFIRM"})
+            stale_resume = await page.post(
+                f"{obsolete_resume}/confirm", json={"decision": "CONFIRM"}
+            )
             assert stale_resume.status_code == 409, stale_resume.text
             assert stale_resume.json()["detail"]["code"] == "APPROVAL_STALE"
             assert len(transport.writes) == writes_before
@@ -291,16 +332,22 @@ async def test_rework_page_flow_guidance_to_confirmation_and_next_round(
 
             mixed_items = [
                 {
-                    "checkItem": "坐标系", "result": "PASSED", "comment": "坐标系核对通过",
+                    "checkItem": "坐标系",
+                    "result": "PASSED",
+                    "comment": "坐标系核对通过",
                     "evidenceReferences": ["report:t835-coordinate"],
                 },
                 {
-                    "checkItem": "范围边界", "result": "FAILED", "comment": "人工核对发现范围偏差",
+                    "checkItem": "范围边界",
+                    "result": "FAILED",
+                    "comment": "人工核对发现范围偏差",
                     "evidenceReferences": ["report:t835-boundary-failed"],
                 },
             ]
             failed_path, failed_card = await preview(
-                "REGISTER_REWORK_INSPECTION", first, items=mixed_items,
+                "REGISTER_REWORK_INSPECTION",
+                first,
+                items=mixed_items,
             )
             assert failed_card["review"]["expected_effects"]["rework_status_after"] == "RUNNING"
             assert (await confirm(failed_path))["outcome"] == "SUCCEEDED"
@@ -311,29 +358,43 @@ async def test_rework_page_flow_guidance_to_confirmation_and_next_round(
             assert failed_check["inspection"]["items"] == mixed_items
             assert "SUBMIT_REWORK_REVIEW" not in failed_check["allowedActions"]
 
-            blocked_review = await page.post(f"{_ACTIONS}/preview", json={
-                "order_id": _ORDER,
-                "command": {
-                    "operation": "SUBMIT_REWORK_REVIEW", "task_id": _TASK, "rework_task_id": first,
-                    "status": "APPROVED", "review_comment": "尝试提前复核",
+            blocked_review = await page.post(
+                f"{_ACTIONS}/preview",
+                json={
+                    "order_id": _ORDER,
+                    "command": {
+                        "operation": "SUBMIT_REWORK_REVIEW",
+                        "task_id": _TASK,
+                        "rework_task_id": first,
+                        "status": "APPROVED",
+                        "review_comment": "尝试提前复核",
+                    },
                 },
-            })
+            )
             assert blocked_review.status_code == 409, blocked_review.text
             error = blocked_review.json()["detail"]
             assert error["code"] == "BUSINESS_CONFLICT" and set(error) == {"code", "trace_id"}
             assert len(transport.writes) == 7
             assert await detail(first) == failed_check
 
-            inspect, inspection_card = await preview("REGISTER_REWORK_INSPECTION", first, items=[
-                {
-                    "checkItem": "坐标系", "result": "PASSED", "comment": "人工核对通过",
-                    "evidenceReferences": ["report:t835-inspection"],
-                },
-                {
-                    "checkItem": "范围边界", "result": "PASSED", "comment": "重新核对范围通过",
-                    "evidenceReferences": ["report:t835-boundary-passed"],
-                },
-            ])
+            inspect, inspection_card = await preview(
+                "REGISTER_REWORK_INSPECTION",
+                first,
+                items=[
+                    {
+                        "checkItem": "坐标系",
+                        "result": "PASSED",
+                        "comment": "人工核对通过",
+                        "evidenceReferences": ["report:t835-inspection"],
+                    },
+                    {
+                        "checkItem": "范围边界",
+                        "result": "PASSED",
+                        "comment": "重新核对范围通过",
+                        "evidenceReferences": ["report:t835-boundary-passed"],
+                    },
+                ],
+            )
             bound_artifact = inspection_card["bound_materials"]["processing"]["artifact"]
             assert bound_artifact == materials["artifact"]
             assert (await confirm(inspect))["outcome"] == "SUCCEEDED"
@@ -345,20 +406,31 @@ async def test_rework_page_flow_guidance_to_confirmation_and_next_round(
                 inspected["inspection"]["processingRevision"]
                 == failed_check["inspection"]["processingRevision"]
             )
-            inspection_history = _json(await java.get(
-                f"/api/tasks/{_TASK}/reworks/{first}/inspections", params={"limit": 2},
-            ))["data"]
-            assert inspection_history["records"] == [failed_check["inspection"], inspected["inspection"]]
+            inspection_history = _json(
+                await java.get(
+                    f"/api/tasks/{_TASK}/reworks/{first}/inspections",
+                    params={"limit": 2},
+                )
+            )["data"]
+            assert inspection_history["records"] == [
+                failed_check["inspection"],
+                inspected["inspection"],
+            ]
 
             review, review_card = await preview(
-                "SUBMIT_REWORK_REVIEW", first, status="REWORK_REQUIRED", review_comment="还需检查范围",
+                "SUBMIT_REWORK_REVIEW",
+                first,
+                status="REWORK_REQUIRED",
+                review_comment="还需检查范围",
             )
             assert review_card["bound_materials"]["inspection"] == inspected["inspection"]
             assert (await confirm(review))["outcome"] == "SUCCEEDED"
             returned = await detail(first)
             assert returned["review"]["status"] == "REWORK_REQUIRED"
             assert returned["issueStatus"] == "OPEN"
-            next_path, next_card = await preview("CREATE_NEXT_REWORK", first, reason="第二轮检查范围")
+            next_path, next_card = await preview(
+                "CREATE_NEXT_REWORK", first, reason="第二轮检查范围"
+            )
             assert next_card["previous_review"] == returned["review"]
             next_result = await confirm(next_path)
             assert next_result["outcome"] == "SUCCEEDED"
@@ -367,9 +439,55 @@ async def test_rework_page_flow_guidance_to_confirmation_and_next_round(
             successor = await detail(next_id)
             assert successor["roundNumber"] == 2 and successor["previousReworkTaskId"] == first
             assert successor["reworkTask"]["status"] == "PENDING"
+
+            # 页面入口须能完成新一轮，旧轮退回不替代本轮的独立检查与复核。
+            start_next, _ = await preview("START_REWORK", next_id)
+            assert (await confirm(start_next))["outcome"] == "SUCCEEDED"
+            next_materials = {
+                "artifact": {"artifactId": "artifact-t835", "artifactVersion": "002.0"},
+                "processing_comment": "第二轮人工修正完成",
+                "evidence_references": ["report:t835-second-round"],
+            }
+            result_next, _ = await preview("REGISTER_REWORK_RESULT", next_id, **next_materials)
+            assert (await confirm(result_next))["outcome"] == "SUCCEEDED"
+            check_next, _ = await preview(
+                "REGISTER_REWORK_INSPECTION",
+                next_id,
+                items=[
+                    {
+                        "checkItem": "范围边界",
+                        "result": "PASSED",
+                        "comment": "第二轮人工检查通过",
+                        "evidenceReferences": ["report:t835-second-check"],
+                    }
+                ],
+            )
+            assert (await confirm(check_next))["outcome"] == "SUCCEEDED"
+            checked_next = await detail(next_id)
+            assert checked_next["issueStatus"] == "RESOLVED" and checked_next["review"] is None
+            approve_next, approval_card = await preview(
+                "SUBMIT_REWORK_REVIEW",
+                next_id,
+                status="APPROVED",
+                review_comment="第二轮再次复核通过",
+            )
+            assert approval_card["bound_materials"]["inspection"] == checked_next["inspection"]
+            assert (await confirm(approve_next))["outcome"] == "SUCCEEDED"
+            closed_next = await detail(next_id)
+            assert closed_next["issueStatus"] == "CLOSED"
+            assert closed_next["review"]["status"] == "APPROVED"
+            assert closed_next["roundNumber"] == 2
+            assert closed_next["processing"]["artifact"] == next_materials["artifact"]
+            conditions = _json(await java.get(f"/api/orders/{_ORDER}/delivery-conditions"))["data"]
+            assert conditions["hasBlockers"] is True
+            assert any(
+                blocker["code"] == "ACTIVE_REWORK" and blocker["taskId"] == _OTHER_TASK
+                for blocker in conditions["blockers"]
+            )
+            assert conditions["order"]["status"] == "QUALITY_CHECKING"
             assert (await detail(first))["review"] == returned["review"]
             assert (await detail(other, task=_OTHER_TASK))["taskVersion"] == 1
-            assert len(transport.writes) == 10 and len(transport.lookups) == 1
+            assert len(transport.writes) == 14 and len(transport.lookups) == 1
             assert _json(await java.get(golden_path))["data"] == golden
     finally:
         try:

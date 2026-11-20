@@ -47,7 +47,7 @@ def parse_rework_entry(message: str) -> ReworkEntryCommand | None:
     match = _COMMAND.match(message)
     if match is None:
         return None
-    tokens = re.split(r"[\s，,]+", message[match.end():].strip(" \t：:。？！?!"))
+    tokens = re.split(r"[\s，,]+", message[match.end() :].strip(" \t：:。？\uff01?!"))
     ids: dict[str, str] = {}
     for token in filter(None, tokens):
         identifier = _IDENTIFIER.fullmatch(token)
@@ -118,7 +118,8 @@ class ReworkAgentEntry:
                 if (review_id := row.effective_review.rework_task_id) is not None
             )
             candidates.update(
-                (task.task_id, key) for key in ids
+                (task.task_id, key)
+                for key in ids
                 if command.rework_id is None or key == command.rework_id
             )
         if not candidates:
@@ -131,7 +132,9 @@ class ReworkAgentEntry:
         )
         if len(targets) > 1:
             return ReworkGuidanceResult(
-                state="CHOOSE_TARGET", order_id=order_id, operation=command.operation,
+                state="CHOOSE_TARGET",
+                order_id=order_id,
+                operation=command.operation,
                 candidates=targets,
             )
         target = targets[0]
@@ -151,7 +154,9 @@ class ReworkAgentEntry:
                 message="rework target binding differs",
                 retryable=False,
             )
-        task_version = next(task.task_version for task in snapshot.tasks if task.task_id == target.task_id)
+        task_version = next(
+            task.task_version for task in snapshot.tasks if task.task_id == target.task_id
+        )
         if detail.task_version != task_version:
             raise ToolException(
                 code=ToolErrorCode.BUSINESS_CONFLICT,
@@ -163,6 +168,9 @@ class ReworkAgentEntry:
         )
         return ReworkGuidanceResult(
             state="READY" if can_prepare else "ACTION_UNAVAILABLE",
-            order_id=order_id, operation=command.operation, candidates=targets,
-            status=detail.rework_task.status, round_number=detail.round_number,
+            order_id=order_id,
+            operation=command.operation,
+            candidates=targets,
+            status=detail.rework_task.status,
+            round_number=detail.round_number,
         )

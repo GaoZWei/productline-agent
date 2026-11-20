@@ -20,19 +20,24 @@ export MODEL_BASE_URL=
 export MODEL_API_KEY=
 export EMBEDDING_API_KEY=
 
+# 验收使用独占项目与显式测试变量，不读取开发环境的.env。
+page_e2e_compose() {
+  docker compose --env-file /dev/null "$@"
+}
+
 cleanup() {
-  docker compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  page_e2e_compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   rm -rf "${e2e_temp}"
 }
 trap cleanup EXIT INT TERM
 
-docker compose up --build --detach business-service
-docker compose build agent-service agent-frontend
-docker compose run --rm --no-deps agent-service \
+page_e2e_compose up --build --detach business-service
+page_e2e_compose build agent-service agent-frontend
+page_e2e_compose run --rm --no-deps agent-service \
   /service/.venv/bin/alembic upgrade head
-docker compose up --detach agent-service agent-frontend
+page_e2e_compose up --detach agent-service agent-frontend
 
-web_port="$(docker compose port agent-frontend 5173 | sed -n 's/.*://p' | head -n 1)"
+web_port="$(page_e2e_compose port agent-frontend 5173 | sed -n 's/.*://p' | head -n 1)"
 if [ -z "${web_port}" ]; then
   echo "无法解析 M7.6-G Web 服务端口" >&2
   exit 1
@@ -44,7 +49,7 @@ until curl --fail --silent "${web_url}/health" >"${e2e_temp}/web-health.json"; d
   attempt=$((attempt + 1))
   if [ "${attempt}" -ge 90 ]; then
     echo "M7.6-G agent-frontend 未在预期时间内就绪" >&2
-    docker compose logs agent-frontend agent-service business-service >&2
+    page_e2e_compose logs agent-frontend agent-service business-service >&2
     exit 1
   fi
   sleep 1
@@ -56,7 +61,7 @@ until curl --fail --silent "${web_url}/agent-api/health" \
   attempt=$((attempt + 1))
   if [ "${attempt}" -ge 60 ]; then
     echo "M7.6-G agent-service 代理链路未在预期时间内就绪" >&2
-    docker compose logs agent-service >&2
+    page_e2e_compose logs agent-service >&2
     exit 1
   fi
   sleep 1
@@ -68,7 +73,7 @@ until curl --fail --silent "${web_url}/business-api/health" \
   attempt=$((attempt + 1))
   if [ "${attempt}" -ge 60 ]; then
     echo "M7.6-G business-service 代理链路未在预期时间内就绪" >&2
-    docker compose logs business-service >&2
+    page_e2e_compose logs business-service >&2
     exit 1
   fi
   sleep 1

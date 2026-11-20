@@ -6,7 +6,7 @@
 状态字符串。当前已实现9个只读端点（含V4扩充后的订单列表），M0.5已实现提交复核和创建返工两个写端点，
 M0.6 已增加统一响应、错误码和 Trace ID，M0.7 已增加仅供开发验证的只读故障模拟。
 KB-02.1新增无写入的知识管理授权查询`POST /api/knowledge/authorize`，详见[知识管理授权契约](../knowledge/KNOWLEDGE_AUTHORIZATION.md)。
-M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，T806已实现返工详情GET，T807～T809及T811/T812已实现`POST /api/tasks/{taskId}/reworks/{reworkTaskId}/start`、`/block`、`/fail`、`/resume`、`/results`及`/inspections`，T815已接通同一返工路径下`GET /results`及`/inspections`历史分页，T816已接通本返工`GET /reviews`及任务级`GET /api/tasks/{taskId}/effective-reviews`，T817/T818已接通同一返工路径`POST /review`的通过关闭和退回OPEN分支。T819已开发受控首轮及下一轮创建，T820已开发`GET /api/orders/{orderId}/delivery-conditions`，均已通过本机Java验收；其他新增路径及三端确认仍待开发。
+M8在T804冻结[返工生命周期契约v1](REWORK_CONTRACT.md)，现已接通详情/历史、开始/异常/恢复、成果/人工检查、再次复核与问题关闭、受控首轮/下一轮、有效复核、交付条件及原回执查询；Python Client/Tool、独立确认、唯一提交和页面八类已有轮次操作也已接通。M8.1～M8.8及T801～T840已完成本机分层验收，实际结果见[STATUS](../STATUS.md)；独立列表等未实现路径仍按M8契约明确标注，不能据完成状态推定可调用。
 
 JSON 中状态字段必须使用下列大写字符串，不接受数字序号、显示文案或大小写变体。
 
@@ -188,7 +188,7 @@ Idempotency-Key: 调用方为一次业务动作生成的稳定唯一值
   前后状态；重放幂等请求不重复生成日志。
 
 当前 `X-User-Id`/`X-User-Role` 是 M0.5 的最小身份上下文，不等同于真实认证令牌或人工确认凭证。
-既有M6/M7已接入Agent Approval、Python写Tool及确认用户校验，复核与创建返工分别确认；M8新增动作尚未接入。
+既有M6/M7已接入Agent Approval、Python写Tool及确认用户校验，复核与创建返工分别确认；M8新增动作已通过独立草稿、确认、唯一提交及原键核对接线，旧创建路径与旧审批含义保持，不静默切换为新受控首轮。
 
 ## 4. M0.6 统一响应、错误与 Trace ID
 
@@ -600,3 +600,5 @@ T829新增[唯一执行、一次提交与原键核对](REWORK_CONTRACT.md#34-t82
 T830新增[Run/Step、状态审计与提交后事件](REWORK_CONTRACT.md#35-t830-runstep状态审计与提交后事件)：独立审查使用专属Run，状态、职责Step与白名单审计同事务，提交后尽力通知；补发重验完整绑定，模式误装配拒绝，通知失败或自行取消不覆盖业务结果、不重发。2026-11-19专项、隔离数据库、真实Java九动作/两轮及兼容回归通过，M8.6已在停止线验收；本轮仅修正格式/说明和等值正则字面量，没有HTTP、Java或事件字段变更，生产入口仍待M8.7。
 
 T831新增[返工详情与分页历史只读页面](REWORK_CONTRACT.md#36-t831-返工详情与分页历史只读页面)：从任务下的已有返工打开，使用既有Java详情及三类历史GET，严格校验资源/当前材料和分页顺序，存量缺证据不补造，允许动作仅展示。页面及真实Java/生产代理联调已通过，没有Java/HTTP字段变更；写入表单、独立确认和返工Agent入口仍待后续。
+
+T832～T835已接通并验收[页面操作预览与独立确认](REWORK_CONTRACT.md#37-t832-页面操作预览与独立确认)、检查/复核证据卡、下一轮及原审批核对，以及[受控短句引导](REWORK_CONTRACT.md#40-t835-agent返工引导)。2026-11-20页面组件、隔离HTTP、真实Java第二轮关闭与部署烟测通过，M8.7已在停止线收口；本轮只修正规范、补齐验收和隔离脚本，不新增或改变HTTP字段、Java契约、业务权限或写入规则。

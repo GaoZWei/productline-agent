@@ -55,7 +55,10 @@ def test_rework_agent_entry_parser(
     ],
 )
 async def test_rework_agent_entry_through_unified_http(
-    migrated_database_url: str, message: str, expected: str, reads: int,
+    migrated_database_url: str,
+    message: str,
+    expected: str,
+    reads: int,
 ) -> None:
     database, java = Database(migrated_database_url), ExecutionHarness()
     model, skills = AsyncMock(), AsyncMock()
@@ -82,12 +85,18 @@ async def test_rework_agent_entry_through_unified_http(
         ) as client:
             response = await client.post(
                 "/api/agent/messages",
-                headers={"X-User-Id": "reviewer-test", "X-User-Role": "REVIEWER", "X-Trace-Id": TRACE},
+                headers={
+                    "X-User-Id": "reviewer-test",
+                    "X-User-Role": "REVIEWER",
+                    "X-Trace-Id": TRACE,
+                },
                 json={
                     "message": message,
                     "page_context": {
-                        "current_system": "production-system", "current_page": "order-detail",
-                        "order_id": ORDER, "user_role": "REVIEWER",
+                        "current_system": "production-system",
+                        "current_page": "order-detail",
+                        "order_id": ORDER,
+                        "user_role": "REVIEWER",
                     },
                 },
             )
@@ -95,7 +104,10 @@ async def test_rework_agent_entry_through_unified_http(
         result = response.json()["result"]
         assert result["kind"] == "REWORK_GUIDANCE" and result["state"] == expected
         if expected == "CHOOSE_TARGET":
-            assert {item["rework_task_id"] for item in result["candidates"]} == {REWORK, "REWORK-SECOND"}
+            assert {item["rework_task_id"] for item in result["candidates"]} == {
+                REWORK,
+                "REWORK-SECOND",
+            }
             assert result["status"] is None
         elif expected == "READY":
             assert result["candidates"] == [{"task_id": TASK, "rework_task_id": REWORK}]
@@ -104,7 +116,10 @@ async def test_rework_agent_entry_through_unified_http(
         model.complete_structured.assert_not_called()
         skills.dispatch.assert_not_called()
         async with database.session() as session:
-            assert await session.scalar(select(func.count()).select_from(ReworkConfirmationRecord)) == 0
+            assert (
+                await session.scalar(select(func.count()).select_from(ReworkConfirmationRecord))
+                == 0
+            )
             run = await session.scalar(select(AgentRun))
             assert run is not None and run.tool_call_count == reads and run.final_result == result
     finally:

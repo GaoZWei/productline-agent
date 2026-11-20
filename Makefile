@@ -357,6 +357,11 @@ test-rework-actions: ## 验证T832～T834页面表单、独立确认及原审批
 test-rework-page-flow: ## 使用独占数据库和真实Java验证M8.7页面HTTP与Agent返工引导
 	sh ./scripts/test-rework-query-e2e.sh tests/e2e/test_rework_page_flow.py
 
+.PHONY: test-rework-e2e
+test-rework-e2e: ## M8.8完整隔离验收：正常/多轮/并发/故障/黄金及真实页面代理，正逆序两轮
+	cd agent-service && uv run --frozen pytest -q tests/test_rework_acceptance_fixtures.py
+	sh ./scripts/test-rework-e2e.sh
+
 dev: ## 构建并启动 PostgreSQL、Java、Python 和 Web
 	$(COMPOSE) up --build
 

@@ -32,6 +32,7 @@ class AgentMessageSchema(BaseModel):
         str_strip_whitespace=True,
     )
 
+
 # 澄清选择模型
 class ClarificationChoice(AgentMessageSchema):
     """引用上一轮澄清Run, 并提交实体选择或意图确认中的一种。"""
@@ -48,14 +49,15 @@ class ClarificationChoice(AgentMessageSchema):
             raise ValueError("clarification choice must contain exactly one user decision")
         return self
 
+
 # 严格请求模型
 class AgentMessageRequest(AgentMessageSchema):
     """一轮统一Agent请求, 可创建会话或续接本人已有会话。"""
 
-    message: Annotated[str, Field(min_length=1, max_length=2000)] # 当前用户消息
-    session_id: SessionIdentifier | None = None # 没有则创建新 Session
-    page_context: PageContext | None = None # 当前页面提供的提示
-    clarification: ClarificationChoice | None = None # 用户对上一轮澄清的回答
+    message: Annotated[str, Field(min_length=1, max_length=2000)]  # 当前用户消息
+    session_id: SessionIdentifier | None = None  # 没有则创建新 Session
+    page_context: PageContext | None = None  # 当前页面提供的提示
+    clarification: ClarificationChoice | None = None  # 用户对上一轮澄清的回答
 
     @model_validator(mode="after")
     def require_session_for_clarification(self) -> Self:
@@ -64,6 +66,7 @@ class AgentMessageRequest(AgentMessageSchema):
         if self.clarification is not None and self.session_id is None:
             raise ValueError("clarification continuation requires session_id")
         return self
+
 
 # 结果类型模型
 class AgentResultKind(StrEnum):
@@ -169,7 +172,9 @@ class ReworkGuidanceResult(AgentResultEnvelope):
         """仅选定唯一目标时展示Java详情，模糊目标不携带操作入口。"""
 
         if self.state in {"READY", "ACTION_UNAVAILABLE"}:
-            valid = self.order_id is not None and len(self.candidates) == 1 and self.status is not None
+            valid = (
+                self.order_id is not None and len(self.candidates) == 1 and self.status is not None
+            )
         elif self.state == "CHOOSE_TARGET":
             valid = self.order_id is not None and len(self.candidates) >= 2 and self.status is None
         else:

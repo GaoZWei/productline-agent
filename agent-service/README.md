@@ -12,6 +12,9 @@ Python 3.12/FastAPI Agent 编排服务。Java HTTP Client 和七个只读业务 
 幂等接收、候选构建及管理库发布/停用/人工重试应用，尚无对应HTTP、自动后台执行或问答切源。当前进度与实际验证见[STATUS](../docs/STATUS.md)，完整阅读入口见
 [文档导航](../docs/README.md)。历史验收不代表当前运行库状态，小样本模型验收不代替完整真实质量评测。
 
+返工当前状态（2026-11-20）：M8.1～M8.8及T801～T840已完成开发和本机分层验收，Java事实查询、独立人工确认、唯一提交、原键回执核对、页面操作和受控短句引导均已接通。`make test-rework-e2e`已覆盖完整隔离验收，实际结果以STATUS为准；本轮未更新既有运行环境，也未执行完整浏览器人工验收。
+下文T821～T840按阶段保留实现过程和交付边界，“本轮未接线/下一任务”指对应阶段当时状态，不表示当前仍待开发；自动成果修正、复杂权限和完整交付状态机仍属后续扩展。
+
 ## 本地开发
 
 uv 会按照 `.python-version` 安装/选择 Python 3.12，并根据 `uv.lock` 创建 `.venv`：
@@ -226,13 +229,13 @@ Client 显式使用 `trust_env=False`，避免内部服务流量被宿主机 HTT
 Client每次只发一次请求，写入超时或无法确认回执时不允许自动重发，也不宣称未写入；原成功重放仍应使用原请求/原键。列表仍无Java/Client实现，不以空结果代替；T824已补回执只读查询Client及独立核对Tool，共享只读POST仅额外允许合法任务下固定查询路径，普通写POST仍强制幂等键。T822/T823独立注册表未整体生产装配，T825已单独把有效复核消费接入现有诊断只读动作，新写入仍不开放。
 本轮没有修改lifespan、注册新Tool、开放HTTP路由或接入Approval/页面；代码存在不代表生产已启用。`tests/test_rework_contract.py`使用纯Schema和MockTransport，不代替真实Java或整链验收；本轮已通过本机pytest、mypy及相关模块Ruff格式/lint，真实Python→Java联调仍待后续。可执行`make test-agent-client test-tools`及[STATUS](../docs/STATUS.md)列出的局部回归，M8.4及T821离线契约已验收。完整字段和边界见[契约第二十五节](../docs/api/REWORK_CONTRACT.md#25-t821-python-schema与http-client开发边界)。
 
-## T822 M8内部只读Tool（离线验收通过，未生产装配）
+## T822 M8内部只读Tool（阶段验收通过）
 
 `app.tools.rework_readonly.create_rework_read_tool_registry`显式创建独立六Tool注册表：get_rework_detail、get_rework_results、get_rework_inspections、get_rework_reviews、get_effective_rework_reviews和get_delivery_conditions。全部LOW风险并要求ToolContext中的REWORK_READ；输入只接受资源ID及适用的分页参数，身份/角色、权限和Trace不从Tool参数读取。Java仍最终裁决角色、归属及业务事实。
 六Tool复用T821 GET和BaseTool公共门禁，默认总预算5秒、最多额外一次重试，仅既有白名单中retryable=true的瞬时错误可重试；Java拒绝及不自洽响应不重试，Client不叠加策略。历史每次只读一页，保留原始说明、失败检查、退回意见、显式null与存量记录，不挑历史通过或自动翻页。游标在指纹前拒绝不可无损编码字符；同Run相同页拒绝重复，显式force_refresh才重新获取事实，不复用缓存结果。
 注册表不加入lifespan、原七只读Tool、生产Agent动作或诊断；服务端角色权限映射、Approval和页面仍待后续，不把内部能力描述为已启用。`tests/integration/tools/test_rework_read_tools.py`通过现有`make test-tools`目录收集并完成离线验收，覆盖实际MockTransport、权限/归属、重试/去重/超时/取消等；本机已通过正式Client/Tool入口、类型及相关文件格式/lint检查，实际结果见[STATUS](../docs/STATUS.md)，边界见[契约第二十六节](../docs/api/REWORK_CONTRACT.md#26-t822内部只读tool与调用策略边界)。
 
-## T823 M8内部写Tool（离线验收通过，未生产装配）
+## T823 M8内部写Tool（阶段验收通过）
 
 `app.tools.rework_write.create_rework_write_tool_registry`显式接收Client和`ReworkExecutionStore`端口，独立注册九个HIGH风险Tool。输入只接受approval_id和idempotency_key，目标、版本、轮次及完整材料来自服务端已确认的执行快照；核对用户/Run、确认人/有效期、EXECUTING状态、操作与原键后，仅调用一次Java，详情见[契约第二十七节](../docs/api/REWORK_CONTRACT.md#27-t823内部写tool与确认执行边界)。
 Client与Tool共同核对Java原回执的资源/版本/操作/轮次及材料绑定，再以完整快照交给Store保存；保存冲突不覆盖首次结果，不宣称Java回滚。全部错误不可自动重试，取消向上传播。失败检查、退回复核和关闭后的其他交付阻塞均由Java决定，不因Tool成功就推进订单交付。
@@ -251,7 +254,7 @@ lifespan使用`create_diagnosis_read_tool_registry`保留七个动作名称/权�
 固定规则和动态缺口检测比对任务版本及问题集合，受控问题必须CLOSED且当前复核APPROVED；历史拒绝不能永久阻塞当前通过，旧通过不能代替当前缺失/退回。错版本/缺问题/查询错误均保留缺口或停止，不退回旧历史，动态复核场景不能跳过问题状态。未纳管问题保持原规则，NONE仍不构成交付授权或状态推进；完整边界见[契约第三十节](../docs/api/REWORK_CONTRACT.md#30-t825-诊断有效复核视图与历史隔离)。
 诊断结果HTTP字段及七个Evidence Tool名称不变，当前缺复核可输出`effective_reviews.issues[index].review=null`字段证据，前端保留null。`make test-rework-diagnosis-e2e`使用原独占Java/PostgreSQL脚本验证真实两轮返工、固定/动态诊断及ORDER-003，新增入口不读取.env或调用真实模型。M8.5门禁已通过，下一最小任务T826未启动，新写入仍需M8.6独立确认及持久化适配。
 
-## T826 M8独立审批草稿契约（已验收，未接确认或执行）
+## T826 M8独立审批草稿契约（契约阶段已验收）
 
 `app.schemas.rework_approval`定义九类以operation区分的草稿，复用既有Java请求模型；`ReworkApprovalTarget`绑定任务/问题/原版本、轮次/前驱、当前成果标识/版本/修订、检查和复核身份，缺失字段必须显式null。首轮不能继承已有轮次，检查/复核必须绑定当前材料，后继须绑定前轮复核；契约本身只证明结构一致，T827取证流程已开发待验收，确认前校验仍待T828。
 `parse_rework_approval_draft`复制并校验嵌套材料，`validate_rework_draft_edit`允许本次请求材料进入最终审查，但禁止换动作、目标、版本、轮次或当前材料。`review_rework_approval_draft`返回固定Tool/所需权限及EXPECTED_IF_JAVA_ACCEPTS影响，登记说明不等于检查通过，本轮完成不等于最终验收，关闭问题仅重查交付条件；它是纯函数，不查询Java、不持久化确认、不发放执行权，详见[契约第三十一节](../docs/api/REWORK_CONTRACT.md#31-t826-独立审批草稿与审查契约)。
@@ -292,19 +295,32 @@ Store可选注入`ReworkStateObserver`，统一Run→审查行锁顺序，在原
 
 定向入口`make test-rework-observability`覆盖Python白名单/事件、隔离Agent数据库和前端事件解码；`make test-rework-execution-e2e`验证真实Java九动作、两轮及独立Run/Step/日志断言。用例同时纳入既有审批、持久化和`make test-agent-e2e`入口。2026-11-19上述专项及真实Java入口、`make test-approval test-tools test-diagnosis-rules`、原有`./scripts/test-agent-e2e.sh`均通过；类型、相关lint/格式及停止线复核完成，M8.6已验收，具体结果见[STATUS](../docs/STATUS.md)。下一最小任务T831仅登记待办，未接HTTP/Agent/页面生产入口，完整边界见[契约第三十五节](../docs/api/REWORK_CONTRACT.md#35-t830-runstep状态审计与提交后事件)。
 
-## T832 返工页面操作（待验收）
+## T832 返工页面操作（已验收）
 
 `/api/agent/rework-actions` 接入详情页的开始、阻塞、失败、恢复和成果登记。入口沿用网关身份Header并要求复核角色，服务端创建专属Run和会话，复用 `ObservedReworkService` 从Java确认订单和现有材料后保存审批。页面分别调用预览、取消或显式确认。确认只读原草稿，重校验后才领取一次执行权，业务写入和幂等由Java裁决。页面响应只返回审查草稿、执行结果或原回执编号，模型和自然语言路由留待T835。
 
-接口与失败处理见[返工契约第37节](../docs/api/REWORK_CONTRACT.md#37-t832-页面操作预览与独立确认)。用例纳入 `make test-rework-actions` 和 `make test-agent-page`，本机尚未执行。
+接口与失败处理见[返工契约第37节](../docs/api/REWORK_CONTRACT.md#37-t832-页面操作预览与独立确认)。用例已通过 `make test-rework-actions` 和 `make test-agent-page`，包括隔离Agent库的HTTP门禁回归。
 
-T833在同一入口增加 `REGISTER_REWORK_INSPECTION` 和 `SUBMIT_REWORK_REVIEW`。沿用复核角色校验，服务端为复核操作提供 `REVIEW_WRITE`，Java验证当前材料与写入权限。两类预览返回 `bound_materials`，数据取自原审批保存的Java快照。人工检查展示成果，复核同时展示同轮次同修订的通过检查。检查未通过时提交复核预览返回 `409 BUSINESS_CONFLICT`。原确认后二次取证发现材料变化时审批失效，要求刷新重审。T832/T833均待项目电脑验收。
+T833在同一入口增加 `REGISTER_REWORK_INSPECTION` 和 `SUBMIT_REWORK_REVIEW`。沿用复核角色校验，服务端为复核操作提供 `REVIEW_WRITE`，Java验证当前材料与写入权限。两类预览返回 `bound_materials`，数据取自原审批保存的Java快照。人工检查展示成果，复核同时展示同轮次同修订的通过检查。检查未通过时提交复核预览返回 `409 BUSINESS_CONFLICT`。原确认后二次取证发现材料变化时审批失效，要求刷新重审。T832/T833已通过本机页面、隔离HTTP及真实Java联调验收。
 
-T834增加 `CREATE_NEXT_REWORK` 与 `POST /{run_id}/{approval_id}/reconcile`。下一轮独立预览含原审批绑定的上一轮复核。主动核对验证原审批与当前页面定位，待确认或已确认未领取的审批到期后可原子终结，已领取的继续保留原执行键。有提交记录时只按原键查询Java回执。成功响应根据已校验回执提供操作及后继返工编号，查询未命中保持未知。详见[返工契约第39节](../docs/api/REWORK_CONTRACT.md#39-t834-下一轮与原审批结果核对)。本机尚未执行新增验收用例。
+T834增加 `CREATE_NEXT_REWORK` 与 `POST /{run_id}/{approval_id}/reconcile`。下一轮独立预览含原审批绑定的上一轮复核。主动核对验证原审批与当前页面定位，待确认或已确认未领取的审批到期后可原子终结，已领取的继续保留原执行键。有提交记录时只按原键查询Java回执。成功响应根据已校验回执提供操作及后继返工编号，查询未命中保持未知。详见[返工契约第39节](../docs/api/REWORK_CONTRACT.md#39-t834-下一轮与原审批结果核对)。本机隔离HTTP、页面恢复及真实Java原键核对用例已通过，标签页存储和有效会话限制保持。
 
-T835从统一消息入口识别明确的返工短句，复用只读订单交付条件和返工详情Tool。歧义通过候选选择重新读取，唯一目标返回 `REWORK_GUIDANCE`，供页面打开详情或现有操作表单。候选为空或详情返回资源不存在时，页面提示核对返工编号。Run/Step记录实际查询次数，获取写入审批仍由页面预览及人工确认触发。支持的句式和返回状态见[返工契约第40节](../docs/api/REWORK_CONTRACT.md#40-t835-agent返工引导)。新增用例待项目电脑验收。
+T835从统一消息入口识别明确的返工短句，复用只读订单交付条件和返工详情Tool。歧义通过候选选择重新读取，唯一目标返回 `REWORK_GUIDANCE`，供页面打开详情或现有操作表单。候选为空或详情返回资源不存在时，页面提示核对返工编号。Run/Step记录实际查询次数，获取写入审批仍由页面预览及人工确认触发。支持的句式和返回状态见[返工契约第40节](../docs/api/REWORK_CONTRACT.md#40-t835-agent返工引导)。统一HTTP、页面及真实Java目标核对用例已通过，不宣称任意自然语言材料提取或自动写入。
 
-`make test-rework-page-flow` 使用独占PostgreSQL、真实Java与生产FastAPI装配，发起Agent引导、预览、确认、取消和核对请求。测试仅在首个成功写入后注入丢响应，以同一个原键验证回执恢复，随后检查阻塞与失败后的恢复、失效草稿、失败检查禁止复核、通过检查的证据绑定、复核退回和下一轮。项目电脑可与 `make test-agent-page` 的页面用例配合验收。本机尚未执行。
+`make test-rework-page-flow` 使用独占PostgreSQL、真实Java与生产FastAPI装配，发起Agent引导、预览、确认、取消和核对请求。测试仅在首个成功写入后注入丢响应，以同一个原键验证回执恢复，随后检查阻塞与失败后的恢复、失效草稿、失败检查禁止复核、通过检查的证据绑定、复核退回和下一轮；第二轮逐项确认至复核关闭，断言旧历史、其他交付阻塞及ORDER-003保持。2026-11-20该入口及`make test-agent-page test-rework-actions test-web`均通过，M8.7停止线已验收，实际结果见[STATUS](../docs/STATUS.md)。Docker页面烟测显式使用`--env-file /dev/null`和独占项目，未访问运行库或调用模型；本轮不进入M8.8。
+
+## M8.8 完整隔离验收与黄金回归（T836～T840已验收）
+
+根目录执行`make test-rework-e2e`，先验证端点门禁、命名空间及人工材料，再由`scripts/test-rework-e2e.sh`两次分别启动和回收独占Java/PostgreSQL，第二轮反转用例顺序。
+入口已覆盖T836至T840：独立夹具及清理、首轮正常关闭、成果/检查变化失效和第二轮、幂等与最终版本竞争、权限归属和回执落库回滚、ORDER-003固定诊断/旧查询及真实前端同源代理。2026-11-20正序及逆序两轮实际通过，M8.8和M8首版已在停止线验收。
+
+`test_rework_acceptance_flows.py`逐动作核对预览零写入、独立确认、Java当前有效复核及历史，关闭问题后仍保留其他交付阻塞。`test_rework_acceptance_safety.py`只在测试传输层同步两个已确认写入或丢弃真实提交后的响应，不伪造Java成功；回执插入故障仅在独占库按本场景任务触发，验证检查/问题/版本/幂等/审计/回执整体回滚，随后只按原键查询而不重发。`test_rework_acceptance_golden.py`从生产固定诊断核对QUALITY_REVIEW、原始根因和建议，旧查询和Run/Step保持。
+
+`tests/e2e/rework_acceptance_fixtures.py`的`isolated_rework`先拒绝非脚本专用库、非环回Java地址及附加连接参数，场景键只接受T836～T840范围的短ASCII命名空间。每个场景拥有独立Agent库和固定业务编号，初始订单/任务/问题只插入专属命名空间，返工生命周期调用Java创建；`preview/confirm/cancel`使用真实生产页面HTTP，材料不直接写生命周期表。每份成果和人工检查样例独立创建，版本`001.0`按字符串保留，`fixture://`证据不代表真实影像成果或自动检查。
+
+同一轮每个场景键只使用一次，已有库或业务编号冲突直接失败，不接管、覆盖或重置；整轮重复使用相同固定编号时重建新容器。夹具退出先关闭应用连接池，再只删除自己成功创建的Agent库，业务夹具随独占容器回收，进入和退出均核对ORDER-003初始事实。Agent最小表由测试元数据创建，不替代Alembic迁移验收；运行库、种子、旧迁移、模型调用和知识读源不参与。
+
+边界单测可单独执行`uv run --frozen pytest -q tests/test_rework_acceptance_fixtures.py`，不连接数据库。真实用例缺少隔离环境变量时跳过，只有通过根级专用入口实际运行才计为通过；普通前端全量中跳过的真实查询用例已由本入口启动独占环境实际执行。T840还实际执行`make test-business-data test-diagnosis-rules test-agent-e2e test-web`，验证固定数据/迁移兼容、黄金规则、旧Agent/确认、既有M8执行及页面；具体分层结果见[STATUS](../docs/STATUS.md)。组件、HTTP/Java和同源代理分层验证，不宣称完整浏览器人工操作、真实影像修复或模型质量评测；原有会话恢复和内存SSE边界保持，KB-03.11保留待办且本轮未启动。
 
 ## KB-02.2 知识授权Client
 

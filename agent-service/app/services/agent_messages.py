@@ -383,9 +383,14 @@ class AgentMessageService:
                 rework_command = parse_rework_entry(request.message)
                 if rework_command is not None:
                     return await self._execute_rework_entry(
-                        self._rework_entry, rework_command,
-                        run_id=run_id, session_id=session_id, identity=identity,
-                        trace_id=trace_id, page_context=request.page_context, recorder=recorder,
+                        self._rework_entry,
+                        rework_command,
+                        run_id=run_id,
+                        session_id=session_id,
+                        identity=identity,
+                        trace_id=trace_id,
+                        page_context=request.page_context,
+                        recorder=recorder,
                     )
             # 5.判断是不是澄清续接
             # 如果当前请求不是澄清续接，系统创建路由模型
@@ -927,16 +932,24 @@ class AgentMessageService:
 
         step_id = f"step-rework-entry-{run_id}"
         context = ToolContext(
-            run_id=run_id, trace_id=trace_id, identity=identity,
+            run_id=run_id,
+            trace_id=trace_id,
+            identity=identity,
             permissions=frozenset({"REWORK_READ"}),
         )
         await recorder.start_step(
-            step_id=step_id, run_id=run_id, sequence_number=2, step_type=AgentStepType.WORKFLOW,
-            step_name="resolve_rework_entry", input_summary="rework read or page guidance",
+            step_id=step_id,
+            run_id=run_id,
+            sequence_number=2,
+            step_type=AgentStepType.WORKFLOW,
+            step_name="resolve_rework_entry",
+            input_summary="rework read or page guidance",
         )
         try:
             result = await entry.resolve(
-                command, page_order_id=page_context.order_id if page_context else None, context=context
+                command,
+                page_order_id=page_context.order_id if page_context else None,
+                context=context,
             )
         except ToolException as error:
             await recorder.mark_failed(
@@ -952,14 +965,20 @@ class AgentMessageService:
         await recorder.mark_succeeded(step_id, output_summary=f"guidance={result.state}")
         count = context.tool_call_ledger.recorded_call_count
         await self._mark_succeeded(
-            run_id, result=result, token_usage=RunTokenUsage(),
-            tool_call_count=count, termination_reason="REWORK_GUIDANCE",
+            run_id,
+            result=result,
+            token_usage=RunTokenUsage(),
+            tool_call_count=count,
+            termination_reason="REWORK_GUIDANCE",
         )
         await self._publish(
-            RunEventType.RUN_COMPLETED, run_id=run_id,
+            RunEventType.RUN_COMPLETED,
+            run_id=run_id,
             data={
-                "session_id": session_id, "status": AgentRunStatus.SUCCEEDED.value,
-                "result_kind": result.kind.value, "tool_call_count": count,
+                "session_id": session_id,
+                "status": AgentRunStatus.SUCCEEDED.value,
+                "result_kind": result.kind.value,
+                "tool_call_count": count,
             },
         )
         return AgentMessageExecution(run_id=run_id, session_id=session_id, result=result)

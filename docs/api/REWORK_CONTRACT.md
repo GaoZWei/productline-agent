@@ -1,10 +1,11 @@
-# M8返工生命周期契约 v1（M8.1～M8.4已验收，T821/T822 Python契约及内部只读Tool离线验收通过）
+# M8返工生命周期契约 v1（M8.1～M8.8及T801～T840已验收）
 
 ## 1. 适用范围与实现边界
 
-本契约冻结后续Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8.1](../planning/detailed-plan.md#m81-返工领域与契约)。
+本契约规定Java查询/写入、Python Tool及前端共同使用的M8边界，关联[详细计划M8](../planning/detailed-plan.md#m8-rework)。
 T801～T805已完成领域、契约与SQL存储；T806接通GET R详情，T807接通POST R/start，T808接通POST R/block及R/fail，T809接通POST R/resume的Java校验与原子写入；T810完成本组跨操作一致性验收，T811/T812接通POST R/results成果及R/inspections人工检查登记，T813/T814完成更新材料与检查通过原子性验收，T815接通成果修订/检查历史GET并完成M8.3验收，T816接通任务级有效复核及本返工复核历史GET，T817/T818接通复核POST的通过关闭和退回OPEN分支。
-T819受控首轮POST B及后继POST R/next-round、T820订单级只读交付条件查询均已通过本机验收，详见第23/24节。T821独立Python契约及T822内部只读Tool已通过离线验收，详见第25/26节；新Tool尚未生产装配，其余新增Java路径、新写Tool、独立Approval及前端接线尚未实现，不能描述为完整人工确认闭环。
+T819受控首轮POST B及后继POST R/next-round、T820订单级只读交付条件查询已通过本机验收，详见第23/24节。T821～T830的Client/Tool、独立草稿/确认、唯一提交和观测，以及T831～T835页面与受控短句入口均已接通；T836～T840重复隔离验收和黄金回归已通过，M8首版人工返工闭环收口，实际命令和边界见[STATUS](../STATUS.md)。
+第9节起按实现批次保留当时交付边界，阶段记录中的“尚未接入/待后续”不表示当前状态。完整浏览器人工验收尚未执行，本轮未更新既有运行环境；自动成果处理、复杂权限和完整交付状态机仍属后续扩展，未实现的独立列表GET B也不因M8验收自动开放，页面继续从已有overview定位返工。
 既有[Java业务契约](API_CONTRACT.md)的只读、复核及创建返工端点保持现有请求/响应，M8新增响应不得复用旧创建响应中固定PENDING的Schema。
 
 约束范围为人工修正成果、登记处理证据、人工检查、再次复核及下一轮返工；不执行自动生产重跑或自动成果检查，不推进订单或交付状态。
@@ -28,7 +29,7 @@ Java JSON使用camelCase；Python内部使用snake_case并显式绑定别名，�
 | 人员与时间 | 写入人从实际请求身份确定，写入时间由Java生成UTC ISO-8601字符串；请求不得提交inspectorId、reviewedBy或登记时间 |
 | Header | 新端点要求非空白且最多128位、无CR/LF的X-User-Id和精确REVIEWER角色；写入还要求1～128位`^[A-Za-z0-9._:-]+$`的Idempotency-Key |
 
-以下为确定性权限映射，已接通的M8 Java读取及写入端点均落实REVIEWER角色校验；T822内部只读Tool落实REWORK_READ上下文门禁，生产角色映射、新写Tool及独立Approval仍待接线。新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
+以下为确定性权限映射，已接通的M8 Java读取及写入端点均落实REVIEWER角色校验；T822内部只读Tool及后续写Tool、独立Approval已落实服务端权限门禁，页面HTTP由复核角色进入并从服务端构造上下文，旧角色映射保持。新端点Java角色均为REVIEWER，缺失身份401、角色不足403，不扩展复杂RBAC。
 
 | operation | Python权限 | 独立人工确认 |
 | --- | --- | --- |
@@ -51,15 +52,15 @@ Java Header或请求中的approval_id不是人工确认的证明；新Java业务
 
 下表GET R由T806实现，GET R/results及R/inspections由T815实现，GET R/reviews及任务级effective-reviews由T816实现，订单级delivery-conditions由T820实现并验收；T824前置已补齐operations/query的Java查询和Python Schema，列表仍待实现。`B=/api/tasks/{taskId}/reworks`，`R=B/{reworkTaskId}`；查询只返回Java事实，每次响应内部使用一致读取快照。
 
-| 方法与路径 | data内容 | 对应后续实现 |
+| 方法与路径 | data内容 | 实现状态 |
 | --- | --- | --- |
 | GET B | taskId、taskVersion、reworkTasks摘要数组、nextCursor | M8.2查询 |
 | GET R | ReworkDetail | T806已实现，当前材料从V5读取；成果/检查/复核分别由T811/T812/T817～T818写入 |
 | GET R/results | taskId、reworkTaskId、records处理修订数组、nextCursor | T815已实现，按processingRevision升序 |
 | GET R/inspections | taskId、reworkTaskId、records检查数组、nextCursor | T815已实现，按inspectionSequence升序 |
 | GET R/reviews | taskId、reworkTaskId、records复核数组、nextCursor | T816已实现，按reviewSequence升序 |
-| GET /api/tasks/{taskId}/effective-reviews | taskId、taskVersion、issues有效复核分组数组 | T816已实现，T821/T822提供Python契约及内部只读Tool，诊断消费未装配 |
-| GET /api/orders/{orderId}/delivery-conditions | order、tasks、deliveryRecords、blockers、hasBlockers | T820已开发待验收，字段及条件见第24节；无查询参数 |
+| GET /api/tasks/{taskId}/effective-reviews | taskId、taskVersion、issues有效复核分组数组 | T816已实现，T821/T822提供Python契约及内部只读Tool，T825已装配诊断消费 |
+| GET /api/orders/{orderId}/delivery-conditions | order、tasks、deliveryRecords、blockers、hasBlockers | T820已验收，字段及条件见第24节；无查询参数 |
 | POST B/operations/query | 请求仅idempotencyKey；data固定为found及receipt（未见回执时显式null） | T824 Java/Client/独立只读核对Tool已验收，含真实查询联调；不恢复确认终态，见第28～29节 |
 
 列表/历史分页参数仅cursor和limit，limit默认20、最大100；cursor由服务端生成，绑定用户、任务、返工/历史类型及首屏序号上界，
@@ -92,15 +93,15 @@ expectedVersion必须来自最新Java事实。所有写入仅在生产任务COMP
 
 | 方法与路径 | 请求字段 | operation及业务前提 |
 | --- | --- | --- |
-| POST B | sourceIssueId、expectedVersion、reason | T819已开发、待验收；CREATE_LIFECYCLE_REWORK，问题OPEN、无受控链及活动返工，创建受控PENDING首轮 |
-| POST R/start | expectedVersion | T807已实现Java START_REWORK；PENDING/OPEN → RUNNING/PROCESSING，独立确认接线待后续 |
+| POST B | sourceIssueId、expectedVersion、reason | T819已验收；CREATE_LIFECYCLE_REWORK，问题OPEN、无受控链及活动返工，创建受控PENDING首轮 |
+| POST R/start | expectedVersion | T807已实现Java START_REWORK；PENDING/OPEN → RUNNING/PROCESSING，T832已接通独立预览与确认 |
 | POST R/block | expectedVersion、reason | T808已实现Java BLOCK_REWORK；RUNNING/PROCESSING → BLOCKED/PROCESSING |
 | POST R/fail | expectedVersion、reason | T808已实现Java FAIL_REWORK；RUNNING/PROCESSING → FAILED/PROCESSING |
 | POST R/resume | expectedVersion、reason | T809已实现Java RESUME_REWORK；BLOCKED或FAILED/PROCESSING → RUNNING/PROCESSING |
 | POST R/results | expectedVersion、artifact、processingComment、evidenceReferences | T811已实现Java REGISTER_REWORK_RESULT；仅RUNNING/PROCESSING，生成新的processingRevision，旧修订保留 |
 | POST R/inspections | expectedVersion、processingRevision、items | T812已实现Java REGISTER_REWORK_INSPECTION；仅RUNNING/PROCESSING，检查须绑定当前处理修订，通过分支原子完成本轮并将问题置为RESOLVED |
 | POST R/review | expectedVersion、processingRevision、inspectionId、status、reviewComment | T817/T818已实现APPROVED/REJECTED/REWORK_REQUIRED；仅COMPLETED/RESOLVED，通过后关闭问题，退回后问题OPEN，本轮仍COMPLETED |
-| POST R/next-round | expectedVersion、reason | T819已开发、待验收；CREATE_NEXT_REWORK，当前无后继轮COMPLETED/OPEN且有效复核为REJECTED或REWORK_REQUIRED，无活动返工；生成后继PENDING轮次 |
+| POST R/next-round | expectedVersion、reason | T819已验收；CREATE_NEXT_REWORK，当前无后继轮COMPLETED/OPEN且有效复核为REJECTED或REWORK_REQUIRED，无活动返工；生成后继PENDING轮次 |
 
 检查请求不提交总体result，由非空items确定：任一FAILED则总体FAILED、返工仍RUNNING/问题PROCESSING；全部PASSED则在同一事务
 保存检查、执行T803 COMPLETE约束、将返工置为COMPLETED及问题置为RESOLVED。这是一次明确审查并确认的写操作，不再另设complete接口。
@@ -175,7 +176,7 @@ processingRevision由Java按返工连续递增，当前修订是唯一提交目�
 新轮、材料变化或无有效绑定时review=null，历史仍完整保留；不按随机ID、模型文本或“存在任意APPROVED”认定通过。
 effective-reviews每项包含issueId、reworkTaskId、roundNumber、processingRevision、inspectionId、review和legacyReviews：
 有生命周期时返回真实绑定及review（可null），legacyReviews=[]；无生命周期时这些绑定为null，legacyReviews保留旧ReviewRecordDto数组，
-不伪造有效结论。后续Python对前者使用Java有效复核，对后者显式保留旧规则，旧历史查询不删记录、不混成新有效结论。
+不伪造有效结论。Python已对前者使用Java有效复核，对后者显式保留旧规则，旧历史查询不删记录、不混成新有效结论。
 
 ## 6. 独立确认、并发与幂等
 
@@ -210,11 +211,11 @@ Python只读Tool仅对明确瞬时错误有限重试，400/401/403/404/409或响
 存量缺轮次/材料的返工保持原值，新详情roundNumber及材料为null、allowedActions=[]；不自动补轮次、检查、人员或时间，
 也不提供本阶段计划外的自动纳管功能。查询仍可查看这些记录，有活动存量返工时不绕过原防重规则创建首轮。
 新旧消费者并存期间，Python新增Schema/HTTP Client及前端新类型单独接线，不修改旧创建响应的PENDING约束或旧overview渲染契约。
-首轮Java创建与后继创建已由T819开发，Python新首轮操作及CREATE_LIFECYCLE_REWORK确认快照仍待后续接线；旧写Tool不被静默切到新路径。
+首轮Java创建与后继创建由T819提供，CREATE_LIFECYCLE_REWORK已接入独立草稿/确认/执行服务并经九动作联调验证；页面操作入口限定已有轮次的八类动作，旧创建Tool不被静默切到新路径。
 Agent首版仍仅沿用坐标系返工语义，新增HTTP及领域类型不代表模型已获得其他质量问题的自动处置能力。
-字段变化须在后续实现批次同步Java、Python、前端与测试，不能将本轮文档冻结当作三端已装配。
+字段变化须同步Java、Python、前端与测试，不能用历史文档冻结或旧阶段结果代替当前改动的验收。
 
-## 8. 错误、后续验收与停止线
+## 8. 错误、验收与停止线
 
 | HTTP / code | 新接口的失败边界 |
 | --- | --- |
@@ -225,12 +226,11 @@ Agent首版仍仅沿用坐标系返工语义，新增HTTP及领域类型不代�
 | 500 / INTERNAL_SERVER_ERROR | 不暴露底层异常，retryable=false；写入按结果未知处理 |
 
 既有错误码和信封不增加新变体，新请求合法但资源状态不允许时用409，不能把领域异常直接泄露为通用500。
-后续需验收：未知字段和自报确认/权限拒绝；中文及非BMP字符长度一致；重复/并发确认；版本或材料变化；
+已分阶段验收：未知字段和自报确认/权限拒绝；中文及非BMP字符长度一致；重复/并发确认；版本或材料变化；
 最新检查失败但旧检查通过；旧成果通过不能放行新轮；通过检查的原子完成与回滚；退回后独立下一轮；
 缺证据/轮次的历史只读；旧路径/DTO及ORDER-003初始黄金链路不变；写入超时核对不冒充未执行。
 
-T804只冻结本文和三端字段映射，示例不是实际操作记录；T806交付GET R，T807交付POST R/start，T808交付POST R/block及R/fail，T809交付POST R/resume；T811/T812交付成果及检查POST，T815交付对应历史GET，其余新HTTP及三端确认验收留在后续任务。
-T805已实现增量SQL存储和隔离升级测试，未修改旧迁移、固定数据或运行库；M8.1～M8.3已验收，详情、Java开始/异常/恢复、成果/检查登记及历史读取已接通。
+T804最初冻结本文及三端字段映射，示例仍不是实际操作记录；后续详情/历史、受控创建与操作写入、有效复核/交付条件、Python与页面确认已按T806～T835接通，T836～T840已完成隔离验收和黄金回归。M8.1～M8.8及T801～T840均已验收，实际结果以STATUS为准；不改既有迁移、固定数据或运行库，已实现范围不包含本契约仍明确待实现的列表等扩展。
 
 ## 9. T805存储实现边界
 
@@ -717,7 +717,7 @@ Client严格检查结构、枚举、安全整数及当前成果/检查/复核绑
 
 预览和取消无Java业务写入。并发确认同一审批时仅一次能继续执行。明确确认后仍重读事实，使用原审批一次提交许可。调用结果 `UNKNOWN`、`IN_PROGRESS` 或确认请求丢响应时，页面保留审批编号并禁止重复提交。成功后重新读取Java事实，切换目标后的迟到回执不刷新新目标。跨页面未知结果恢复和页面核对留待T834。
 
-可预期的业务或输入错误使用HTTP状态和 `detail.code`、`detail.trace_id`。返工状态或证据不满足操作前置条件时返回 `409 BUSINESS_CONFLICT`，Java已经提供的错误HTTP状态直接沿用。新增隔离用例使用真实Agent数据库及Java HTTP Mock，并与页面交互用例一起纳入 `make test-rework-actions`。本机尚未执行，T832待验收。
+可预期的业务或输入错误使用HTTP状态和 `detail.code`、`detail.trace_id`。返工状态或证据不满足操作前置条件时返回 `409 BUSINESS_CONFLICT`，Java已经提供的错误HTTP状态直接沿用。隔离用例使用真实Agent数据库及Java HTTP Mock，页面交互与隔离HTTP用例已通过 `make test-rework-actions`，真实Java页面链路亦通过；T832已验收，未修改本节HTTP契约。
 
 ## 38. T833 人工检查与再次复核
 
@@ -730,7 +730,7 @@ Client严格检查结构、枚举、安全整数及当前成果/检查/复核绑
 
 两类预览增加 `bound_materials.processing` 和 `bound_materials.inspection`。检查操作的后者为 `null`，复核操作返回实际检查。证据取自审批保存的Java快照。页面校验目标、版本、修订、检查、提交材料和证据绑定，绑定不符不提供确认。确认前重读发现变化时返回 `APPROVAL_STALE`，页面刷新后重新预览。检查和复核的写入权限分别为 `REWORK_WRITE` 和 `REVIEW_WRITE`，页面不提交既有绑定或权限。
 
-检查各项通过时，Java完成本轮返工并解决来源问题，问题等待再次复核。检查存在失败时，问题仍待处理，尝试复核预览会收到 `409 BUSINESS_CONFLICT`。重新检查通过后，复核只绑定最新通过的检查，失败检查继续保留在历史中。再次复核通过时Java关闭来源问题并重查交付条件，驳回或退回则重新打开问题并保留历史。审批卡的预期结果和成功后的当前事实分别来自预览及重新读取。用例纳入 `make test-rework-actions` 和 `make test-rework-page-flow`，本机未执行。
+检查各项通过时，Java完成本轮返工并解决来源问题，问题等待再次复核。检查存在失败时，问题仍待处理，尝试复核预览会收到 `409 BUSINESS_CONFLICT`。重新检查通过后，复核只绑定最新通过的检查，失败检查继续保留在历史中。再次复核通过时Java关闭来源问题，关闭后仍须查询交付条件，驳回或退回则重新打开问题并保留历史。审批卡的预期结果和成功后的当前事实分别来自预览及重新读取。用例已通过 `make test-rework-actions` 和 `make test-rework-page-flow`，含真实第二轮检查通过/复核关闭、历史保留和其他交付阻塞，T833已验收。
 
 ## 39. T834 下一轮与原审批结果核对
 
@@ -750,7 +750,7 @@ Client严格检查结构、枚举、安全整数及当前成果/检查/复核绑
 
 审批仍待确认，或已确认但执行尚未领取时，用户可在原会话核对并将过期审批原子地转为 `EXPIRED`，状态与审计同事务保存，页面可直接刷新后重审。核对以最新持久化状态决定结果。若执行先领取，则保留执行键，已有提交记录时继续查询原键回执。
 
-确认和核对的成功响应可包含回执编号。执行异常时可见白名单 `error_code`，页面仍保留原审批。标签页会话存储只保存审批和Run定位及是否创建下一轮，按身份和当前返工范围隔离。可在同标签页重新进入原详情或刷新时恢复，原会话过期或浏览器存储不可用时受限。详情读取遇到可重试错误时，已定位的原审批仍可核对，服务端继续检查会话和目标归属。已保存的匹配回执可直接返回，尚未保存时仍需要按原键向Java查询。切单后迟到结果不会覆盖新页面。新增用例纳入 `make test-rework-actions`，本机未执行。
+确认和核对的成功响应可包含回执编号。执行异常时可见白名单 `error_code`，页面仍保留原审批。标签页会话存储只保存审批和Run定位及是否创建下一轮，按身份和当前返工范围隔离。可在同标签页重新进入原详情或刷新时恢复，原会话过期或浏览器存储不可用时受限。详情读取遇到可重试错误时，已定位的原审批仍可核对，服务端继续检查会话和目标归属。已保存的匹配回执可直接返回，尚未保存时仍需要按原键向Java查询。切单后迟到结果不会覆盖新页面。用例已通过 `make test-rework-actions` 及真实Java原键核对，T834已验收；上述存储和会话边界保持。
 
 ## 40. T835 Agent返工引导
 
@@ -768,6 +768,6 @@ Client严格检查结构、枚举、安全整数及当前成果/检查/复核绑
 
 任务归属冲突、权限拒绝和上游读取异常仍按统一错误契约返回。详情确认不存在时，Run仍记录本次实际读取，结果无候选和操作入口。
 
-页面总览缺少引导目标时先向Java重读当前订单并校验任务和返工归属，读取失败或仍找不到目标时保留抽屉并提示。表单打开时重新读取Java并核对允许动作，检查及复核材料由人员填写，执行通过原有预览和独立确认。识别和选择阶段只使用只读Tool，Run/Step记录实际调用，审批在页面预览阶段才创建。新增用例纳入 `make test-agent-page`，本机未执行。
+页面总览缺少引导目标时先向Java重读当前订单并校验任务和返工归属，读取失败或仍找不到目标时保留抽屉并提示。表单打开时重新读取Java并核对允许动作，检查及复核材料由人员填写，执行通过原有预览和独立确认。识别和选择阶段只使用只读Tool，Run/Step记录实际调用，审批在页面预览阶段才创建。用例已通过 `make test-agent-page`，真实Java目标不存在/错归属及实际只读调用记录通过，T835已验收；仍限定受控短句和定位编号。
 
-M8.7真实接口联调入口为 `make test-rework-page-flow`。它在独立Agent库中启动生产FastAPI装配，调用真实Java，覆盖目标选择、取消、丢响应后的原键核对、阻塞和失败后的恢复、旧草稿失效、绑定检查、复核退回和下一轮，并检查旧历史及ORDER-003。页面交互由组件用例覆盖，新增接口联调本机未运行。
+M8.7真实接口联调入口为 `make test-rework-page-flow`。它在独立Agent库中启动生产FastAPI装配，调用真实Java，覆盖目标选择、取消、丢响应后的原键核对、阻塞和失败后的恢复、旧草稿失效、绑定检查、复核退回及第二轮处理/检查/复核关闭，并检查旧历史、其他交付阻塞及ORDER-003。2026-11-20该入口及 `make test-agent-page test-rework-actions test-web` 均已通过，M8.7停止线验收完成，实际命令与结果见[STATUS](../STATUS.md)。页面交互由组件测试覆盖，容器烟测验证静态页、代理和模型失败语义，不宣称完整浏览器人工操作或模型理解质量验收，下一最小任务T836仅登记待办。
