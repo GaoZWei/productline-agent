@@ -2779,3 +2779,50 @@ Java已有原回执查询时，Agent侧仍可能把查询失败当作没有写�
 - 当前材料与历史独立，旧通过不替代当前缺失结论；存量null和空历史明确提示，不按编号或时间猜轮次或生成检查证据。
 - 错归属、未知动作、不一致绑定、错轮次、倒序/重复和循环游标拒绝，坏页不拼入；错误保留Trace并允许重试原页，切单/切返工/关闭/刷新隔离迟到响应。
 - Java允许动作仅展示，页面只查询，不登记材料或检查、不推进问题/订单状态；人工表单、独立确认及返工Agent写入口留待后续任务。
+
+## 2026-11-20 — `[T832] 返工页面操作预览与独立确认`
+
+### 核心解决的问题
+
+返工详情已能展示允许动作，但人员需要在同一页面登记开始、异常、恢复及成果，并看到实际目标和材料后明确确认。
+
+### 实现的核心代码
+
+- `agent-frontend/src/components/ReworkActionForm.vue` 和 `src/api/reworkActionClient.ts` 校验人工材料和预览绑定，提供确认、取消及未知结果反馈。
+- `agent-service/app/api/rework_actions.py` 的 `preview_rework_action`、`confirm_rework_action` 和 `cancel_rework_action` 复用 `ObservedReworkService`，串联服务端归属检查、独立审批与一次执行。
+- `agent-frontend/src/components/ReworkDetailPanel.vue` 和 `src/App.vue` 根据原回执重新查询Java详情、历史与订单概览。
+
+### 实现的核心功能
+
+五类操作仅在Java允许时展示，表单保留成果和证据原文。人员在预览版本、轮次和材料后明确确认，Java执行最终校验。取消不写业务，双击和并发确认不能重复执行原审批，未知结果保留审批编号。
+
+## 2026-11-20 — `[T833] 人工检查与再次复核确认卡`
+
+### 核心解决的问题
+
+复核人员需要看到本次审批绑定的成果和检查证据，并区分本轮处理完成、来源问题关闭和后续交付核查。
+
+### 实现的核心代码
+
+- `agent-service/app/api/rework_actions.py` 的 `QualityPreviewOutput` 从审批快照返回绑定证据，复用既有确认与执行入口。
+- `agent-frontend/src/api/reworkActionClient.ts` 校验实际绑定、检查项和复核意见。 `components/ReworkActionForm.vue` 展示人工填写表单及审查卡。
+
+### 实现的核心功能
+
+人工检查逐项填写结论、说明和证据，再次复核填写结论与意见。预览展示绑定成果和检查证据，确认前的Java事实变化使审批失效，页面需要刷新重审。成功后重新读取历史和业务状态。
+
+## 2026-11-20 — `[T834] 下一轮与原审批结果核对`
+
+### 核心解决的问题
+
+复核退回后需要区分原轮与下一轮。提交丢响应时需要恢复原审批，避免把未知结果当成未执行并再次提交。
+
+### 实现的核心代码
+
+- `agent-service/app/api/rework_actions.py` 的 `NextRoundPreviewOutput`、`reconcile_rework_action` 串联原复核、独立确认与原键回执核对。
+- `agent-frontend/src/api/reworkActionClient.ts` 和 `components/ReworkActionForm.vue` 按目标保存原审批定位，恢复后提供主动核对。
+- `agent-frontend/src/components/ReworkDetailPanel.vue` 根据Java回执显示下一轮入口。
+
+### 实现的核心功能
+
+复核退回后可创建下一轮独立审批，回执编号来自Java，原轮历史继续可查。丢响应后用原审批恢复核对，未找到回执继续等待，切单隔离迟到结果。

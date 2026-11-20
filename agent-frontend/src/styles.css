@@ -249,6 +249,12 @@ input {
 .rework-facts dt { color: #64748b; font-size: 12px; }
 .rework-facts dd { margin: 6px 0; }
 .rework-detail-panel .original-text { white-space: pre-wrap; }
+.rework-action-form { margin-block: 12px; }
+.rework-action-form fieldset { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; }
+.rework-action-form label { display: grid; gap: 4px; max-width: 560px; }
+.rework-action-form input, .rework-action-form textarea, .rework-action-form select { font: inherit; padding: 8px; border: 1px solid #aab9cb; border-radius: 6px; }
+.rework-action-form fieldset.rework-check-item { padding: 12px; border: 1px solid #d8dde7; border-radius: 8px; }
+.rework-action-form textarea { resize: vertical; }
 .rework-boundary { padding: 12px; background: #fff8e6; border-radius: 8px; line-height: 1.7; }
 .rework-detail-panel .muted-copy, .rework-detail-panel small { color: #64748b; font-size: 12px; line-height: 1.7; }
 .rework-histories { display: grid; gap: 16px; }

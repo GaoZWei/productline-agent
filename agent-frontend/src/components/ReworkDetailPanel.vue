@@ -3,23 +3,32 @@ import { onBeforeUnmount, ref, watch } from "vue";
 import { fetchReworkDetail } from "../api/reworkClient";
 import { BusinessApiError } from "../api/businessClient";
 import { reworkActionLabels, type ReworkDetail } from "../types/rework";
+import ReworkActionForm from "./ReworkActionForm.vue";
 import ReworkHistory from "./ReworkHistory.vue";
 import ReworkRecord from "./ReworkRecord.vue";
 
 const props = defineProps<{ orderId: string; taskId: string; reworkId: string }>();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; written: [orderId: string]; openNext: [taskId: string, reworkId: string] }>();
 const detail = ref<ReworkDetail>();
 const traceId = ref<string>();
 const loading = ref(false);
 const error = ref<BusinessApiError>();
+const actionBusy = ref(false);
+const operationId = ref<string>();
+const nextReworkId = ref<string | null>(null);
 let generation = 0;
-watch(() => [props.orderId, props.taskId, props.reworkId], () => { void load(); }, { immediate: true });
+watch(() => [props.orderId, props.taskId, props.reworkId], () => {
+  operationId.value = undefined;
+  nextReworkId.value = null;
+  void load();
+}, { immediate: true });
 onBeforeUnmount(() => { generation++; });
 
 async function load() {
   const current = ++generation;
   const { taskId, reworkId } = props;
   detail.value = undefined;
+  actionBusy.value = false;
   traceId.value = undefined;
   error.value = undefined;
   loading.value = true;
@@ -35,6 +44,13 @@ async function load() {
     if (current === generation) loading.value = false;
   }
 }
+
+function written(id: string, nextId: string | null) {
+  operationId.value = id;
+  nextReworkId.value = nextId;
+  emit("written", props.orderId);
+  void load();
+}
 </script>
 
 <template>
@@ -42,10 +58,14 @@ async function load() {
     <header class="panel-heading">
       <div><span class="eyebrow">返工详情</span><h2>{{ reworkId }}</h2><p>{{ orderId }} · {{ taskId }}</p></div>
       <div class="rework-detail-actions">
-        <button type="button" :disabled="loading" @click="load">刷新详情</button>
+        <button type="button" :disabled="loading || actionBusy" @click="load">刷新详情</button>
         <button type="button" @click="emit('close')">关闭详情</button>
       </div>
     </header>
+    <p v-if="operationId" role="status">操作已登记，回执 {{ operationId }}。</p>
+    <button v-if="nextReworkId" type="button" @click="emit('openNext', taskId, nextReworkId)">
+      查看下一轮 {{ nextReworkId }}
+    </button>
     <p v-if="loading" role="status">正在读取 Java 返工事实…</p>
     <div v-if="error" role="alert"><p>{{ error.code }} · {{ error.message }}</p><small v-if="error.traceId">Trace：{{ error.traceId }}</small></div>
     <template v-if="detail">
@@ -63,7 +83,8 @@ async function load() {
         <h3>当前快照允许动作</h3>
         <ul v-if="detail.allowedActions.length" class="rework-allowed-actions"><li v-for="action in detail.allowedActions" :key="action">{{ reworkActionLabels[action] }}</li></ul>
         <p v-else>Java 未返回当前可用动作。</p>
-        <p class="muted-copy">当前仅展示动作，操作表单待开发；执行仍须独立人工确认并由 Java 重新校验。</p>
+        <ReworkActionForm :key="`${orderId}/${taskId}/${reworkId}`" :order-id="orderId" :detail="detail"
+          @busy="actionBusy = $event" @written="written" @refresh="load" />
       </section>
       <section aria-label="Java当前材料">
         <h3>Java 当前材料</h3>

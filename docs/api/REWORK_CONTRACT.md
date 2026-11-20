@@ -701,4 +701,49 @@ Client严格检查结构、枚举、安全整数及当前成果/检查/复核绑
 切单意图立即清除选择，旧overview加载期间不能打开旧返工；切换返工、关闭、刷新及卸载均隔离迟到响应。详情与历史页各有独立快照，刷新重读首屏，不用于写入授权。
 
 `make test-rework-page`已通过本机Client/组件/订单入口回归及真实前端Client→生产同源代理→Java→独占PostgreSQL联调，覆盖两轮、22条成果修订的分页、失败检查、复核退回、错误归属及ORDER-003保护。测试准备在独占库调用Java写入，随后页面Client只读，查询前后任务版本不变；这不是新页面人工写入或完整浏览器操作验收。
-普通`make test-web`缺少隔离环境变量时跳过真实联调用例，专项入口才实际执行；本轮T831已验收，T832～T835操作表单、独立确认和返工Agent写入口仍待开发，M8.7未完成。
+普通`make test-web`缺少隔离环境变量时跳过真实联调用例，专项入口才实际执行。T831已验收，后续页面操作见第37节。
+
+## 37. T832 页面操作预览与独立确认
+
+页面使用 Agent 路径前缀 `/api/agent/rework-actions`。所有入口沿用现有身份Header并要求 `REVIEWER`，相关审批和Run都必须属于同一用户的有效会话。Java通过现有HTTP Tool进行事实读取、权限验证和最终写入。
+
+| 方法与相对路径 | 输入 | 成功输出 |
+|---|---|---|
+| `POST /preview` | `order_id` 与 `command`。命令含动作、`task_id`、`rework_task_id` 和本次人工材料 | `run_id`、`approval_id`、核验后的 `order_id`、`expires_at`、`review` |
+| `POST /{run_id}/{approval_id}/confirm` | `{"decision":"CONFIRM"}` | `approval_id`、`outcome`、`operation_id`。只有已保存的Java成功回执携带操作编号 |
+| `POST /{run_id}/{approval_id}/cancel` | 由路径定位原审批 | `approval_id`、`status: "CANCELLED"` |
+
+命令兼容T827的字段形状，只允许 `START_REWORK`、`BLOCK_REWORK`、`FAIL_REWORK`、`RESUME_REWORK`、`REGISTER_REWORK_RESULT`。开始只提交定位字段。阻塞、失败、恢复必须提交原因。成果提交 `artifact`、`processing_comment` 和 `evidence_references`，按Java字符长度及非空规则验证，原文不改写。版本、轮次、动作前提及允许动作均从Java取得。预览检查任务真实订单，确认以保存的草稿为准，状态变化和过期直接拒绝。接口拒绝自报任务版本、既有材料绑定、权限和执行键。
+
+预览和取消无Java业务写入。并发确认同一审批时仅一次能继续执行。明确确认后仍重读事实，使用原审批一次提交许可。调用结果 `UNKNOWN`、`IN_PROGRESS` 或确认请求丢响应时，页面保留审批编号并禁止重复提交。成功后重新读取Java事实，切换目标后的迟到回执不刷新新目标。跨页面未知结果恢复和页面核对留待T834。
+
+可预期的业务或输入错误使用HTTP状态和 `detail.code`、`detail.trace_id`。新增隔离用例使用真实Agent数据库及Java HTTP Mock，并与页面交互用例一起纳入 `make test-rework-actions`。本机尚未执行，T832待验收。
+
+## 38. T833 人工检查与再次复核
+
+复用第37节的端点和身份/归属检查，新增两类命令。两类仍接收 `task_id` 和 `rework_task_id`。
+
+| 动作 | 人工材料 | 预览证据 |
+|---|---|---|
+| `REGISTER_REWORK_INSPECTION` | `items` 含1至50项。每项提交 `checkItem`、`result`（`PASSED` 或 `FAILED`）、`comment`、`evidenceReferences` | 当前成果修订、标识和版本及其登记证据 |
+| `SUBMIT_REWORK_REVIEW` | `status`（`APPROVED`、`REJECTED` 或 `REWORK_REQUIRED`）与 `review_comment` | 当前成果及绑定同轮次同修订的通过检查和检查证据 |
+
+两类预览增加 `bound_materials.processing` 和 `bound_materials.inspection`。检查操作的后者为 `null`，复核操作返回实际检查。证据取自审批保存的Java快照。页面校验目标、版本、修订、检查、提交材料和证据绑定，绑定不符不提供确认。确认前重读发现变化时返回 `APPROVAL_STALE`，页面刷新后重新预览。检查和复核的写入权限分别为 `REWORK_WRITE` 和 `REVIEW_WRITE`，页面不提交既有绑定或权限。
+
+检查各项通过时，Java完成本轮返工并解决来源问题，问题等待再次复核。检查存在失败时，问题仍待处理。再次复核通过时Java关闭来源问题并重查交付条件，驳回或退回则重新打开问题并保留历史。审批卡的预期结果和成功后的当前事实分别来自预览及重新读取。新增用例纳入 `make test-rework-actions`，本机未执行。
+
+## 39. T834 下一轮与原审批结果核对
+
+`CREATE_NEXT_REWORK` 由第37节的预览入口接收，命令提交上一轮 `task_id`、`rework_task_id` 和下一轮 `reason`。Java事实必须允许创建，草稿绑定上一轮复核，预览增加 `previous_review`。确认按原审批重新读取并执行一次。已存回执返回 `operation_id` 及实际 `next_rework_task_id`，页面刷新订单与详情，从正常入口打开新返工。上一轮历史继续保留。
+
+`POST /api/agent/rework-actions/{run_id}/{approval_id}/reconcile` 接收 `order_id`、`task_id` 和 `rework_task_id`，检查会话有效期、原用户/Run/审批及目标归属。客户端无需持有或提交执行键。该操作复用原键回执查询，可持久化找到的回执。
+
+| 核对结果 | 含义和页面处理 |
+|---|---|
+| `SUCCEEDED` | 已保存匹配的Java回执，提供 `operation_id`。创建下一轮时还提供 `next_rework_task_id` |
+| `WAITING_CONFIRMATION` | 读取时尚待确认，可调用原取消入口。取消与并发确认仍由状态校验决定 |
+| `IN_PROGRESS` | 已确认或领取执行权，尚无提交许可消费记录，继续等待核对 |
+| `UNKNOWN` | 已走提交路径，尚无匹配回执。保留原审批，查无记录也不重发 |
+| `NOT_SUBMITTED` | 审批已取消、过期或失效且未领取执行权。可刷新后重新审查 |
+
+确认和核对的成功响应可包含回执编号。执行异常时可见白名单 `error_code`，页面仍保留原审批。标签页会话存储只保存审批和Run定位及是否创建下一轮，按身份和当前返工范围隔离。可在同标签页重新进入原详情或刷新时恢复，原会话过期或浏览器存储不可用时受限。切单后迟到结果不会覆盖新页面。新增用例纳入 `make test-rework-actions`，本机未执行。

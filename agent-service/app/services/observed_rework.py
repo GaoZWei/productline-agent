@@ -61,6 +61,7 @@ class ObservedReworkService:
         *,
         context: ToolContext,
         event_sink: RunEventSink | None = None,
+        approval_ttl_seconds: int = 600,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         approval_id_factory: Callable[[], str] = lambda: f"rework-approval-{uuid4().hex}",
     ) -> None:
@@ -76,6 +77,7 @@ class ObservedReworkService:
                 rework_tools=create_rework_read_tool_registry(ReworkHttpClient(client)),
             ),
             now=now,
+            ttl_seconds=approval_ttl_seconds,
             approval_id_factory=approval_id_factory,
         )
 
@@ -87,12 +89,29 @@ class ObservedReworkService:
             raise ValueError("rework observation clock must have a timezone")
         return now
 
-    async def create(self, command: object) -> ReworkConfirmationSnapshot:
+    async def create(
+        self, command: object, *, expected_order_id: str | None = None
+    ) -> ReworkConfirmationSnapshot:
         """取证和保存草稿，失败定位到准备Step，绝不调用写Tool。"""
 
         return await self._invoke(
-            "prepare", lambda context: self._confirmation.create(command, context=context)
+            "prepare",
+            lambda context: self._confirmation.create(
+                command, context=context, expected_order_id=expected_order_id
+            ),
         )
+
+    async def get_approval(self, approval_id: str) -> ReworkConfirmationSnapshot:
+        """按原归属恢复审批供入口检查动作范围，不创建步骤或消费许可。"""
+
+        try:
+            snapshot = await self._executor(self._context).store.read(approval_id)
+        except ValueError:
+            raise ReworkConfirmationError("RESPONSE_VALIDATION_ERROR", status_code=500) from None
+        if snapshot is None:
+            raise ReworkConfirmationError("RESOURCE_NOT_FOUND", status_code=404)
+        ReworkConfirmationService._permissions(snapshot, self._context)
+        return snapshot
 
     async def confirm(self, value: object) -> ReworkConfirmationSnapshot:
         """重新取证并确认原草稿，确认通过后仍等待显式执行。"""

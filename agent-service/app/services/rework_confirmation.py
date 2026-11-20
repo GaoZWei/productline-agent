@@ -44,11 +44,15 @@ class ReworkConfirmationService:
         self._store, self._workflow = store, workflow
         self._ttl, self._now, self._id = timedelta(seconds=ttl_seconds), now, approval_id_factory
 
-    async def create(self, command: object, *, context: ToolContext) -> ReworkConfirmationSnapshot:
+    async def create(
+        self, command: object, *, context: ToolContext, expected_order_id: str | None = None
+    ) -> ReworkConfirmationSnapshot:
         """只将本次Java取证结果存为独立待确认记录，不继承其他动作确认。"""
 
         self._clock()
         prepared = await self._workflow.ainvoke(command, context=context)
+        if expected_order_id is not None and prepared.order_id != expected_order_id:
+            raise ReworkConfirmationError("RESOURCE_NOT_FOUND", status_code=404)
         now = self._clock()
         snapshot = ReworkConfirmationSnapshot(
             approval_id=self._id(),

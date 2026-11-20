@@ -17,6 +17,7 @@ from app.api.knowledge_management import router as knowledge_management_router
 from app.api.knowledge_uploads import router as knowledge_uploads_router
 from app.api.model_capabilities import router as model_capabilities_router
 from app.api.order_diagnosis import router as order_diagnosis_router
+from app.api.rework_actions import router as rework_actions_router
 from app.api.run_events import router as run_events_router
 from app.api.runs import router as runs_router
 from app.api.sessions import router as sessions_router
@@ -166,6 +167,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(runs_router)
     application.include_router(sessions_router)
     application.include_router(approvals_router)
+    application.include_router(rework_actions_router)
     # 根据环境决定是否注册路由
     if resolved_settings.environment == "development":
         application.state.tool_debug_context_store = ToolDebugRunContextStore()

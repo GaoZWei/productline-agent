@@ -40,6 +40,7 @@ function review(v: unknown): v is ReworkReview {
     && ["APPROVED", "REJECTED", "REWORK_REQUIRED"].includes(v.status as string)
     && text(v.reviewComment) && text(v.reviewedBy) && instant(v.reviewedAt);
 }
+export { processing as isReworkProcessing, inspection as isReworkInspection, review as isReworkReview };
 function detail(v: unknown): v is ReworkDetail {
   if (!fields(v, "reworkTask issueStatus roundNumber previousReworkTaskId allowedActions taskVersion processing inspection review")
     || !fields(v.reworkTask, "reworkTaskId taskId sourceIssueId status reason")

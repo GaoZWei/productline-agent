@@ -292,6 +292,16 @@ Store可选注入`ReworkStateObserver`，统一Run→审查行锁顺序，在原
 
 定向入口`make test-rework-observability`覆盖Python白名单/事件、隔离Agent数据库和前端事件解码；`make test-rework-execution-e2e`验证真实Java九动作、两轮及独立Run/Step/日志断言。用例同时纳入既有审批、持久化和`make test-agent-e2e`入口。2026-11-19上述专项及真实Java入口、`make test-approval test-tools test-diagnosis-rules`、原有`./scripts/test-agent-e2e.sh`均通过；类型、相关lint/格式及停止线复核完成，M8.6已验收，具体结果见[STATUS](../docs/STATUS.md)。下一最小任务T831仅登记待办，未接HTTP/Agent/页面生产入口，完整边界见[契约第三十五节](../docs/api/REWORK_CONTRACT.md#35-t830-runstep状态审计与提交后事件)。
 
+## T832 返工页面操作（待验收）
+
+`/api/agent/rework-actions` 接入详情页的开始、阻塞、失败、恢复和成果登记。入口沿用网关身份Header并要求复核角色，服务端创建专属Run和会话，复用 `ObservedReworkService` 从Java确认订单和现有材料后保存审批。页面分别调用预览、取消或显式确认。确认只读原草稿，重校验后才领取一次执行权，业务写入和幂等由Java裁决。页面响应只返回审查草稿、执行结果或原回执编号，模型和自然语言路由留待T835。
+
+接口与失败处理见[返工契约第37节](../docs/api/REWORK_CONTRACT.md#37-t832-页面操作预览与独立确认)。用例纳入 `make test-rework-actions` 和 `make test-agent-page`，本机尚未执行。
+
+T833在同一入口增加 `REGISTER_REWORK_INSPECTION` 和 `SUBMIT_REWORK_REVIEW`。沿用复核角色校验，服务端为复核操作提供 `REVIEW_WRITE`，Java验证当前材料与写入权限。两类预览返回 `bound_materials`，数据取自原审批保存的Java快照。人工检查展示成果，复核同时展示同轮次同修订的通过检查。原确认后二次取证发现材料变化时审批失效，要求刷新重审。T832/T833均待项目电脑验收。
+
+T834增加 `CREATE_NEXT_REWORK` 与 `POST /{run_id}/{approval_id}/reconcile`。下一轮独立预览含原审批绑定的上一轮复核。主动核对验证原审批与当前页面定位，未提交时读取审批状态，已提交后只按服务端保存的原键查询Java回执。成功响应只根据已校验回执提供操作及后继返工编号。查询未命中保持未知。详见[返工契约第39节](../docs/api/REWORK_CONTRACT.md#39-t834-下一轮与原审批结果核对)。本机尚未执行新增验收用例。
+
 ## KB-02.2 知识授权Client
 
 `KnowledgeAuthorizationClient.authorize`复用应用lifespan管理的`BusinessHttpClient`连接池，调用

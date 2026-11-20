@@ -30,12 +30,22 @@ const {
 onMounted(() => store.initialize());
 // 切单意图一发生就隔离旧详情，不等旧overview被新响应替换。
 watch([selectedOrderId, currentView], () => { selectedRework.value = undefined; }, { flush: "sync" });
-watch(overview, () => { selectedRework.value = undefined; });
+watch(overview, (value) => {
+  const selected = selectedRework.value;
+  if (!selected) return;
+  if (value?.order.orderId !== selected.orderId || !value.tasks.some(item =>
+    item.task.taskId === selected.taskId && item.reworkTasks.some(rework => rework.reworkTaskId === selected.reworkId))) {
+    selectedRework.value = undefined;
+  }
+});
 function openRework(taskId: string, reworkId: string) {
   if (detailLoading.value || !overview.value || overview.value.order.orderId !== selectedOrderId.value) return;
   const task = overview.value.tasks.find(item => item.task.taskId === taskId && item.task.orderId === selectedOrderId.value);
   if (!task?.reworkTasks.some(item => item.taskId === taskId && item.reworkTaskId === reworkId)) return;
   selectedRework.value = { orderId: selectedOrderId.value, taskId, reworkId };
+}
+function refreshWrittenOrder(orderId: string) {
+  if (selectedOrderId.value === orderId) void store.selectOrder(orderId);
 }
 </script>
 
@@ -120,7 +130,9 @@ function openRework(taskId: string, reworkId: string) {
                 <DeliveryStatusPanel :records="overview.deliveryRecords" />
               </div>
             </div>
-            <ReworkDetailPanel v-if="selectedRework" :order-id="selectedRework.orderId" :task-id="selectedRework.taskId" :rework-id="selectedRework.reworkId" @close="selectedRework = undefined" />
+            <ReworkDetailPanel v-if="selectedRework" :key="`${selectedRework.orderId}/${selectedRework.taskId}/${selectedRework.reworkId}`"
+              :order-id="selectedRework.orderId" :task-id="selectedRework.taskId" :rework-id="selectedRework.reworkId"
+              @close="selectedRework = undefined" @written="refreshWrittenOrder" @open-next="openRework" />
           </div>
         </template>
 
